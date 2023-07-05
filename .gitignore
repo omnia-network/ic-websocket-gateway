@@ -1,1 +1,10 @@
 .DS_Store
+
+ic_websocket_gateway/target
+
+ic_websocket_canisters/target
+ic_websocket_canisters/node_modules
+ic_websocket_canisters/.dfx
+ic_websocket_canisters/dist
+ic_websocket_canisters/src/declarations
+ic_websocket_canisters/.env

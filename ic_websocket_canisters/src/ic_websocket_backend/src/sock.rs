@@ -21,7 +21,7 @@ pub struct KeyGatewayTime {
 }
 
 thread_local! {
-    static NEXT_CLIENT_ID: RefCell<u64> = RefCell::new(16u64);
+    static NEXT_CLIENT_ID: RefCell<u64> = RefCell::new(0u64);
     static CLIENT_CALLER_MAP: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
     static CLIENT_PUBLIC_KEY_MAP: RefCell<HashMap<u64, PublicKey>> = RefCell::new(HashMap::new());
     static CLIENT_GATEWAY_MAP: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
@@ -30,11 +30,11 @@ thread_local! {
     static GATEWAY_MESSAGES_MAP: RefCell<HashMap<String, VecDeque<EncodedMessage>>> = RefCell::new(HashMap::new());
     static MESSAGE_DELETE_QUEUE: RefCell<VecDeque<KeyGatewayTime>> = RefCell::new(VecDeque::new());
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
-    static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(16u64);
+    static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
 
 pub fn wipe() {
-    NEXT_CLIENT_ID.with(|next_id| next_id.replace(16u64));
+    NEXT_CLIENT_ID.with(|next_id| next_id.replace(0u64));
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().clear();
     });
@@ -59,7 +59,7 @@ pub fn wipe() {
     CERT_TREE.with(|t| {
         t.replace(RbTree::new());
     });
-    NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(16u64));
+    NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
 
 pub fn next_client_id() -> u64 {

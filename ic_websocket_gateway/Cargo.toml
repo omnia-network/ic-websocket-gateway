@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ezsockets = { version = "0.4", features = ["tungstenite"] }
 async-trait = "0.1.52"
 candid = "0.8.3"
 ic-agent = "0.23.2"
@@ -15,5 +14,6 @@ serde_cbor = "0.11.2"
 tokio = { version = "1.21.2", features = ["full"] }
 ring = "0.16"
 serde_bytes = "0.11"
-tungstenite = "0.16.0"
+tokio-tungstenite = "0.19.0"
 ed25519-compact = "2"
+futures-util = "0.3.28"
