@@ -1,6 +1,6 @@
 use futures_util::{StreamExt, SinkExt};
 use std::net::SocketAddr;
-use tokio::{net::{TcpListener, TcpStream}, sync::{RwLock, mpsc::{self, UnboundedSender}}, join};
+use tokio::{net::{TcpListener, TcpStream}, sync::{RwLock, mpsc::{self, UnboundedSender}}, select};
 use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Result, Message}, WebSocketStream,
@@ -51,8 +51,8 @@ enum IcWsInitializationError {
     WsError(Error),     // WebSocket error
 }
 
-async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, session_id: u64) -> Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError> {
-    match accept_async(stream).await {
+async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, session_id: u64, session_init_tx: UnboundedSender<Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError>>) {
+    let connection_result = match accept_async(stream).await {
         Ok(mut ws_stream) => {
             if let Some(msg) = ws_stream.next().await {
                 match msg {
@@ -95,7 +95,8 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
             }
         },
         Err(e) => Err(IcWsInitializationError::WsError(e))
-    }
+    };
+    session_init_tx.send(connection_result).expect("channel should be open");
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
@@ -188,8 +189,7 @@ async fn main() {
         ring::signature::Ed25519KeyPair::from_pkcs8(key_pair.as_ref())
             .expect("Could not read the key pair."),
     );
-    let identity = Arc::new(identity);
-    let agent = Arc::new(canister_methods::get_new_agent(URL, Arc::clone(&identity), FETCH_KEY).await);
+    let agent = Arc::new(canister_methods::get_new_agent(URL, identity, FETCH_KEY).await);
     agent.fetch_root_key().await.unwrap();
 
     let gateway_server = Arc::new(RwLock::new(GatewayServer {
@@ -198,7 +198,7 @@ async fn main() {
         session_streamers: HashMap::default(),
     }));
 
-    let (task_handle_tx, mut task_handle_rx) = mpsc::unbounded_channel();
+    let (session_init_tx, mut session_init_rx) = mpsc::unbounded_channel();
     let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
     let gateway_server_cl = Arc::clone(&gateway_server);
     let agent_cl = Arc::clone(&agent);
@@ -207,22 +207,32 @@ async fn main() {
         while let Ok((stream, client_addr)) = listener.accept().await {
             let gateway_server_cl = Arc::clone(&gateway_server_cl);
             let agent_cl = Arc::clone(&agent_cl);
-            let task_handle = tokio::spawn(async move {
+            let session_init_tx_cl = session_init_tx.clone();
+            // spawn a connection handler task for each incoming connection 
+            tokio::spawn(async move {
                 println!("\nClient address: {}", client_addr);
                 let session_id = gateway_server_cl.read().await.next_session_id;
                 gateway_server_cl.write().await.next_session_id += 1;
-                handle_connection(&*agent_cl, client_addr, stream, session_id).await
+                handle_connection(&*agent_cl, client_addr, stream, session_id, session_init_tx_cl).await
             });
-            // send the handle of the connection handling task to the main thread
-            task_handle_tx.send(task_handle).unwrap();
         }
     });
 
     loop {
-        match task_handle_rx.try_recv() {
-            Ok(task_handle) => {
-                let (task_result, ) = join!(task_handle);
-                match task_result.unwrap() {
+        select! {
+            // prioritize relaying updates to alrwady connected clients rather than handling new client connections
+            Some((client_id, message)) = message_for_client_rx.recv() => {
+                match gateway_server.write().await.session_streamers.get_mut(&client_id) {
+                    Some(ws_stream) => {
+                        if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
+                            println!("WebSocket error: {}", e);
+                        }
+                    },
+                    None => println!("No client with id: {}", client_id)
+                }
+            }
+            Some(task_result) = session_init_rx.recv() => {
+                match task_result {
                     Ok((gateway_session, ws_stream)) => {
                         gateway_server.write().await.session_streamers.insert(gateway_session.session_id, ws_stream);
                         let poller_is_initialized = gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id);
@@ -250,21 +260,7 @@ async fn main() {
                         println!("{:?}", e);
                     }
                 }
-            },
-            Err(_) => tokio::time::sleep(Duration::from_millis(500)).await
-        };
-        match message_for_client_rx.try_recv() {
-            Ok((client_id, message)) => {
-                match gateway_server.write().await.session_streamers.get_mut(&client_id) {
-                    Some(ws_stream) => {
-                        if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
-                            println!("WebSocket error: {}", e);
-                        }
-                    },
-                    None => println!("No client with id: {}", client_id)
-                }
-            },
-            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await
+            }
         }
     }
 }

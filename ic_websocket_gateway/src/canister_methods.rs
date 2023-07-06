@@ -6,7 +6,6 @@ use ic_agent::{
     identity::BasicIdentity, Agent,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
@@ -35,11 +34,11 @@ pub struct CertMessages {
     pub tree: Vec<u8>,
 }
 
-pub async fn get_new_agent(url: &str, identity: Arc<BasicIdentity>, fetch_key: bool) -> Agent {
+pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) -> Agent {
     let transport = ReqwestHttpReplicaV2Transport::create(url.to_string()).unwrap();
     let agent = Agent::builder()
         .with_transport(transport)
-        .with_arc_identity(identity)
+        .with_identity(identity)
         .build()
         .unwrap();
     if fetch_key {
