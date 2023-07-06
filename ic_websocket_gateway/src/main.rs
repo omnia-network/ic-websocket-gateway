@@ -61,7 +61,6 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                         let m: MessageFromClient = from_slice(&bytes).unwrap();
                         let content: ClientCanisterId = from_slice(&m.content).unwrap();
                         let canister_id = Principal::from_text(&content.canister_id).unwrap();
-    
                         let client_key =
                             canister_methods::ws_get_client_key(agent, &canister_id, content.client_id)
                                 .await;
@@ -211,8 +210,14 @@ async fn main() {
             // spawn a connection handler task for each incoming connection 
             tokio::spawn(async move {
                 println!("\nClient address: {}", client_addr);
-                let session_id = gateway_server_cl.read().await.next_session_id;
-                gateway_server_cl.write().await.next_session_id += 1;
+                // ensure that the lock is released before calling handle_connection
+                let session_id = {
+                    let session_id = gateway_server_cl.read().await.next_session_id;
+                    // next_session_id must be updated before handle_connection
+                    // otherwise two clients connecting at the same time might end up with the same client_id 
+                    gateway_server_cl.write().await.next_session_id += 1;
+                    session_id
+                };
                 handle_connection(&*agent_cl, client_addr, stream, session_id, session_init_tx_cl).await
             });
         }
@@ -234,9 +239,13 @@ async fn main() {
             Some(task_result) = session_init_rx.recv() => {
                 match task_result {
                     Ok((gateway_session, ws_stream)) => {
-                        gateway_server.write().await.session_streamers.insert(gateway_session.session_id, ws_stream);
-                        let poller_is_initialized = gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id);
-                        // getting the lock in the match expression would cause a deadlock as we are also acquiring the lock inside the match arms
+                        // ensure that the lock is released before executing the match arms
+                        // not doing so would result in a deadlock as the lock is awaited within each arm
+                        // but it would not be released by the expression being matched until an arm is executed
+                        let poller_is_initialized = {
+                            gateway_server.write().await.session_streamers.insert(gateway_session.session_id, ws_stream);
+                            gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
+                        };
                         match poller_is_initialized {
                             false => {
                                 let poller = CanisterPoller {
