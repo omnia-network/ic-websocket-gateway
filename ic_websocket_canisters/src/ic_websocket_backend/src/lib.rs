@@ -6,6 +6,7 @@ use serde_cbor::from_slice;
 
 use canister::ws_on_message;
 use canister::ws_on_open;
+use sock::check_registered_client_key;
 use sock::get_cert_messages;
 use sock::get_client_incoming_num;
 use sock::put_client_incoming_num;
@@ -82,19 +83,24 @@ fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> bool {
 
     let client_key = decoded.client_key;
 
-    let sig = Signature::from_slice(&sig).unwrap();
-    let valid = PublicKey::from_slice(&client_key).unwrap().verify(&msg, &sig);
+    if check_registered_client_key(&client_key) {
+        let sig = Signature::from_slice(&sig).unwrap();
 
-    match valid {
-        Ok(_) => {
-            // Remember this gateway will get the messages for this client_key.
-            put_client_gateway(client_key.clone());
-
-            ws_on_open(client_key);
-            true
+        return {
+            match PublicKey::from_slice(&client_key).unwrap().verify(&msg, &sig) {
+                Ok(_) => {
+                    // Remember this gateway will get the messages for this client_key.
+                    put_client_gateway(client_key.clone());
+        
+                    ws_on_open(client_key);
+                    true
+                }
+                Err(_) => false,
+            }
         }
-        Err(_) => false,
     }
+    false
+
 }
 
 // Close the websocket connection.

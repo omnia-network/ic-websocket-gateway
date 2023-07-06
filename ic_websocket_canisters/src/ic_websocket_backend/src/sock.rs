@@ -75,6 +75,12 @@ pub fn get_client_gateway(client_key: &PublicKeySlice) -> Option<String> {
     CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(client_key).cloned())
 }
 
+pub fn check_registered_client_key(client_key: &PublicKeySlice) -> bool {
+    CLIENT_CALLER_MAP.with(|map| {
+        map.borrow().contains_key(client_key)
+    })
+}
+
 pub fn next_client_message_num(client_key: PublicKeySlice) -> u64 {
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
         let mut map = map.borrow_mut();
