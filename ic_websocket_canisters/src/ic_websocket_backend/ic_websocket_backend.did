@@ -11,8 +11,7 @@ type CertMessages = record {
 };
 
 service : {
-  "ws_register": (blob) -> (nat64);
-  "ws_get_client_key": (nat64) -> (blob);
+  "ws_register": (blob) -> ();
   "ws_open": (blob, blob) -> (bool);
   "ws_close": (nat64) -> ();
   "ws_message": (blob) -> (bool);

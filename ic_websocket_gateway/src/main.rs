@@ -6,13 +6,13 @@ use tokio_tungstenite::{
     tungstenite::{Error, Result, Message}, WebSocketStream,
 };
 use candid::CandidType;
-use ed25519_compact::Signature;
+use ed25519_compact::{Signature, PublicKey};
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
@@ -35,13 +35,14 @@ struct MessageFromClient {
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
 struct ClientCanisterId {
-    client_id: u64,
+    #[serde(with = "serde_bytes")]
+    client_key: Vec<u8>,
     canister_id: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct GatewaySession {
-    session_id: u64,
+    client_key: Vec<u8>,
     canister_id: Principal,
 }
 
@@ -51,7 +52,7 @@ enum IcWsInitializationError {
     WsError(Error),     // WebSocket error
 }
 
-async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, session_id: u64, session_init_tx: UnboundedSender<Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError>>) {
+async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, session_init_tx: UnboundedSender<Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError>>) {
     let connection_result = match accept_async(stream).await {
         Ok(mut ws_stream) => {
             if let Some(msg) = ws_stream.next().await {
@@ -61,21 +62,17 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                         if let Ok(m) = from_slice::<MessageFromClient>(&bytes) {
                             if let Ok(content) = from_slice::<ClientCanisterId>(&m.content) {
                                 if let Ok(canister_id) = Principal::from_text(&content.canister_id) {
-                                    let client_key =
-                                        canister_methods::ws_get_client_key(agent, &canister_id, content.client_id)
-                                            .await;
                                     if let Ok(sig) = Signature::from_slice(&m.sig) {
-                                        let valid = client_key.verify(&m.content, &sig);
+                                        let valid = PublicKey::from_slice(&content.client_key).unwrap().verify(&m.content, &sig);
                                         match valid {
                                             Ok(_) => {
                                                 let _ret =
                                                     canister_methods::ws_open(agent, &canister_id, m.content, m.sig)
                                                     .await;
-                                                println!("New WebSocket connection: {} with session id {}", client_addr, session_id);
-                    
+                                                println!("New WebSocket connection: {}", client_addr);
                                                 Ok((
                                                     GatewaySession {
-                                                        session_id,
+                                                        client_key: content.client_key,
                                                         canister_id,
                                                     },
                                                     ws_stream
@@ -127,12 +124,12 @@ pub struct CertMessage {
 
 struct CanisterPoller {
     canister_id: Principal,
-    canister_client_session_map: HashMap<u64, GatewaySession>,
+    canister_client_session_map: HashMap<Vec<u8>, GatewaySession>,
     agent: Arc<Agent>
 }
 
 impl CanisterPoller {
-    async fn run_polling(&self, message_for_client_tx: UnboundedSender<(u64, CertMessage)>) {
+    async fn run_polling(&self, message_for_client_tx: UnboundedSender<(Vec<u8>, CertMessage)>) {
         let agent = Arc::clone(&self.agent);
         let canister_id = self.canister_id;
         tokio::spawn({
@@ -143,11 +140,11 @@ impl CanisterPoller {
                     let msgs = canister_methods::ws_get_messages(&*agent, &canister_id, nonce).await;
 
                     for encoded_message in msgs.messages {
-                        let client_id = encoded_message.client_id;
+                        let client_key = encoded_message.client_key;
 
                         println!(
-                            "Message to client #{} with key {}.",
-                            client_id, encoded_message.key
+                            "Message to client {:?} with key {}.",
+                            client_key, encoded_message.key
                         );
 
                         let m = CertMessage {
@@ -157,7 +154,7 @@ impl CanisterPoller {
                             tree: msgs.tree.clone(),
                         };
 
-                        if let Err(e) = message_for_client_tx.send((client_id, m)) {
+                        if let Err(e) = message_for_client_tx.send((client_key, m)) {
                             println!("Error sending canister message to main thread: {}", e);
                         }
 
@@ -177,15 +174,14 @@ impl CanisterPoller {
         });
     }
 
-    fn add_session(&mut self, canister_client_id: u64, session: GatewaySession) {
-        self.canister_client_session_map.insert(canister_client_id, session);
+    fn add_session(&mut self, canister_client_key: Vec<u8>, session: GatewaySession) {
+        self.canister_client_session_map.insert(canister_client_key, session);
     }
 }
 
 struct GatewayServer {
-    next_session_id: u64,
     connected_canisters: HashMap<Principal, CanisterPoller>,
-    session_streamers: HashMap<u64, WebSocketStream<TcpStream>>,
+    session_streamers: HashMap<Vec<u8>, WebSocketStream<TcpStream>>,
 }
 
 #[tokio::main]
@@ -206,33 +202,22 @@ async fn main() {
     agent.fetch_root_key().await.unwrap();
 
     let gateway_server = Arc::new(RwLock::new(GatewayServer {
-        next_session_id: 0,
         connected_canisters: HashMap::default(),
         session_streamers: HashMap::default(),
     }));
 
     let (session_init_tx, mut session_init_rx) = mpsc::unbounded_channel();
     let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
-    let gateway_server_cl = Arc::clone(&gateway_server);
     let agent_cl = Arc::clone(&agent);
     // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
         while let Ok((stream, client_addr)) = listener.accept().await {
-            let gateway_server_cl = Arc::clone(&gateway_server_cl);
             let agent_cl = Arc::clone(&agent_cl);
             let session_init_tx_cl = session_init_tx.clone();
             // spawn a connection handler task for each incoming connection 
             tokio::spawn(async move {
                 println!("\nClient address: {}", client_addr);
-                // ensure that the lock is released before calling handle_connection
-                let session_id = {
-                    let session_id = gateway_server_cl.read().await.next_session_id;
-                    // next_session_id must be updated before handle_connection
-                    // otherwise two clients connecting at the same time might end up with the same client_id 
-                    gateway_server_cl.write().await.next_session_id += 1;
-                    session_id
-                };
-                handle_connection(&*agent_cl, client_addr, stream, session_id, session_init_tx_cl).await
+                handle_connection(&*agent_cl, client_addr, stream, session_init_tx_cl).await
             });
         }
     });
@@ -240,16 +225,16 @@ async fn main() {
     loop {
         select! {
             // prioritize relaying updates to already connected clients rather than handling new client connections
-            Some((client_id, message)) = message_for_client_rx.recv() => {
-                // TODO: canister might send a message for a client_id before the corresponding ws_stream is initialized
+            Some((client_key, message)) = message_for_client_rx.recv() => {
+                // TODO: canister might send a message for a client_key before the corresponding ws_stream is initialized
                 //       need to store such a message and send it as soon as the ws_stream is initialized
-                match gateway_server.write().await.session_streamers.get_mut(&client_id) {
+                match gateway_server.write().await.session_streamers.get_mut(&client_key) {
                     Some(ws_stream) => {
                         if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
                             println!("WebSocket error: {}", e);
                         }
                     },
-                    None => println!("No client with id: {}", client_id)
+                    None => println!("No client with id: {:?}", client_key)
                 }
             }
             Some(connection_result) = session_init_rx.recv() => {
@@ -259,8 +244,7 @@ async fn main() {
                         // not doing so would result in a deadlock as the lock is awaited within each arm
                         // but it would not be released by the expression being matched until an arm is executed
                         let poller_is_initialized = {
-                            gateway_server.write().await.session_streamers.insert(gateway_session.session_id, ws_stream);
-                            println!("Added session streamer for session id: {}", gateway_session.session_id);
+                            gateway_server.write().await.session_streamers.insert(gateway_session.client_key.clone(), ws_stream);
                             gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
                         };
                         match poller_is_initialized {
@@ -270,7 +254,7 @@ async fn main() {
                                     canister_client_session_map: HashMap::new(),
                                     agent: Arc::clone(&agent),
                                 };
-                                poller.add_session(gateway_session.session_id, gateway_session);
+                                poller.add_session(gateway_session.client_key.clone(), gateway_session.clone());
                                 let message_for_client_tx_cl = message_for_client_tx.clone();
                                 poller.run_polling(message_for_client_tx_cl).await;
                                 println!("Created new poller for canister: {}", poller.canister_id);
@@ -282,7 +266,7 @@ async fn main() {
                                 gateway_server.write().await
                                     .connected_canisters.get_mut(&gateway_session.canister_id)
                                     .expect("poller already initialized")
-                                    .add_session(gateway_session.session_id, gateway_session);
+                                    .add_session(gateway_session.client_key.clone(), gateway_session);
                             }
                         }
                     },

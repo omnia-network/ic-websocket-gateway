@@ -1,4 +1,3 @@
-use ed25519_compact::PublicKey;
 use ic_cdk::api::{caller, data_certificate, set_certified_data, time};
 use ic_certified_map::{labeled, labeled_hash, AsHashTree, Hash as ICHash, RbTree};
 use serde::Serialize;
@@ -8,7 +7,7 @@ use std::{
     cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef, time::Duration,
 };
 
-use crate::{CertMessages, EncodedMessage, WebsocketMessage};
+use crate::{CertMessages, EncodedMessage, WebsocketMessage, PublicKeySlice};
 
 const LABEL_WEBSOCKET: &[u8] = b"websocket";
 const MSG_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -21,12 +20,10 @@ pub struct KeyGatewayTime {
 }
 
 thread_local! {
-    static NEXT_CLIENT_ID: RefCell<u64> = RefCell::new(0u64);
-    static CLIENT_CALLER_MAP: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
-    static CLIENT_PUBLIC_KEY_MAP: RefCell<HashMap<u64, PublicKey>> = RefCell::new(HashMap::new());
-    static CLIENT_GATEWAY_MAP: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
-    static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<u64, u64>> = RefCell::new(HashMap::new());
-    static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<u64, u64>> = RefCell::new(HashMap::new());
+    static CLIENT_CALLER_MAP: RefCell<HashMap<PublicKeySlice, String>> = RefCell::new(HashMap::new());
+    static CLIENT_GATEWAY_MAP: RefCell<HashMap<PublicKeySlice, String>> = RefCell::new(HashMap::new());
+    static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
+    static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
     static GATEWAY_MESSAGES_MAP: RefCell<HashMap<String, VecDeque<EncodedMessage>>> = RefCell::new(HashMap::new());
     static MESSAGE_DELETE_QUEUE: RefCell<VecDeque<KeyGatewayTime>> = RefCell::new(VecDeque::new());
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
@@ -34,11 +31,7 @@ thread_local! {
 }
 
 pub fn wipe() {
-    NEXT_CLIENT_ID.with(|next_id| next_id.replace(0u64));
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().clear();
-    });
-    CLIENT_PUBLIC_KEY_MAP.with(|map| {
         map.borrow_mut().clear();
     });
     CLIENT_GATEWAY_MAP.with(|map| {
@@ -62,81 +55,64 @@ pub fn wipe() {
     NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
 
-pub fn next_client_id() -> u64 {
-    NEXT_CLIENT_ID.with(|next_id| next_id.replace_with(|&mut old| old + 1))
-}
-
 fn next_message_nonce() -> u64 {
     NEXT_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
 }
 
-pub fn put_client_public_key(client_id: u64, client_key: PublicKey) {
-    CLIENT_PUBLIC_KEY_MAP.with(|map| {
-        map.borrow_mut().insert(client_id, client_key);
-    })
-}
-
-pub fn get_client_public_key(client_id: u64) -> Option<PublicKey> {
-    CLIENT_PUBLIC_KEY_MAP.with(|map| map.borrow().get(&client_id).cloned())
-}
-
-pub fn put_client_caller(client_id: u64) {
+pub fn put_client_caller(client_key: PublicKeySlice) {
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().insert(client_id, caller().to_string());
+        map.borrow_mut().insert(client_key, caller().to_string());
     })
 }
 
-pub fn put_client_gateway(client_id: u64) {
+pub fn put_client_gateway(client_key: PublicKeySlice) {
     CLIENT_GATEWAY_MAP.with(|map| {
-        map.borrow_mut().insert(client_id, caller().to_string());
+        map.borrow_mut().insert(client_key, caller().to_string());
     })
 }
 
-pub fn get_client_gateway(client_id: u64) -> Option<String> {
-    CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(&client_id).cloned())
+pub fn get_client_gateway(client_key: &PublicKeySlice) -> Option<String> {
+    CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(client_key).cloned())
 }
 
-pub fn next_client_message_num(client_id: u64) -> u64 {
+pub fn next_client_message_num(client_key: PublicKeySlice) -> u64 {
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
         let mut map = map.borrow_mut();
-        match map.get(&client_id).cloned() {
+        match map.get(&client_key).cloned() {
             None => {
-                map.insert(client_id, 0);
+                map.insert(client_key, 0);
                 0
             }
             Some(num) => {
-                map.insert(client_id, num + 1);
+                map.insert(client_key, num + 1);
                 num + 1
             }
         }
     })
 }
 
-pub fn get_client_incoming_num(client_id: u64) -> u64 {
-    CLIENT_INCOMING_NUM_MAP.with(|map| *map.borrow().get(&client_id).unwrap_or(&0))
+pub fn get_client_incoming_num(client_key: PublicKeySlice) -> u64 {
+    CLIENT_INCOMING_NUM_MAP.with(|map| *map.borrow().get(&client_key).unwrap_or(&0))
 }
 
-pub fn put_client_incoming_num(client_id: u64, num: u64) {
+pub fn put_client_incoming_num(client_key: PublicKeySlice, num: u64) {
     CLIENT_INCOMING_NUM_MAP.with(|map| {
-        map.borrow_mut().insert(client_id, num);
+        map.borrow_mut().insert(client_key, num);
     })
 }
 
-pub fn delete_client(client_id: u64) {
+pub fn delete_client(client_key: PublicKeySlice) {
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().remove(&client_id);
-    });
-    CLIENT_PUBLIC_KEY_MAP.with(|map| {
-        map.borrow_mut().remove(&client_id);
+        map.borrow_mut().remove(&client_key);
     });
     CLIENT_GATEWAY_MAP.with(|map| {
-        map.borrow_mut().remove(&client_id);
+        map.borrow_mut().remove(&client_key);
     });
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().remove(&client_id);
+        map.borrow_mut().remove(&client_key);
     });
     CLIENT_INCOMING_NUM_MAP.with(|map| {
-        map.borrow_mut().remove(&client_id);
+        map.borrow_mut().remove(&client_key);
     });
 }
 
@@ -200,8 +176,8 @@ pub fn delete_message(message_info: &KeyGatewayTime) {
     });
 }
 
-pub fn send_message_from_canister(client_id: u64, msg: Vec<u8>) {
-    let gateway = match get_client_gateway(client_id) {
+pub fn send_message_from_canister(client_key: PublicKeySlice, msg: Vec<u8>) {
+    let gateway = match get_client_gateway(&client_key) {
         None => {
             return;
         }
@@ -233,8 +209,8 @@ pub fn send_message_from_canister(client_id: u64, msg: Vec<u8>) {
     });
 
     let input = WebsocketMessage {
-        client_id,
-        sequence_num: next_client_message_num(client_id),
+        client_key: client_key.clone(),
+        sequence_num: next_client_message_num(client_key.clone()),
         timestamp: time,
         message: msg,
     };
@@ -255,7 +231,7 @@ pub fn send_message_from_canister(client_id: u64, msg: Vec<u8>) {
             Some(map) => map,
         };
         gw_map.push_back(EncodedMessage {
-            client_id,
+            client_key,
             key,
             val: data,
         });
