@@ -136,7 +136,7 @@ impl CanisterPoller {
         let agent = Arc::clone(&self.agent);
         let canister_id = self.canister_id;
         tokio::spawn({
-            let interval = Duration::from_millis(200);
+            let interval = Duration::from_millis(5000);
             let mut nonce: u64 = 0;
             async move {
                 loop {
@@ -158,7 +158,7 @@ impl CanisterPoller {
                         };
 
                         if let Err(e) = message_for_client_tx.send((client_id, m)) {
-                            println!("Error sendind message to main thread: {}", e);
+                            println!("Error sending canister message to main thread: {}", e);
                         }
 
                         nonce = encoded_message
@@ -239,8 +239,10 @@ async fn main() {
 
     loop {
         select! {
-            // prioritize relaying updates to alrwady connected clients rather than handling new client connections
+            // prioritize relaying updates to already connected clients rather than handling new client connections
             Some((client_id, message)) = message_for_client_rx.recv() => {
+                // TODO: canister might send a message for a client_id before the corresponding ws_stream is initialized
+                //       need to store such a message and send it as soon as the ws_stream is initialized
                 match gateway_server.write().await.session_streamers.get_mut(&client_id) {
                     Some(ws_stream) => {
                         if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
@@ -250,14 +252,15 @@ async fn main() {
                     None => println!("No client with id: {}", client_id)
                 }
             }
-            Some(task_result) = session_init_rx.recv() => {
-                match task_result {
+            Some(connection_result) = session_init_rx.recv() => {
+                match connection_result {
                     Ok((gateway_session, ws_stream)) => {
                         // ensure that the lock is released before executing the match arms
                         // not doing so would result in a deadlock as the lock is awaited within each arm
                         // but it would not be released by the expression being matched until an arm is executed
                         let poller_is_initialized = {
                             gateway_server.write().await.session_streamers.insert(gateway_session.session_id, ws_stream);
+                            println!("Added session streamer for session id: {}", gateway_session.session_id);
                             gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
                         };
                         match poller_is_initialized {
