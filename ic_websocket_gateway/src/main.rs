@@ -58,31 +58,47 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                 match msg {
                     Ok(Message::Binary(bytes)) => {
                         // TODO: handle possible errors in order not to panic
-                        let m: MessageFromClient = from_slice(&bytes).unwrap();
-                        let content: ClientCanisterId = from_slice(&m.content).unwrap();
-                        let canister_id = Principal::from_text(&content.canister_id).unwrap();
-                        let client_key =
-                            canister_methods::ws_get_client_key(agent, &canister_id, content.client_id)
-                                .await;
-                        let sig = Signature::from_slice(&m.sig).unwrap();
-                        let valid = client_key.verify(&m.content, &sig);
-                        match valid {
-                            Ok(_) => {
-                                let _ret =
-                                    canister_methods::ws_open(agent, &canister_id, m.content, m.sig)
-                                    .await;
-                                println!("New WebSocket connection: {} with session id {}", client_addr, session_id);
-
-                                Ok((
-                                    GatewaySession {
-                                        session_id,
-                                        canister_id,
-                                    },
-                                    ws_stream
-                                )
-                            )
-                            },
-                            Err(_) => Err(IcWsInitializationError::CustomError(String::from("Client's signature does not verify"))),
+                        if let Ok(m) = from_slice::<MessageFromClient>(&bytes) {
+                            if let Ok(content) = from_slice::<ClientCanisterId>(&m.content) {
+                                if let Ok(canister_id) = Principal::from_text(&content.canister_id) {
+                                    let client_key =
+                                        canister_methods::ws_get_client_key(agent, &canister_id, content.client_id)
+                                            .await;
+                                    if let Ok(sig) = Signature::from_slice(&m.sig) {
+                                        let valid = client_key.verify(&m.content, &sig);
+                                        match valid {
+                                            Ok(_) => {
+                                                let _ret =
+                                                    canister_methods::ws_open(agent, &canister_id, m.content, m.sig)
+                                                    .await;
+                                                println!("New WebSocket connection: {} with session id {}", client_addr, session_id);
+                    
+                                                Ok((
+                                                    GatewaySession {
+                                                        session_id,
+                                                        canister_id,
+                                                    },
+                                                    ws_stream
+                                                )
+                                            )
+                                            },
+                                            Err(_) => Err(IcWsInitializationError::CustomError(String::from("Client's signature does not verify"))),
+                                        }
+                                    }
+                                    else {
+                                        Err(IcWsInitializationError::CustomError(String::from("first message does not contain a valid signature")))
+                                    }
+                                }
+                                else {
+                                    Err(IcWsInitializationError::CustomError(String::from("content of first message does not contain a valid principal in canister_id")))
+                                }
+                            }
+                            else {
+                                Err(IcWsInitializationError::CustomError(String::from("content of first message is not of type ClientCanisterId")))
+                            }
+                        }
+                        else {
+                            Err(IcWsInitializationError::CustomError(String::from("first message is not of type MessageFromClient")))
                         }
                     },
                     Ok(_) => Err(IcWsInitializationError::CustomError(String::from("first message from client should be binary encoded"))),
@@ -111,7 +127,7 @@ pub struct CertMessage {
 
 struct CanisterPoller {
     canister_id: Principal,
-    canister_client_session_map: Arc<Mutex<HashMap<u64, GatewaySession>>>,
+    canister_client_session_map: HashMap<u64, GatewaySession>,
     agent: Arc<Agent>
 }
 
@@ -161,10 +177,8 @@ impl CanisterPoller {
         });
     }
 
-    fn add_session(&self, canister_client_id: u64, session: GatewaySession) {
-        let map = &self.canister_client_session_map;
-        let mut m = map.lock().unwrap();
-        m.insert(canister_client_id, session);
+    fn add_session(&mut self, canister_client_id: u64, session: GatewaySession) {
+        self.canister_client_session_map.insert(canister_client_id, session);
     }
 }
 
@@ -248,20 +262,24 @@ async fn main() {
                         };
                         match poller_is_initialized {
                             false => {
-                                let poller = CanisterPoller {
+                                let mut poller = CanisterPoller {
                                     canister_id: gateway_session.canister_id.clone(),
-                                    canister_client_session_map: Arc::new(Mutex::new(HashMap::new())),
+                                    canister_client_session_map: HashMap::new(),
                                     agent: Arc::clone(&agent),
                                 };
                                 poller.add_session(gateway_session.session_id, gateway_session);
                                 let message_for_client_tx_cl = message_for_client_tx.clone();
                                 poller.run_polling(message_for_client_tx_cl).await;
                                 println!("Created new poller for canister: {}", poller.canister_id);
-                                gateway_server.write().await.connected_canisters.insert(poller.canister_id, poller);
+                                gateway_server.write().await
+                                    .connected_canisters.insert(poller.canister_id, poller);
                             },
                             true => {
                                 println!("Added new client session to poller of canister: {}", gateway_session.canister_id);
-                                gateway_server.read().await.connected_canisters.get(&gateway_session.canister_id).expect("poller already initialized").add_session(gateway_session.session_id, gateway_session);
+                                gateway_server.write().await
+                                    .connected_canisters.get_mut(&gateway_session.canister_id)
+                                    .expect("poller already initialized")
+                                    .add_session(gateway_session.session_id, gateway_session);
                             }
                         }
                     },
