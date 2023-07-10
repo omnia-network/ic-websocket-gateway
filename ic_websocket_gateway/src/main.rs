@@ -52,42 +52,36 @@ enum IcWsInitializationError {
     WsError(Error),     // WebSocket error
 }
 
-async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, ws_stream: WebSocketStream<TcpStream>, message: Message) -> Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError> {
+async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Message) -> Result<(Vec<u8>, Principal), String> {
     if let Message::Binary(bytes) = message {
         let m = from_slice::<MessageFromClient>(&bytes).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("first message is not of type MessageFromClient"))
+            String::from("first message is not of type MessageFromClient")
         })?;
         let content = from_slice::<ClientCanisterId>(&m.content).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("content of first message is not of type ClientCanisterId"))
+            String::from("content of first message is not of type ClientCanisterId")
         })?;
         let canister_id = Principal::from_text(&content.canister_id).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("content of first message does not contain a valid principal in canister_id"))
+            String::from("content of first message does not contain a valid principal in canister_id")
         })?;
         let sig = Signature::from_slice(&m.sig).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("first message does not contain a valid signature"))
+            String::from("first message does not contain a valid signature")
         })?;
         let public_key = PublicKey::from_slice(&content.client_key).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("first message does not contain a valid public key"))
+            String::from("first message does not contain a valid public key")
         })?;
         public_key.verify(&m.content, &sig).map_err(|_| {
-            IcWsInitializationError::CustomError(String::from("client's signature does not verify against public key"))
+            String::from("client's signature does not verify against public key")
         })?;
         if canister_methods::ws_open(agent, &canister_id, m.content, m.sig).await {
             println!("New WebSocket connection: {}", client_addr);
-            Ok((
-                GatewaySession {
-                    client_key: content.client_key,
-                    canister_id,
-                },
-                ws_stream
-            ))
+            Ok((content.client_key, canister_id))
         }
         else {
-            Err(IcWsInitializationError::CustomError(String::from("client's signature does not verify against public key")))
+            Err(String::from("canister could not verify client's signature against public key"))
         }
     }
     else {
-        Err(IcWsInitializationError::CustomError(String::from("first message from client should be binary encoded")))
+        Err(String::from("first message from client should be binary encoded"))
     }
 }
 
@@ -98,12 +92,28 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                 match first_msg {
                     Ok(msg) => {
                         // check if client correctly registered its public key in the backend canister
-                        check_canister_init(agent, client_addr, ws_stream, msg).await
+                        match check_canister_init(agent, client_addr, msg).await {
+                            Ok((client_key, canister_id)) => {
+                                ws_stream.send(Message::Text("1".to_string())).await;   // tell the client that the IC WS connection is setup correctly
+                                Ok((
+                                    GatewaySession {
+                                        client_key,
+                                        canister_id,
+                                    },
+                                    ws_stream
+                                ))
+                            },
+                            Err(e) => {
+                                ws_stream.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
+                                Err(IcWsInitializationError::CustomError(e))
+                            }
+                        }
                     },
                     Err(e) => Err(IcWsInitializationError::WsError(e)),
                 }
             }
             else {
+                ws_stream.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
                 Err(IcWsInitializationError::CustomError(String::from("client should send first message")))
             }
         },
@@ -266,7 +276,7 @@ async fn main() {
                                 println!("Added new client session to poller of canister: {}", gateway_session.canister_id);
                                 gateway_server.write().await
                                     .connected_canisters.get_mut(&gateway_session.canister_id)
-                                    .expect("poller already initialized")
+                                    .expect("poller should have already been initialized")
                                     .add_session(gateway_session.client_key.clone(), gateway_session);
                             }
                         }

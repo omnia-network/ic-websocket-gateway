@@ -21,7 +21,7 @@ import validateBody from "./utils/validateBody";
 export default class websocketConnection {
   constructor(canister_id, gateway_address, network_url, local_test) {
     this.canister_id = canister_id;
-    this.next_received_num = 0; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
+    this.next_received_num = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
     this.instance = new WebSocket(gateway_address); // Gateway address. Here localhost to reproduce the demo.
     this.instance.binaryType = "arraybuffer";
     this.bindEvents();
@@ -103,43 +103,49 @@ export default class websocketConnection {
   }
 
   async onMessage(event) {
-    const res = Cbor.decode(event.data);
-
-    let key, val, cert, tree;
-    key = res.key;
-    val = new Uint8Array(res.val);
-    cert = res.cert;
-    tree = res.tree;
-    let websocketMsg = Cbor.decode(val);
-
-    // Check the sequence number
-    let received_num = websocketMsg.sequence_num;
-    if (received_num != this.next_received_num) {
-      console.log(`Received message sequence number (${received_num}) does not match next expected value (${this.next_received_num}). Message ignored.`);
-      return;
+    if (this.next_received_num == -1) {
+      console.log(event.data);
+      this.next_received_num += 1;
     }
-    this.next_received_num += 1;
-
-    // Inspect the timestamp
-    let time = websocketMsg.timestamp;
-    let delay_s = (Date.now() * (10 ** 6) - time) / (10 ** 9);
-    console.log(`(time now) - (message timestamp) = ${delay_s}s`);
-
-    // Verify the certificate (canister signature)
-    let principal = Principal.fromText(this.canister_id);
-    let valid = await validateBody(principal, key, val, cert, tree, this.agent);
-    console.log(`Certificate validation: ${valid}`);
-    if (!valid) {
-      console.log(`Message ignored.`);
-      return;
+    else {
+      const res = Cbor.decode(event.data);
+  
+      let key, val, cert, tree;
+      key = res.key;
+      val = new Uint8Array(res.val);
+      cert = res.cert;
+      tree = res.tree;
+      let websocketMsg = Cbor.decode(val);
+  
+      // Check the sequence number
+      let received_num = websocketMsg.sequence_num;
+      if (received_num != this.next_received_num) {
+        console.log(`Received message sequence number (${received_num}) does not match next expected value (${this.next_received_num}). Message ignored.`);
+        return;
+      }
+      this.next_received_num += 1;
+  
+      // Inspect the timestamp
+      let time = websocketMsg.timestamp;
+      let delay_s = (Date.now() * (10 ** 6) - time) / (10 ** 9);
+      console.log(`(time now) - (message timestamp) = ${delay_s}s`);
+  
+      // Verify the certificate (canister signature)
+      let principal = Principal.fromText(this.canister_id);
+      let valid = await validateBody(principal, key, val, cert, tree, this.agent);
+      console.log(`Certificate validation: ${valid}`);
+      if (!valid) {
+        console.log(`Message ignored.`);
+        return;
+      }
+  
+      // Message has been verified
+      let appMsg = Cbor.decode(websocketMsg.message);
+      let text = appMsg.text;
+      console.log(`[message] Message from canister: ${text}`);
+      addNotification(text);
+      this.sendMessage(await this.make_message(text + "-pong"));
     }
-
-    // Message has been verified
-    let appMsg = Cbor.decode(websocketMsg.message);
-    let text = appMsg.text;
-    console.log(`[message] Message from canister: ${text}`);
-    addNotification(text);
-    this.sendMessage(await this.make_message(text + "-pong"));
   }
 
   onClose(event) {
