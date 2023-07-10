@@ -25,6 +25,13 @@ const FETCH_KEY: bool = true;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
+enum GatewayMessage {
+    RelayedFromClient(MessageFromClient),
+    FromGateway(Vec<u8>, bool)
+}
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
 struct MessageFromClient {
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
@@ -144,7 +151,7 @@ impl CanisterPoller {
         let agent = Arc::clone(&self.agent);
         let canister_id = self.canister_id;
         tokio::spawn({
-            let interval = Duration::from_millis(5000);
+            let interval = Duration::from_millis(200);
             let mut nonce: u64 = 0;
             async move {
                 loop {
@@ -237,8 +244,6 @@ async fn main() {
         select! {
             // prioritize relaying updates to already connected clients rather than handling new client connections
             Some((client_key, message)) = message_for_client_rx.recv() => {
-                // TODO: canister might send a message for a client_key before the corresponding ws_stream is initialized
-                //       need to store such a message and send it as soon as the ws_stream is initialized
                 match gateway_server.write().await.session_streamers.get_mut(&client_key) {
                     Some(ws_stream) => {
                         if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
@@ -256,6 +261,11 @@ async fn main() {
                         // but it would not be released by the expression being matched until an arm is executed
                         let poller_is_initialized = {
                             gateway_server.write().await.session_streamers.insert(gateway_session.client_key.clone(), ws_stream);
+
+                            // notify canister that it can now send messages for the client corresponding to client_key
+                            let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
+                            canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
+
                             gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
                         };
                         match poller_is_initialized {

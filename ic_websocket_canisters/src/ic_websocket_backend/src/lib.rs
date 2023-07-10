@@ -1,5 +1,6 @@
 use ed25519_compact::{PublicKey, Signature};
 use ic_cdk::export::candid::CandidType;
+use ic_cdk::print;
 use ic_cdk_macros::*;
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
@@ -91,8 +92,6 @@ fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> bool {
                 Ok(_) => {
                     // Remember this gateway will get the messages for this client_key.
                     put_client_gateway(client_key.clone());
-        
-                    ws_on_open(client_key);
                     true
                 }
                 Err(_) => false,
@@ -100,13 +99,19 @@ fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> bool {
         }
     }
     false
-
 }
 
 // Close the websocket connection.
 #[update]
 fn ws_close(client_key: Vec<u8>) {
     delete_client(client_key);
+}
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[candid_path("ic_cdk::export::candid")]
+enum GatewayMessage {
+    RelayedFromClient(ClientMessage),
+    FromGateway(Vec<u8>, bool)
 }
 
 // Encoded message + signature from client.
@@ -122,25 +127,39 @@ struct ClientMessage {
 // Gateway calls this method to pass on the message from the client to the canister.
 #[update]
 fn ws_message(msg: Vec<u8>) -> bool {
-    let decoded: ClientMessage = from_slice(&msg).unwrap();
-    let content: WebsocketMessage = from_slice(&decoded.val).unwrap();
+    let decoded: GatewayMessage = from_slice(&msg).unwrap();
+    match decoded {
+        GatewayMessage::RelayedFromClient(decoded_msg) => {
+            let content: WebsocketMessage = from_slice(&decoded_msg.val).unwrap();
 
-    // Verify the signature.
-    let sig = Signature::from_slice(&decoded.sig).unwrap();
-    let valid = PublicKey::from_slice(&content.client_key).unwrap().verify(&decoded.val, &sig);
-
-    match valid {
-        Ok(_) => {
-            // Verify the message sequence number.
-            if content.sequence_num == get_client_incoming_num(content.client_key.clone()) {
-                put_client_incoming_num(content.client_key.clone(), content.sequence_num + 1);
-                ws_on_message(content);
-                true
-            } else {
-                false
+            // Verify the signature.
+            let sig = Signature::from_slice(&decoded_msg.sig).unwrap();
+            let valid = PublicKey::from_slice(&content.client_key).unwrap().verify(&decoded_msg.val, &sig);
+        
+            match valid {
+                Ok(_) => {
+                    // Verify the message sequence number.
+                    if content.sequence_num == get_client_incoming_num(content.client_key.clone()) {
+                        put_client_incoming_num(content.client_key.clone(), content.sequence_num + 1);
+                        ws_on_message(content);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Err(_) => false,
             }
+        },
+        GatewayMessage::FromGateway(client_key, can_send) => {
+            if can_send {
+                print(format!("Can start notifying client with key: {:?}", client_key));
+                ws_on_open(client_key);
+            }
+            else {
+                // TODO: remove registered client 
+            }
+            can_send
         }
-        Err(_) => false,
     }
 }
 
