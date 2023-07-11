@@ -1,6 +1,6 @@
 use futures_util::{StreamExt, SinkExt};
-use std::net::SocketAddr;
-use tokio::{net::{TcpListener, TcpStream}, sync::{RwLock, mpsc::{self, UnboundedSender}}, select};
+use std::{net::SocketAddr, rc::Rc, cell::RefCell};
+use tokio::{net::{TcpListener, TcpStream}, sync::{mpsc::{self, UnboundedSender}}, select};
 use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Result, Message}, WebSocketStream,
@@ -199,7 +199,7 @@ impl CanisterPoller {
 
 struct GatewayServer {
     connected_canisters: HashMap<Principal, CanisterPoller>,
-    session_streamers: HashMap<Vec<u8>, WebSocketStream<TcpStream>>,
+    session_streamers: HashMap<Vec<u8>, Rc<RefCell<WebSocketStream<TcpStream>>>>,
 }
 
 #[tokio::main]
@@ -219,10 +219,10 @@ async fn main() {
     let agent = Arc::new(canister_methods::get_new_agent(URL, identity, FETCH_KEY).await);
     agent.fetch_root_key().await.unwrap();
 
-    let gateway_server = Arc::new(RwLock::new(GatewayServer {
+    let mut gateway_server = GatewayServer {
         connected_canisters: HashMap::default(),
         session_streamers: HashMap::default(),
-    }));
+    };
 
     let (session_init_tx, mut session_init_rx) = mpsc::unbounded_channel();
     let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
@@ -242,11 +242,25 @@ async fn main() {
 
     loop {
         select! {
+            Some(disconnected_clients) = get_disconnected_client(&gateway_server) => {
+                println!("Triggered disconnection handler");
+                for client_key in disconnected_clients {
+                    gateway_server.session_streamers.remove(&client_key);
+                    println!("\nClient {:?} disconnected", client_key);
+                }
+            }
             // prioritize relaying updates to already connected clients rather than handling new client connections
             Some((client_key, message)) = message_for_client_rx.recv() => {
-                match gateway_server.write().await.session_streamers.get_mut(&client_key) {
+                println!("Triggered message handler");
+                let ws_stream_opt = {
+                    match gateway_server.session_streamers.get_mut(&client_key) {
+                        Some(ws_stream) => Some(Rc::clone(&ws_stream)),
+                        None => None
+                    }
+                };
+                match ws_stream_opt {
                     Some(ws_stream) => {
-                        if let Err(e) = ws_stream.send(Message::Binary(to_vec(&message).unwrap())).await {
+                        if let Err(e) = (*ws_stream).borrow_mut().send(Message::Binary(to_vec(&message).unwrap())).await {
                             println!("WebSocket error: {}", e);
                         }
                     },
@@ -254,21 +268,16 @@ async fn main() {
                 }
             }
             Some(connection_result) = session_init_rx.recv() => {
+                println!("Triggered connection handler");
                 match connection_result {
                     Ok((gateway_session, ws_stream)) => {
-                        // ensure that the lock is released before executing the match arms
-                        // not doing so would result in a deadlock as the lock is awaited within each arm
-                        // but it would not be released by the expression being matched until an arm is executed
-                        let poller_is_initialized = {
-                            gateway_server.write().await.session_streamers.insert(gateway_session.client_key.clone(), ws_stream);
+                        gateway_server.session_streamers.insert(gateway_session.client_key.clone(), Rc::new(RefCell::new(ws_stream)));
 
-                            // notify canister that it can now send messages for the client corresponding to client_key
-                            let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
-                            canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
+                        // notify canister that it can now send messages for the client corresponding to client_key
+                        let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
+                        canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
 
-                            gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
-                        };
-                        match poller_is_initialized {
+                        match gateway_server.connected_canisters.contains_key(&gateway_session.canister_id) {
                             false => {
                                 let mut poller = CanisterPoller {
                                     canister_id: gateway_session.canister_id.clone(),
@@ -279,12 +288,12 @@ async fn main() {
                                 let message_for_client_tx_cl = message_for_client_tx.clone();
                                 poller.run_polling(message_for_client_tx_cl).await;
                                 println!("Created new poller for canister: {}", poller.canister_id);
-                                gateway_server.write().await
+                                gateway_server
                                     .connected_canisters.insert(poller.canister_id, poller);
                             },
                             true => {
                                 println!("Added new client session to poller of canister: {}", gateway_session.canister_id);
-                                gateway_server.write().await
+                                gateway_server
                                     .connected_canisters.get_mut(&gateway_session.canister_id)
                                     .expect("poller should have already been initialized")
                                     .add_session(gateway_session.client_key.clone(), gateway_session);
@@ -296,6 +305,29 @@ async fn main() {
                     }
                 }
             }
+            _ = check_starvation() => {
+                println!("Not starving");
+            }
         }
     }
+}
+
+async fn get_disconnected_client(gateway_server: &GatewayServer) -> Option<Vec<Vec<u8>>> {
+    let mut disconnected_clients = Vec::new();
+    for (client_key, ws_stream) in gateway_server.session_streamers.iter() {
+        if let None = (*Rc::clone(ws_stream)).borrow_mut().next().await {
+            disconnected_clients.push(client_key.clone());
+        }
+    }
+    // it's necessary to return an option in order to not starve the other branches in select!
+    // by always executing the branch for client disconnection (as it is first)
+    if disconnected_clients.len() > 0 {
+        return Some(disconnected_clients);
+    }
+    None
+
+}
+
+async fn check_starvation() {
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 }
