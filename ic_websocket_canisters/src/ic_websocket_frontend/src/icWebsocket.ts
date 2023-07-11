@@ -1,6 +1,5 @@
-import { ic_websocket_backend } from "../../declarations/ic_websocket_backend";
-
 import {
+  ActorSubclass,
   Cbor,
   Certificate,
   compare,
@@ -34,9 +33,9 @@ type IcWebSocketConfig = {
    */
   canisterId: string;
   /**
-   * The gateway address to connect to.
+   * The canister actor class. It must implement the `ws_register` method.
    */
-  gatewayAddress: string;
+  canisterActor: ActorSubclass<any>
   /**
    * The IC network url to use for the HttpAgent. It can be a local replica (e.g. http://localhost:4943) or the IC mainnet (https://ic0.io).
    */
@@ -51,9 +50,12 @@ type IcWebSocketConfig = {
   persistKey?: boolean;
 };
 
+type WsParameters = ConstructorParameters<typeof WebSocket>;
+
 export default class IcWebSocket {
   readonly canisterId: Principal;
   readonly agent: HttpAgent;
+  readonly canisterActor: ActorSubclass<any>;
   private wsInstance: WebSocket;
   private secretKey: Uint8Array | string;
   private nextReceivedNum: number;
@@ -64,10 +66,24 @@ export default class IcWebSocket {
   onmessage: ((this: IcWebSocket, ev: MessageEvent<string>) => any) | null = null;
   onopen: ((this: IcWebSocket, ev: Event) => any) | null = null;
 
-  constructor(config: IcWebSocketConfig) {
+  /**
+   * Creates a new IcWebSocket instance.
+   * @param url The gateway address.
+   * @param protocols The protocols to use in the WebSocket.
+   * @param config The IcWebSocket configuration.
+   */
+  constructor(url: WsParameters[0], protocols: WsParameters[1], config: IcWebSocketConfig) {
     this.canisterId = Principal.fromText(config.canisterId);
+
+    if (!config.canisterActor.ws_register) {
+      throw new Error("Canister actor does not implement the ws_register method");
+    }
+
+    this.canisterActor = config.canisterActor;
+
     this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
-    this.wsInstance = new WebSocket(config.gatewayAddress); // Gateway address. Here localhost to reproduce the demo.
+    // TODO: IcWebSocket should accept parameters in the config object.
+    this.wsInstance = new WebSocket(url, protocols); // Gateway address. Here localhost to reproduce the demo.
     this.wsInstance.binaryType = "arraybuffer";
     this._bindWsEvents();
 
@@ -138,7 +154,7 @@ export default class IcWebSocket {
     console.log("[open] Connection opened");
     const publicKey = await ed.getPublicKeyAsync(this.secretKey);
     // Put the public key in the canister
-    await ic_websocket_backend.ws_register(publicKey);
+    await this.canisterActor.ws_register(publicKey);
     this.sequenceNum = 0;
 
     // Send the first message with client and canister id

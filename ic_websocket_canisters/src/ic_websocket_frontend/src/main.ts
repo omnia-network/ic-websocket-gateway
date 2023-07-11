@@ -1,5 +1,6 @@
 import IcWebSocket from "./icWebsocket";
 import addNotification from "./utils/addNotification";
+import { ic_websocket_backend } from "../../declarations/ic_websocket_backend";
 
 const backendCanisterId = process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND || "";
 const gatewayAddress = "ws://127.0.0.1:8080";
@@ -18,9 +19,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   </div>
 `
 
-const ws = new IcWebSocket({
+const ws = new IcWebSocket(gatewayAddress, undefined, {
   canisterId: backendCanisterId,
-  gatewayAddress,
+  canisterActor: ic_websocket_backend,
   networkUrl: url,
   localTest,
   persistKey,
