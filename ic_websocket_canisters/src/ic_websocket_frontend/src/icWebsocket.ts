@@ -33,7 +33,11 @@ type IcWebSocketConfig = {
    */
   canisterId: string;
   /**
-   * The canister actor class. It must implement the `ws_register` method.
+   * The canister actor class.
+   * 
+   * It must implement the methods:
+   * - `ws_register`
+   * - `ws_message`
    */
   canisterActor: ActorSubclass<any>
   /**
@@ -77,6 +81,10 @@ export default class IcWebSocket {
 
     if (!config.canisterActor.ws_register) {
       throw new Error("Canister actor does not implement the ws_register method");
+    }
+
+    if (!config.canisterActor.ws_message) {
+      throw new Error("Canister actor does not implement the ws_message method");
     }
 
     this.canisterActor = config.canisterActor;
@@ -133,13 +141,17 @@ export default class IcWebSocket {
     };
 
     // Send CBOR encoded
-    const wsMessage = Cbor.encode(message);
-    return wsMessage;
+    // TODO: fix the serialization of the message
+    const wsMessage = Cbor.encode({ RelayedFromClient: message });
+    return new Uint8Array(wsMessage);
   }
 
   async send(data: any) {
     console.log("Sending to canister.");
-    this.wsInstance.send(await this._makeMessage(data));
+    // we send the message directly to the canister, not to the gateway
+    const serialized = await this._makeMessage(data);
+    // TODO: fix the serialization of the message
+    await this.canisterActor.ws_message(serialized);
     this.sequenceNum += 1;
   }
 
