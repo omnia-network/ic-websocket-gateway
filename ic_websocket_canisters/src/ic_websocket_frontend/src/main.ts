@@ -1,7 +1,7 @@
 import IcWebSocket from "./icWebsocket";
 import addNotification from "./utils/addNotification";
 
-const backendCanisterId = process.env.IC_WEBSOCKET_BACKEND_CANISTER_ID || "";
+const backendCanisterId = process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND || "";
 const gatewayAddress = "ws://127.0.0.1:8080";
 const url = "http://127.0.0.1:4943";
 const localTest = true;

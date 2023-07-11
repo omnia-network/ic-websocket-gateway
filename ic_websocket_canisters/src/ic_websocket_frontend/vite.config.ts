@@ -13,7 +13,7 @@ export default defineConfig({
   mode: isDevelopment ? "development" : "production",
   plugins: [
     EnvironmentPlugin('all', {
-      prefix: 'IC_WEBSOCKET',
+      prefix: 'CANISTER_ID',
     }),
     EnvironmentPlugin('all', {
       prefix: 'DFX',
