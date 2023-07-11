@@ -2,14 +2,16 @@ import { ic_websocket_backend } from "../../declarations/ic_websocket_backend";
 
 import {
   Cbor,
-  HttpAgent
+  Certificate,
+  compare,
+  HashTree,
+  HttpAgent,
+  lookup_path,
+  reconstruct,
 } from "@dfinity/agent";
 import { Principal } from "@dfinity/principal";
-import addNotification from "./utils/addNotification";
 
 import * as ed from '@noble/ed25519';
-
-import validateBody from "./utils/validateBody";
 
 const CLIENT_SECRET_KEY_STORAGE_KEY = "ic_websocket_client_secret_key";
 
@@ -26,22 +28,50 @@ type WsMessageContent = {
   message: ArrayBuffer;
 };
 
+type IcWebSocketConfig = {
+  /**
+   * The canister id of the canister to open the websocket to.
+   */
+  canisterId: string;
+  /**
+   * The gateway address to connect to.
+   */
+  gatewayAddress: string;
+  /**
+   * The IC network url to use for the HttpAgent. It can be a local replica (e.g. http://localhost:4943) or the IC mainnet (https://ic0.io).
+   */
+  networkUrl: string;
+  /**
+   * If `true`, it means that the network is a local replica and the HttpAgent will fetch the root key.
+   */
+  localTest: boolean;
+  /**
+   * If `true`, the secret key will be stored in local storage and reused on subsequent page loads.
+   */
+  persistKey?: boolean;
+};
+
 export default class IcWebSocket {
-  canisterId: Principal;
-  nextReceivedNum: number;
-  instance: WebSocket;
-  secretKey: Uint8Array | string;
-  agent: HttpAgent;
-  sequenceNum = 0;
+  readonly canisterId: Principal;
+  readonly agent: HttpAgent;
+  private wsInstance: WebSocket;
+  private secretKey: Uint8Array | string;
+  private nextReceivedNum: number;
+  private sequenceNum = 0;
 
-  constructor(canisterId: string, gatewayAddress: string, networkUrl: string, localTest: boolean, persistKey?: boolean) {
-    this.canisterId = Principal.fromText(canisterId);
+  onclose: ((this: IcWebSocket, ev: CloseEvent) => any) | null = null;
+  onerror: ((this: IcWebSocket, ev: Event) => any) | null = null;
+  onmessage: ((this: IcWebSocket, ev: MessageEvent<string>) => any) | null = null;
+  onopen: ((this: IcWebSocket, ev: Event) => any) | null = null;
+
+  constructor(config: IcWebSocketConfig) {
+    this.canisterId = Principal.fromText(config.canisterId);
     this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
-    this.instance = new WebSocket(gatewayAddress); // Gateway address. Here localhost to reproduce the demo.
-    this.instance.binaryType = "arraybuffer";
-    this.bindEvents();
+    this.wsInstance = new WebSocket(config.gatewayAddress); // Gateway address. Here localhost to reproduce the demo.
+    this.wsInstance.binaryType = "arraybuffer";
+    this._bindWsEvents();
 
-    if (persistKey) {
+    if (config.persistKey) {
       // attempt to load the secret key from local storage (stored in hex format)
       const storedKey = localStorage.getItem(CLIENT_SECRET_KEY_STORAGE_KEY);
 
@@ -58,17 +88,15 @@ export default class IcWebSocket {
       this.secretKey = ed.utils.randomPrivateKey(); // Generate new key for this websocket connection.
     }
 
-    this.agent = new HttpAgent({ host: networkUrl });
-    if (localTest) {
+    this.agent = new HttpAgent({ host: config.networkUrl });
+    if (config.localTest) {
       this.agent.fetchRootKey();
     }
   }
 
-  async makeMessage(text: string) {
+  private async _makeMessage(data: any) {
     // Our demo application uses simple text message.
-    const content = Cbor.encode({
-      text: text,
-    });
+    const content = Cbor.encode(data);
 
     // Message with all required fields.
     const websocketMessage = Cbor.encode({
@@ -93,22 +121,22 @@ export default class IcWebSocket {
     return wsMessage;
   }
 
-  sendMessage(message: ArrayBuffer) {
+  async send(data: any) {
     console.log("Sending to canister.");
-    this.instance.send(message);
+    this.wsInstance.send(await this._makeMessage(data));
     this.sequenceNum += 1;
   }
 
-  bindEvents() {
-    this.instance.onopen = this.onOpen.bind(this);
-    this.instance.onmessage = this.onMessage.bind(this);
-    this.instance.onclose = this.onClose.bind(this);
-    this.instance.onerror = this.onError.bind(this);
+  private _bindWsEvents() {
+    this.wsInstance.onopen = this._onWsOpen.bind(this);
+    this.wsInstance.onmessage = this._onWsMessage.bind(this);
+    this.wsInstance.onclose = this._onWsClose.bind(this);
+    this.wsInstance.onerror = this._onWsError.bind(this);
   }
 
-  async onOpen() {
+  private async _onWsOpen() {
     console.log("[open] Connection opened");
-    const publicKey = await ed.getPublicKeyAsync(this.secretKey)
+    const publicKey = await ed.getPublicKeyAsync(this.secretKey);
     // Put the public key in the canister
     await ic_websocket_backend.ws_register(publicKey);
     this.sequenceNum = 0;
@@ -135,16 +163,23 @@ export default class IcWebSocket {
 
     // Send the first message
     const wsMessage = Cbor.encode(message);
-    this.sendMessage(wsMessage);
+    this.wsInstance.send(wsMessage);
     this.sequenceNum = 0;
+
+    // the onopen callback is called when the first confirmation message is received from the canister
+    // see _onWsMessage function
   }
 
-  async onMessage(event: MessageEvent<ArrayBuffer>) {
+  private async _onWsMessage(event: MessageEvent<ArrayBuffer>) {
     if (this.nextReceivedNum == -1) {
-      console.log(event.data);
+      // first received message
+      console.log('[message]: first message', event.data);
       this.nextReceivedNum += 1;
-    }
-    else {
+
+      if (this.onopen) {
+        this.onopen.call(this, new Event("open"));
+      }
+    } else {
       const res = Cbor.decode<WsMessage>(event.data);
 
       let key, val, cert, tree;
@@ -168,7 +203,7 @@ export default class IcWebSocket {
       console.log(`(time now) - (message timestamp) = ${delaySeconds}s`);
 
       // Verify the certificate (canister signature)
-      const valid = await validateBody(this.canisterId, key, val, cert, tree, this.agent);
+      const valid = await validateWsMessageBody(this.canisterId, key, val, cert, tree, this.agent);
       console.log(`Certificate validation: ${valid}`);
       if (!valid) {
         console.log(`Message ignored.`);
@@ -179,12 +214,16 @@ export default class IcWebSocket {
       const appMsg = Cbor.decode<{ text: string }>(websocketMsg.message);
       const text = appMsg.text;
       console.log(`[message] Message from canister: ${text}`);
-      addNotification(text);
-      this.sendMessage(await this.makeMessage(text + "-pong"));
+
+      if (this.onmessage) {
+        this.onmessage.call(this, new MessageEvent("message", {
+          data: text,
+        }));
+      }
     }
   }
 
-  onClose(event: CloseEvent) {
+  private _onWsClose(event: CloseEvent) {
     if (event.wasClean) {
       console.log(
         `[close] Connection closed, code=${event.code} reason=${event.reason}`
@@ -192,9 +231,83 @@ export default class IcWebSocket {
     } else {
       console.log("[close] Connection died");
     }
+
+    if (this.onclose) {
+      this.onclose.call(this, event);
+    }
   }
 
-  onError(error: Event) {
+  private _onWsError(error: Event) {
     console.log(`[error]`, error);
+
+    if (this.onerror) {
+      this.onerror.call(this, error);
+    }
   }
+}
+
+function equal(buf1: ArrayBuffer, buf2: ArrayBuffer) {
+  return compare(buf1, buf2) === 0;
+}
+
+async function validateWsMessageBody(
+  canisterId: Principal,
+  path: string,
+  body: Uint8Array,
+  certificate: ArrayBuffer,
+  tree: ArrayBuffer,
+  agent: HttpAgent,
+) {
+  let cert;
+  try {
+    cert = await Certificate.create({
+      certificate,
+      canisterId,
+      rootKey: agent.rootKey!
+    });
+  } catch (error) {
+    return false;
+  }
+
+  const hashTree = Cbor.decode<HashTree>(tree);
+  const reconstructed = await reconstruct(hashTree);
+  const witness = cert.lookup([
+    "canister",
+    canisterId.toUint8Array(),
+    "certified_data"
+  ]);
+
+  if (!witness) {
+    throw new Error(
+      "Could not find certified data for this canister in the certificate."
+    );
+  }
+
+  // First validate that the Tree is as good as the certification.
+  if (!equal(witness, reconstructed)) {
+    console.error("Witness != Tree passed in ic-certification");
+    return false;
+  }
+
+  // Next, calculate the SHA of the content.
+  const sha = await crypto.subtle.digest("SHA-256", body);
+  let treeSha = lookup_path(["websocket", path], hashTree);
+
+  if (!treeSha) {
+    // Allow fallback to `index.html`.
+    treeSha = lookup_path(["websocket"], hashTree);
+  }
+
+  if (!treeSha) {
+    // The tree returned in the certification header is wrong. Return false.
+    // We don't throw here, just invalidate the request.
+    console.error(
+      `Invalid Tree in the header. Does not contain path ${JSON.stringify(
+        path
+      )}`
+    );
+    return false;
+  }
+
+  return !!treeSha && equal(sha, treeSha);
 }

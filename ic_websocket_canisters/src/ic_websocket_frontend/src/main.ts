@@ -1,4 +1,5 @@
 import IcWebSocket from "./icWebsocket";
+import addNotification from "./utils/addNotification";
 
 const backendCanisterId = process.env.IC_WEBSOCKET_BACKEND_CANISTER_ID || "";
 const gatewayAddress = "ws://127.0.0.1:8080";
@@ -17,6 +18,32 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   </div>
 `
 
-const ws = new IcWebSocket(backendCanisterId, gatewayAddress, url, localTest, persistKey);
+const ws = new IcWebSocket({
+  canisterId: backendCanisterId,
+  gatewayAddress,
+  networkUrl: url,
+  localTest,
+  persistKey,
+});
+
+ws.onopen = () => {
+  console.log("IcWebSocket opened");
+};
+
+ws.onmessage = (event) => {
+  addNotification(event.data);
+
+  ws.send({
+    text: event.data + " -pong",
+  });
+};
+
+ws.onclose = () => {
+  console.log("IcWebSocket closed");
+};
+
+ws.onerror = (event) => {
+  console.log("IcWebSocket error", event);
+};
 
 console.log(ws);
