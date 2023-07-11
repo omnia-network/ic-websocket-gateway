@@ -1,3 +1,4 @@
+use candid::Principal;
 use ed25519_compact::{PublicKey, Signature};
 use ic_cdk::export::candid::CandidType;
 use ic_cdk::print;
@@ -74,7 +75,7 @@ fn ws_register(client_key: PublicKeySlice) {
 struct FirstMessage {
     #[serde(with = "serde_bytes")]
     client_key: PublicKeySlice,
-    canister_id: String,
+    canister_id: Principal,
 }
 
 // Open the websocket connection.

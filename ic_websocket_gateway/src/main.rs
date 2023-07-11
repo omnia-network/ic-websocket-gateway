@@ -44,7 +44,7 @@ struct MessageFromClient {
 struct ClientCanisterId {
     #[serde(with = "serde_bytes")]
     client_key: Vec<u8>,
-    canister_id: String,
+    canister_id: Principal,
 }
 
 #[derive(Debug, Clone)]
@@ -67,9 +67,6 @@ async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Me
         let content = from_slice::<ClientCanisterId>(&m.content).map_err(|_| {
             String::from("content of first message is not of type ClientCanisterId")
         })?;
-        let canister_id = Principal::from_text(&content.canister_id).map_err(|_| {
-            String::from("content of first message does not contain a valid principal in canister_id")
-        })?;
         let sig = Signature::from_slice(&m.sig).map_err(|_| {
             String::from("first message does not contain a valid signature")
         })?;
@@ -79,9 +76,9 @@ async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Me
         public_key.verify(&m.content, &sig).map_err(|_| {
             String::from("client's signature does not verify against public key")
         })?;
-        if canister_methods::ws_open(agent, &canister_id, m.content, m.sig).await {
+        if canister_methods::ws_open(agent, &content.canister_id, m.content, m.sig).await {
             println!("New WebSocket connection: {}", client_addr);
-            Ok((content.client_key, canister_id))
+            Ok((content.client_key, content.canister_id))
         }
         else {
             Err(String::from("canister could not verify client's signature against public key"))
