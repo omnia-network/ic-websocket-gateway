@@ -25,14 +25,14 @@ const FETCH_KEY: bool = true;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
-enum GatewayMessage {
+pub enum GatewayMessage {
     RelayedFromClient(MessageFromClient),
     FromGateway(Vec<u8>, bool)
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
-struct MessageFromClient {
+pub struct MessageFromClient {
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -261,7 +261,7 @@ async fn main() {
 
                             // notify canister that it can now send messages for the client corresponding to client_key
                             let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
-                            canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
+                            canister_methods::ws_message(&*agent, &gateway_session.canister_id, gateway_message).await;
 
                             gateway_server.read().await.connected_canisters.contains_key(&gateway_session.canister_id)
                         };

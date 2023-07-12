@@ -2,10 +2,10 @@ use ic_cdk_macros::*;
 
 use canister::{on_close, on_message, on_open};
 use sock::wipe;
-use sock::{CertMessages, PublicKeySlice};
+use sock::{CertMessages, GatewayMessage, PublicKeySlice};
 
-pub mod canister;
-pub mod sock;
+mod canister;
+mod sock;
 
 #[init]
 fn init() {
@@ -36,7 +36,7 @@ fn ws_close(client_key: Vec<u8>) {
 
 // Gateway calls this method to pass on the message from the client to the canister.
 #[update]
-fn ws_message(msg: Vec<u8>) -> bool {
+fn ws_message(msg: GatewayMessage) -> bool {
     sock::ws_message(msg)
 }
 

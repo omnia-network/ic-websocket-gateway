@@ -32,18 +32,18 @@ struct FirstMessage {
 }
 
 // Encoded message + signature from client.
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-struct ClientMessage {
+pub struct ClientMessage {
     #[serde(with = "serde_bytes")]
-    val: Vec<u8>,
+    content: Vec<u8>,
     #[serde(with = "serde_bytes")]
     sig: Vec<u8>,
 }
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-enum GatewayMessage {
+pub enum GatewayMessage {
     RelayedFromClient(ClientMessage),
     FromGateway(PublicKeySlice, bool),
 }
@@ -352,17 +352,16 @@ pub fn ws_close(client_key: PublicKeySlice) {
     })
 }
 
-pub fn ws_message(msg: Vec<u8>) -> bool {
-    let decoded: GatewayMessage = from_slice(&msg).unwrap();
-    match decoded {
+pub fn ws_message(msg: GatewayMessage) -> bool {
+    match msg {
         GatewayMessage::RelayedFromClient(decoded_msg) => {
-            let content: WebsocketMessage = from_slice(&decoded_msg.val).unwrap();
+            let content: WebsocketMessage = from_slice(&decoded_msg.content).unwrap();
 
             // Verify the signature.
             let sig = Signature::from_slice(&decoded_msg.sig).unwrap();
             let valid = PublicKey::from_slice(&content.client_key)
                 .unwrap()
-                .verify(&decoded_msg.val, &sig);
+                .verify(&decoded_msg.content, &sig);
 
             match valid {
                 Ok(_) => {

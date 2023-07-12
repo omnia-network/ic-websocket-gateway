@@ -136,22 +136,20 @@ export default class IcWebSocket {
 
     // Final signed websocket message
     const message = {
-      val: websocketMessage,
+      content: toSign,
       sig: sig,
     };
 
-    // Send CBOR encoded
-    // TODO: fix the serialization of the message
-    const wsMessage = Cbor.encode({ RelayedFromClient: message });
-    return new Uint8Array(wsMessage);
+    // Send GatewayMessage variant
+    return {
+      RelayedFromClient: message,
+    };
   }
 
   async send(data: any) {
-    console.log("Sending to canister.");
     // we send the message directly to the canister, not to the gateway
     const serialized = await this._makeMessage(data);
-    // TODO: fix the serialization of the message
-    await this.canisterActor.ws_message(serialized);
+    this.canisterActor.ws_message(serialized);
     this.sequenceNum += 1;
   }
 
@@ -175,11 +173,6 @@ export default class IcWebSocket {
       canister_id: this.canisterId,
     });
 
-    console.log("Sending first message", {
-      client_key: publicKey,
-      canister_id: this.canisterId,
-    }, cborContent);
-
     // Sign so that the gateway can verify canister and client ids match
     const toSign = new Uint8Array(cborContent);
     const sig = await ed.signAsync(toSign, this.secretKey);
@@ -193,6 +186,8 @@ export default class IcWebSocket {
     const wsMessage = Cbor.encode(message);
     this.wsInstance.send(wsMessage);
     this.sequenceNum = 0;
+
+    console.log("[open] Sent first message");
 
     // the onopen callback is called when the first confirmation message is received from the canister
     // see _onWsMessage function

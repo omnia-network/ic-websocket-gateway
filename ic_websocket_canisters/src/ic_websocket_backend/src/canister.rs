@@ -27,6 +27,7 @@ pub fn on_message(content: WebsocketMessage) {
 }
 
 fn send_app_message(client_key: PublicKeySlice, msg: AppMessage) {
+    print(format!("Sending message: {:?}", msg));
     ws_send(client_key, msg);
 }
 

@@ -34,9 +34,12 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   addNotification(event.data);
 
-  ws.send({
-    text: event.data + " -pong",
-  });
+  // wait 5 seconds and send a pong (just as an example, the timeout is not part of the protocol)
+  setTimeout(() => {
+    ws.send({
+      text: event.data + "-pong",
+    });
+  }, 5000);
 };
 
 ws.onclose = () => {
@@ -46,5 +49,3 @@ ws.onclose = () => {
 ws.onerror = (event) => {
   console.log("IcWebSocket error", event);
 };
-
-console.log(ws);
