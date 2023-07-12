@@ -7,6 +7,7 @@ export default function addNotification(text: string, heading?: string) {
     time = new Intl.DateTimeFormat("default", {
       hour: "numeric",
       minute: "numeric",
+      second: "numeric",
       hour12: false
     }).format(date);
 
@@ -41,7 +42,6 @@ export default function addNotification(text: string, heading?: string) {
       notification.classList.add("appeared");
       notification.classList.remove("appearing");
 
-      // dzwoneczek w prawo po 4s
       setTimeout(() => {
         notification.classList.remove("appeared");
         notification.classList.add("transitioned");
