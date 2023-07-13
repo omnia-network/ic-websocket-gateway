@@ -1,10 +1,11 @@
 use canister_methods::CertMessages;
-use futures_util::{StreamExt, SinkExt, stream::SplitSink, TryStreamExt};
-use std::{net::SocketAddr, rc::Rc, cell::RefCell};
-use tokio::{net::{TcpListener, TcpStream}, sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}}, select};
+use futures_util::{StreamExt, SinkExt, TryStreamExt};
+use ic_cdk::println;
+use std::net::SocketAddr;
+use tokio::{net::{TcpListener, TcpStream}, sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, select};
 use tokio_tungstenite::{
     accept_async,
-    tungstenite::{Error, Result, Message}, WebSocketStream,
+    tungstenite::{Error, Result, Message},
 };
 use candid::CandidType;
 use ed25519_compact::{Signature, PublicKey};
@@ -50,15 +51,17 @@ struct ClientCanisterId {
 
 #[derive(Debug, Clone)]
 struct GatewaySession {
+    client_id: u64,
     client_key: Vec<u8>,
     canister_id: Principal,
     message_for_client_tx: UnboundedSender<CertMessage>
 }
 
 #[derive(Debug)]
-enum IcWsInitializationError {
-    CustomError(String),    // error due to the client not following the IC WS initialization protocol
+enum IcWsError {
+    InitializationError(String),    // error due to the client not following the IC WS initialization protocol
     WsError(Error),     // WebSocket error
+    WsClose(u64)     // WebSocket closed by client
 }
 
 async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Message) -> Result<(Vec<u8>, Principal), String> {
@@ -94,7 +97,7 @@ async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Me
     }
 }
 
-async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, connection_handler_tx: UnboundedSender<Result<GatewaySession, IcWsInitializationError>>) {
+async fn handle_connection(client_id: u64, agent: &Agent, client_addr: SocketAddr, stream: TcpStream, connection_handler_tx: UnboundedSender<Result<GatewaySession, IcWsError>>) {
     match accept_async(stream).await {
         Ok(ws_stream) => {
             let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -106,8 +109,10 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                         match msg_res {
                             Ok(Some(message)) => {
                                 if message.is_close() {
-                                    // Client has sent a close message, indicating disconnection
-                                    println!("WebSocket stream has been closed by the client");
+                                    println!("WebSocket stream has been closed by the client with id: {}", client_id);
+                                    connection_handler_tx.send(
+                                        Err(IcWsError::WsClose(client_id))
+                                    ).expect("channel should be open");
                                     break;
                                 }
                                 if is_first_message {
@@ -120,6 +125,7 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                                             connection_handler_tx.send(
                                                 Ok(
                                                     GatewaySession {
+                                                        client_id,
                                                         client_key,
                                                         canister_id,
                                                         message_for_client_tx: message_for_client_tx_cl,
@@ -129,7 +135,9 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                                         },
                                         Err(e) => {
                                             ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                                            // Err(IcWsInitializationError::CustomError(e))
+                                            connection_handler_tx.send(
+                                                Err(IcWsError::InitializationError(e))
+                                            ).expect("channel should be open");
                                         }
                                     };
                                     is_first_message = false;
@@ -137,29 +145,41 @@ async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpSt
                                 else {
                                     println!("Client sent message: {:?}", message);
                                 }
-                                // Process the message and send a response if needed
-                                // ...
                             }
                             Ok(None) => {
-                                // ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                                // Err(IcWsInitializationError::CustomError(String::from("client should send first message")));
+                                if is_first_message {
+                                    ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
+                                    connection_handler_tx.send(
+                                        Err(IcWsError::InitializationError(String::from("client should send first message")))
+                                    ).expect("channel should be open");
+                                    is_first_message = false;
+                                }
+                                else {
+                                    connection_handler_tx.send(
+                                        Err(IcWsError::WsError(Error::AlreadyClosed))
+                                    ).expect("channel should be open");
+                                }
                                 break;
                             }
                             Err(err) => {
-                                println!("Error reading from WebSocket stream: {}", err);
-                                // Err(IcWsInitializationError::WsError(err));
+                                connection_handler_tx.send(
+                                    Err(IcWsError::WsError(err))
+                                ).expect("channel should be open");
                                 break;
                             }
                         }
                     }
                     Some(message) = message_for_client_rx.recv() => {
+                        // send message to client
                         ws_write.send(Message::Binary(to_vec(&message).unwrap())).await;
                     }
                 }
             }
         }
         Err(e) => {
-            // Err(IcWsInitializationError::WsError(e));
+            connection_handler_tx.send(
+                Err(IcWsError::WsError(e))
+            ).expect("channel should be open");
         }
     };
 }
@@ -177,7 +197,6 @@ pub struct CertMessage {
 
 struct CanisterPoller {
     canister_id: Principal,
-    canister_client_session_map: HashMap<Vec<u8>, GatewaySession>,
     agent: Arc<Agent>
 }
 
@@ -191,32 +210,33 @@ impl CanisterPoller {
             async move {
                 loop {
                     let msgs = canister_methods::ws_get_messages(&*agent, &canister_id, nonce).await;
-                    for encoded_message in msgs.messages.iter() {
-                        nonce = encoded_message
-                            .key
-                            .split('_')
-                            .last()
-                            .unwrap()
-                            .parse()
-                            .unwrap();
-                        nonce += 1
+
+                    if msgs.messages.len() > 0 {
+                        // increment nonce in order to not request the same messages again
+                        for encoded_message in msgs.messages.iter() {
+                            nonce = encoded_message
+                                .key
+                                .split('_')
+                                .last()
+                                .unwrap()
+                                .parse()
+                                .unwrap();
+                            nonce += 1
+                        }
+                        clients_updates_tx.send(msgs).expect("channel should be open");
                     }
-                    clients_updates_tx.send(msgs);
 
                     tokio::time::sleep(interval).await;
                 }
             }
         });
     }
-
-    fn add_session(&mut self, canister_client_key: Vec<u8>, session: GatewaySession) {
-        self.canister_client_session_map.insert(canister_client_key, session);
-    }
 }
 
 struct GatewayServer {
     connected_canisters: HashMap<Principal, CanisterPoller>,
     client_session_map: HashMap<Vec<u8>, GatewaySession>,
+    client_key_map: HashMap<u64, Vec<u8>>,
 }
 
 #[tokio::main]
@@ -239,20 +259,28 @@ async fn main() {
     let mut gateway_server = GatewayServer {
         connected_canisters: HashMap::default(),
         client_session_map: HashMap::default(),
+        client_key_map: HashMap::default(),
     };
 
     let (connection_handler_tx, mut connection_handler_rx) = mpsc::unbounded_channel();
     let (clients_updates_tx, mut clients_updates_rx): (UnboundedSender<CertMessages>, UnboundedReceiver<CertMessages>) = mpsc::unbounded_channel();
     let agent_cl = Arc::clone(&agent);
+    let client_id = Arc::new(Mutex::new(0));  // needed to know which gateway_session to delete in case of error or WS closed
     // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
         while let Ok((stream, client_addr)) = listener.accept().await {
             let agent_cl = Arc::clone(&agent_cl);
             let connection_handler_tx_cl = connection_handler_tx.clone();
+            let client_id = Arc::clone(&client_id);
             // spawn a connection handler task for each incoming connection 
             tokio::spawn(async move {
-                println!("\nClient address: {}", client_addr);
-                handle_connection(&*agent_cl, client_addr, stream, connection_handler_tx_cl).await
+                let next_client_id = {
+                    let mut next_client_id = client_id.lock().await;
+                    *next_client_id += 1;
+                    *next_client_id
+                };
+                println!("\nNew client id: {}", next_client_id);
+                handle_connection(next_client_id, &*agent_cl, client_addr, stream, connection_handler_tx_cl).await;
             });
         }
     });
@@ -260,7 +288,8 @@ async fn main() {
     loop {
         select! {
             Some(msgs) = clients_updates_rx.recv() => {
-                // println!("Triggered message handler");
+                println!("Triggered message handler");
+                // triggered when fetched a update messages from canister
                 for encoded_message in msgs.messages {
                     let client_key = encoded_message.client_key;
 
@@ -276,43 +305,47 @@ async fn main() {
                         tree: msgs.tree.clone(),
                     };
 
+                    // TODO: check whether channel is still open
                     if let Err(e) = gateway_server.client_session_map.get(&client_key).expect("should have channel with client's thread").message_for_client_tx.send(m) {
                         println!("Error sending canister message to client's thread: {}", e);
                     }
                 }
             }
             Some(connection_result) = connection_handler_rx.recv() => {
-                // println!("Triggered connection handler");
+                println!("Triggered connection handler");
                 match connection_result {
                     Ok(gateway_session) => {
                         // notify canister that it can now send messages for the client corresponding to client_key
                         let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
                         canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
 
+                        gateway_server.client_key_map.insert(gateway_session.client_id.clone(), gateway_session.client_key.clone());
                         gateway_server.client_session_map.insert(gateway_session.client_key.clone(), gateway_session.clone());
-                        match gateway_server.connected_canisters.contains_key(&gateway_session.canister_id) {
-                            false => {
-                                let mut poller = CanisterPoller {
-                                    canister_id: gateway_session.canister_id.clone(),
-                                    canister_client_session_map: HashMap::new(),
-                                    agent: Arc::clone(&agent),
-                                };
-                                poller.add_session(gateway_session.client_key.clone(), gateway_session.clone());
-                                let clients_updates_tx_cl = clients_updates_tx.clone();
-                                poller.run_polling(clients_updates_tx_cl).await;
-                                println!("Created new poller for canister: {}", poller.canister_id);
-                                gateway_server
-                                    .connected_canisters.insert(poller.canister_id, poller);
-                            },
-                            true => {
-                                println!("Added new client session to poller of canister: {}", gateway_session.canister_id);
-                                gateway_server
-                                    .connected_canisters.get_mut(&gateway_session.canister_id)
-                                    .expect("poller should have already been initialized")
-                                    .add_session(gateway_session.client_key.clone(), gateway_session);
-                            }
+                        println!("{} clients registered", gateway_server.client_session_map.len());
+                        if let false = gateway_server.connected_canisters.contains_key(&gateway_session.canister_id) {
+                            let poller = CanisterPoller {
+                                canister_id: gateway_session.canister_id.clone(),
+                                agent: Arc::clone(&agent),
+                            };
+                            let clients_updates_tx_cl = clients_updates_tx.clone();
+                            poller.run_polling(clients_updates_tx_cl).await;
+                            println!("Created new poller for canister: {}", poller.canister_id);
+                            gateway_server
+                                .connected_canisters.insert(poller.canister_id, poller);
                         }
                     },
+                    Err(IcWsError::WsClose(client_id)) => {
+                        match gateway_server.client_key_map.remove(&client_id) {
+                            Some(client_key) => {
+                                let gateway_session = gateway_server.client_session_map.remove(&client_key).expect("gateway session should be registered");
+                                canister_methods::ws_close(&*agent, &gateway_session.canister_id, client_key).await;
+                                println!("{} clients registered", gateway_server.client_session_map.len());
+                            },
+                            None => {
+                                println!("Client closed connection before being registered");
+                            }
+                        }
+                    }
                     Err(e) => {
                         println!("{:?}", e);
                     }

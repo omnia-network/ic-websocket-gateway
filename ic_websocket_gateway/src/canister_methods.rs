@@ -16,7 +16,7 @@ pub struct WebsocketMessage {
     pub message: Vec<u8>,
 }
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct EncodedMessage {
     pub client_key: Vec<u8>,
     pub key: String,
@@ -24,7 +24,7 @@ pub struct EncodedMessage {
     pub val: Vec<u8>,
 }
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CertMessages {
     pub messages: Vec<EncodedMessage>,
     #[serde(with = "serde_bytes")]
