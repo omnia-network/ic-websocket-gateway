@@ -61,7 +61,7 @@ struct GatewaySession {
 enum IcWsError {
     InitializationError(String),    // error due to the client not following the IC WS initialization protocol
     WsError(Error),     // WebSocket error
-    WsClose(u64)     // WebSocket closed by client
+    WsClose(String)     // WebSocket closed by client
 }
 
 async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Message) -> Result<(Vec<u8>, Principal), String> {
@@ -97,7 +97,13 @@ async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Me
     }
 }
 
-async fn handle_connection(client_id: u64, agent: &Agent, client_addr: SocketAddr, stream: TcpStream, connection_handler_tx: UnboundedSender<Result<GatewaySession, IcWsError>>) {
+async fn handle_connection(
+    client_id: u64,
+    agent: &Agent,
+    client_addr: SocketAddr,
+    stream: TcpStream,
+    connection_handler_tx: UnboundedSender<Result<GatewaySession, u64>>
+) -> Result<(), IcWsError> {
     match accept_async(stream).await {
         Ok(ws_stream) => {
             let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -109,17 +115,19 @@ async fn handle_connection(client_id: u64, agent: &Agent, client_addr: SocketAdd
                         match msg_res {
                             Ok(Some(message)) => {
                                 if message.is_close() {
-                                    println!("WebSocket stream has been closed by the client with id: {}", client_id);
                                     connection_handler_tx.send(
-                                        Err(IcWsError::WsClose(client_id))
-                                    ).expect("channel should be open");
-                                    break;
+                                        Err(client_id)
+                                    ).expect("channel should be open on the main thread");
+                                    return Err(IcWsError::WsClose(format!("WebSocket stream has been closed by the client with id: {}", client_id)));
                                 }
                                 if is_first_message {
                                     // check if client correctly registered its public key in the backend canister
                                     match check_canister_init(agent, client_addr, message.clone()).await {
                                         Ok((client_key, canister_id)) => {
-                                            ws_write.send(Message::Text("1".to_string())).await;   // tell the client that the IC WS connection is setup correctly
+                                            // tell the client that the IC WS connection is setup correctly
+                                            ws_write.send(Message::Text("1".to_string())).await.map_err(|e| {
+                                                IcWsError::WsError(e)
+                                            })?;
         
                                             let message_for_client_tx_cl = message_for_client_tx.clone();
                                             connection_handler_tx.send(
@@ -131,57 +139,38 @@ async fn handle_connection(client_id: u64, agent: &Agent, client_addr: SocketAdd
                                                         message_for_client_tx: message_for_client_tx_cl,
                                                     },
                                                 )
-                                            ).expect("channel should be open");
+                                            ).expect("channel should be open on the main thread");
                                         },
                                         Err(e) => {
-                                            ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                                            connection_handler_tx.send(
-                                                Err(IcWsError::InitializationError(e))
-                                            ).expect("channel should be open");
+                                            // tell the client that the setup of the IC WS connection failed
+                                            ws_write.send(Message::Text("0".to_string())).await.map_err(|e| {
+                                                IcWsError::WsError(e)
+                                            })?;
+                                            return Err(IcWsError::InitializationError(e));
                                         }
                                     };
                                     is_first_message = false;
                                 }
                                 else {
-                                    println!("Client sent message: {:?}", message);
+                                    // TODO: handle incoming message from client
+                                    // println!("Client sent message: {:?}", message);
                                 }
                             }
-                            Ok(None) => {
-                                if is_first_message {
-                                    ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                                    connection_handler_tx.send(
-                                        Err(IcWsError::InitializationError(String::from("client should send first message")))
-                                    ).expect("channel should be open");
-                                    is_first_message = false;
-                                }
-                                else {
-                                    connection_handler_tx.send(
-                                        Err(IcWsError::WsError(Error::AlreadyClosed))
-                                    ).expect("channel should be open");
-                                }
-                                break;
-                            }
-                            Err(err) => {
-                                connection_handler_tx.send(
-                                    Err(IcWsError::WsError(err))
-                                ).expect("channel should be open");
-                                break;
-                            }
+                            Ok(None) => return Err(IcWsError::WsError(Error::AlreadyClosed)),
+                            Err(err) => return Err(IcWsError::WsError(err))
                         }
                     }
                     Some(message) = message_for_client_rx.recv() => {
-                        // send message to client
-                        ws_write.send(Message::Binary(to_vec(&message).unwrap())).await;
+                        // send canister message to client
+                        ws_write.send(Message::Binary(to_vec(&message).unwrap())).await.map_err(|e| {
+                            IcWsError::WsError(e)
+                        })?;
                     }
                 }
             }
         }
-        Err(e) => {
-            connection_handler_tx.send(
-                Err(IcWsError::WsError(e))
-            ).expect("channel should be open");
-        }
-    };
+        Err(e) => return Err(IcWsError::WsError(e))
+    }
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
@@ -280,7 +269,8 @@ async fn main() {
                     *next_client_id
                 };
                 println!("\nNew client id: {}", next_client_id);
-                handle_connection(next_client_id, &*agent_cl, client_addr, stream, connection_handler_tx_cl).await;
+                let end_connection_result = handle_connection(next_client_id, &*agent_cl, client_addr, stream, connection_handler_tx_cl).await;
+                println!("Client connection terminated: {:?}", end_connection_result);
             });
         }
     });
@@ -288,7 +278,6 @@ async fn main() {
     loop {
         select! {
             Some(msgs) = clients_updates_rx.recv() => {
-                println!("Triggered message handler");
                 // triggered when fetched a update messages from canister
                 for encoded_message in msgs.messages {
                     let client_key = encoded_message.client_key;
@@ -305,14 +294,17 @@ async fn main() {
                         tree: msgs.tree.clone(),
                     };
 
-                    // TODO: check whether channel is still open
-                    if let Err(e) = gateway_server.client_session_map.get(&client_key).expect("should have channel with client's thread").message_for_client_tx.send(m) {
-                        println!("Error sending canister message to client's thread: {}", e);
+                    match gateway_server.client_session_map.get(&client_key) {
+                        Some(gateway_session) => {
+                            if let Err(e) = gateway_session.message_for_client_tx.send(m) {
+                                println!("Client's thread terminated: {}", e);
+                            }
+                        },
+                        None => println!("Connection with client closed before message could be delivered")
                     }
                 }
             }
             Some(connection_result) = connection_handler_rx.recv() => {
-                println!("Triggered connection handler");
                 match connection_result {
                     Ok(gateway_session) => {
                         // notify canister that it can now send messages for the client corresponding to client_key
@@ -334,7 +326,7 @@ async fn main() {
                                 .connected_canisters.insert(poller.canister_id, poller);
                         }
                     },
-                    Err(IcWsError::WsClose(client_id)) => {
+                    Err(client_id) => {
                         match gateway_server.client_key_map.remove(&client_id) {
                             Some(client_key) => {
                                 let gateway_session = gateway_server.client_session_map.remove(&client_key).expect("gateway session should be registered");
@@ -345,9 +337,6 @@ async fn main() {
                                 println!("Client closed connection before being registered");
                             }
                         }
-                    }
-                    Err(e) => {
-                        println!("{:?}", e);
                     }
                 }
             }
