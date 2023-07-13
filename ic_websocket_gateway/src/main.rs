@@ -1,6 +1,7 @@
-use futures_util::{StreamExt, SinkExt};
+use canister_methods::CertMessages;
+use futures_util::{StreamExt, SinkExt, stream::SplitSink, TryStreamExt};
 use std::{net::SocketAddr, rc::Rc, cell::RefCell};
-use tokio::{net::{TcpListener, TcpStream}, sync::{mpsc::{self, UnboundedSender}}, select};
+use tokio::{net::{TcpListener, TcpStream}, sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}}, select};
 use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Result, Message}, WebSocketStream,
@@ -51,6 +52,7 @@ struct ClientCanisterId {
 struct GatewaySession {
     client_key: Vec<u8>,
     canister_id: Principal,
+    message_for_client_tx: UnboundedSender<CertMessage>
 }
 
 #[derive(Debug)]
@@ -92,41 +94,74 @@ async fn check_canister_init(agent: &Agent, client_addr: SocketAddr, message: Me
     }
 }
 
-async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, session_init_tx: UnboundedSender<Result<(GatewaySession, WebSocketStream<TcpStream>), IcWsInitializationError>>) {
-    let connection_result = match accept_async(stream).await {
-        Ok(mut ws_stream) => {
-            if let Some(first_msg) = ws_stream.next().await {
-                match first_msg {
-                    Ok(msg) => {
-                        // check if client correctly registered its public key in the backend canister
-                        match check_canister_init(agent, client_addr, msg).await {
-                            Ok((client_key, canister_id)) => {
-                                ws_stream.send(Message::Text("1".to_string())).await;   // tell the client that the IC WS connection is setup correctly
-                                Ok((
-                                    GatewaySession {
-                                        client_key,
-                                        canister_id,
-                                    },
-                                    ws_stream
-                                ))
-                            },
-                            Err(e) => {
-                                ws_stream.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                                Err(IcWsInitializationError::CustomError(e))
+async fn handle_connection(agent: &Agent, client_addr: SocketAddr, stream: TcpStream, connection_handler_tx: UnboundedSender<Result<GatewaySession, IcWsInitializationError>>) {
+    match accept_async(stream).await {
+        Ok(ws_stream) => {
+            let (mut ws_write, mut ws_read) = ws_stream.split();
+            let mut is_first_message = true;
+            let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
+            loop {
+                select! {
+                    msg_res = ws_read.try_next() => {
+                        match msg_res {
+                            Ok(Some(message)) => {
+                                if message.is_close() {
+                                    // Client has sent a close message, indicating disconnection
+                                    println!("WebSocket stream has been closed by the client");
+                                    break;
+                                }
+                                if is_first_message {
+                                    // check if client correctly registered its public key in the backend canister
+                                    match check_canister_init(agent, client_addr, message.clone()).await {
+                                        Ok((client_key, canister_id)) => {
+                                            ws_write.send(Message::Text("1".to_string())).await;   // tell the client that the IC WS connection is setup correctly
+        
+                                            let message_for_client_tx_cl = message_for_client_tx.clone();
+                                            connection_handler_tx.send(
+                                                Ok(
+                                                    GatewaySession {
+                                                        client_key,
+                                                        canister_id,
+                                                        message_for_client_tx: message_for_client_tx_cl,
+                                                    },
+                                                )
+                                            ).expect("channel should be open");
+                                        },
+                                        Err(e) => {
+                                            ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
+                                            // Err(IcWsInitializationError::CustomError(e))
+                                        }
+                                    };
+                                    is_first_message = false;
+                                }
+                                else {
+                                    println!("Client sent message: {:?}", message);
+                                }
+                                // Process the message and send a response if needed
+                                // ...
+                            }
+                            Ok(None) => {
+                                // ws_write.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
+                                // Err(IcWsInitializationError::CustomError(String::from("client should send first message")));
+                                break;
+                            }
+                            Err(err) => {
+                                println!("Error reading from WebSocket stream: {}", err);
+                                // Err(IcWsInitializationError::WsError(err));
+                                break;
                             }
                         }
-                    },
-                    Err(e) => Err(IcWsInitializationError::WsError(e)),
+                    }
+                    Some(message) = message_for_client_rx.recv() => {
+                        ws_write.send(Message::Binary(to_vec(&message).unwrap())).await;
+                    }
                 }
             }
-            else {
-                ws_stream.send(Message::Text("0".to_string())).await;   // tell the client that the setup of the IC WS connection failed
-                Err(IcWsInitializationError::CustomError(String::from("client should send first message")))
-            }
-        },
-        Err(e) => Err(IcWsInitializationError::WsError(e))
+        }
+        Err(e) => {
+            // Err(IcWsInitializationError::WsError(e));
+        }
     };
-    session_init_tx.send(connection_result).expect("channel should be open");
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
@@ -147,7 +182,7 @@ struct CanisterPoller {
 }
 
 impl CanisterPoller {
-    async fn run_polling(&self, message_for_client_tx: UnboundedSender<(Vec<u8>, CertMessage)>) {
+    async fn run_polling(&self, clients_updates_tx: UnboundedSender<CertMessages>) {
         let agent = Arc::clone(&self.agent);
         let canister_id = self.canister_id;
         tokio::spawn({
@@ -156,26 +191,7 @@ impl CanisterPoller {
             async move {
                 loop {
                     let msgs = canister_methods::ws_get_messages(&*agent, &canister_id, nonce).await;
-
-                    for encoded_message in msgs.messages {
-                        let client_key = encoded_message.client_key;
-
-                        println!(
-                            "Message to client {:?} with key {}.",
-                            client_key, encoded_message.key
-                        );
-
-                        let m = CertMessage {
-                            key: encoded_message.key.clone(),
-                            val: encoded_message.val,
-                            cert: msgs.cert.clone(),
-                            tree: msgs.tree.clone(),
-                        };
-
-                        if let Err(e) = message_for_client_tx.send((client_key, m)) {
-                            println!("Error sending canister message to main thread: {}", e);
-                        }
-
+                    for encoded_message in msgs.messages.iter() {
                         nonce = encoded_message
                             .key
                             .split('_')
@@ -185,6 +201,7 @@ impl CanisterPoller {
                             .unwrap();
                         nonce += 1
                     }
+                    clients_updates_tx.send(msgs);
 
                     tokio::time::sleep(interval).await;
                 }
@@ -199,7 +216,7 @@ impl CanisterPoller {
 
 struct GatewayServer {
     connected_canisters: HashMap<Principal, CanisterPoller>,
-    session_streamers: HashMap<Vec<u8>, Rc<RefCell<WebSocketStream<TcpStream>>>>,
+    client_session_map: HashMap<Vec<u8>, GatewaySession>,
 }
 
 #[tokio::main]
@@ -221,62 +238,58 @@ async fn main() {
 
     let mut gateway_server = GatewayServer {
         connected_canisters: HashMap::default(),
-        session_streamers: HashMap::default(),
+        client_session_map: HashMap::default(),
     };
 
-    let (session_init_tx, mut session_init_rx) = mpsc::unbounded_channel();
-    let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
+    let (connection_handler_tx, mut connection_handler_rx) = mpsc::unbounded_channel();
+    let (clients_updates_tx, mut clients_updates_rx): (UnboundedSender<CertMessages>, UnboundedReceiver<CertMessages>) = mpsc::unbounded_channel();
     let agent_cl = Arc::clone(&agent);
     // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
         while let Ok((stream, client_addr)) = listener.accept().await {
             let agent_cl = Arc::clone(&agent_cl);
-            let session_init_tx_cl = session_init_tx.clone();
+            let connection_handler_tx_cl = connection_handler_tx.clone();
             // spawn a connection handler task for each incoming connection 
             tokio::spawn(async move {
                 println!("\nClient address: {}", client_addr);
-                handle_connection(&*agent_cl, client_addr, stream, session_init_tx_cl).await
+                handle_connection(&*agent_cl, client_addr, stream, connection_handler_tx_cl).await
             });
         }
     });
 
     loop {
         select! {
-            Some(disconnected_clients) = get_disconnected_client(&gateway_server) => {
-                println!("Triggered disconnection handler");
-                for client_key in disconnected_clients {
-                    gateway_server.session_streamers.remove(&client_key);
-                    println!("\nClient {:?} disconnected", client_key);
-                }
-            }
-            // prioritize relaying updates to already connected clients rather than handling new client connections
-            Some((client_key, message)) = message_for_client_rx.recv() => {
-                println!("Triggered message handler");
-                let ws_stream_opt = {
-                    match gateway_server.session_streamers.get_mut(&client_key) {
-                        Some(ws_stream) => Some(Rc::clone(&ws_stream)),
-                        None => None
-                    }
-                };
-                match ws_stream_opt {
-                    Some(ws_stream) => {
-                        if let Err(e) = (*ws_stream).borrow_mut().send(Message::Binary(to_vec(&message).unwrap())).await {
-                            println!("WebSocket error: {}", e);
-                        }
-                    },
-                    None => println!("No client with id: {:?}", client_key)
-                }
-            }
-            Some(connection_result) = session_init_rx.recv() => {
-                println!("Triggered connection handler");
-                match connection_result {
-                    Ok((gateway_session, ws_stream)) => {
-                        gateway_server.session_streamers.insert(gateway_session.client_key.clone(), Rc::new(RefCell::new(ws_stream)));
+            Some(msgs) = clients_updates_rx.recv() => {
+                // println!("Triggered message handler");
+                for encoded_message in msgs.messages {
+                    let client_key = encoded_message.client_key;
 
+                    println!(
+                        "Message to client {:?} with key {}.",
+                        client_key, encoded_message.key
+                    );
+
+                    let m = CertMessage {
+                        key: encoded_message.key.clone(),
+                        val: encoded_message.val,
+                        cert: msgs.cert.clone(),
+                        tree: msgs.tree.clone(),
+                    };
+
+                    if let Err(e) = gateway_server.client_session_map.get(&client_key).expect("should have channel with client's thread").message_for_client_tx.send(m) {
+                        println!("Error sending canister message to client's thread: {}", e);
+                    }
+                }
+            }
+            Some(connection_result) = connection_handler_rx.recv() => {
+                // println!("Triggered connection handler");
+                match connection_result {
+                    Ok(gateway_session) => {
                         // notify canister that it can now send messages for the client corresponding to client_key
                         let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
                         canister_methods::ws_message(&*agent, &gateway_session.canister_id, to_vec(&gateway_message).unwrap()).await;
 
+                        gateway_server.client_session_map.insert(gateway_session.client_key.clone(), gateway_session.clone());
                         match gateway_server.connected_canisters.contains_key(&gateway_session.canister_id) {
                             false => {
                                 let mut poller = CanisterPoller {
@@ -285,8 +298,8 @@ async fn main() {
                                     agent: Arc::clone(&agent),
                                 };
                                 poller.add_session(gateway_session.client_key.clone(), gateway_session.clone());
-                                let message_for_client_tx_cl = message_for_client_tx.clone();
-                                poller.run_polling(message_for_client_tx_cl).await;
+                                let clients_updates_tx_cl = clients_updates_tx.clone();
+                                poller.run_polling(clients_updates_tx_cl).await;
                                 println!("Created new poller for canister: {}", poller.canister_id);
                                 gateway_server
                                     .connected_canisters.insert(poller.canister_id, poller);
@@ -305,29 +318,6 @@ async fn main() {
                     }
                 }
             }
-            _ = check_starvation() => {
-                println!("Not starving");
-            }
         }
     }
-}
-
-async fn get_disconnected_client(gateway_server: &GatewayServer) -> Option<Vec<Vec<u8>>> {
-    let mut disconnected_clients = Vec::new();
-    for (client_key, ws_stream) in gateway_server.session_streamers.iter() {
-        if let None = (*Rc::clone(ws_stream)).borrow_mut().next().await {
-            disconnected_clients.push(client_key.clone());
-        }
-    }
-    // it's necessary to return an option in order to not starve the other branches in select!
-    // by always executing the branch for client disconnection (as it is first)
-    if disconnected_clients.len() > 0 {
-        return Some(disconnected_clients);
-    }
-    None
-
-}
-
-async fn check_starvation() {
-    tokio::time::sleep(Duration::from_millis(1000)).await;
 }
