@@ -1,17 +1,17 @@
 {
-  "name": "ic_websocket_frontend",
+  "name": "ic_websocket",
   "version": "0.1.0",
-  "description": "Internet Computer starter application",
+  "description": "IC WebSocket on the IC",
   "keywords": [
     "Internet Computer",
-    "Motoko",
+    "Rust",
     "JavaScript",
     "Canister"
   ],
   "scripts": {
-    "build": "webpack",
+    "build": "cd src/ic_websocket_frontend && npm run build",
     "prebuild": "npm run generate",
-    "start": "webpack serve --mode development --env development",
+    "start": "cd src/ic_websocket_frontend && npm run dev",
     "prestart": "npm run generate",
     "generate": "dfx generate ic_websocket_backend"
   },
@@ -21,16 +21,10 @@
     "@dfinity/principal": "0.15.1",
     "assert": "2.0.0",
     "buffer": "6.0.3",
-    "copy-webpack-plugin": "^11.0.0",
     "events": "3.3.0",
-    "html-webpack-plugin": "5.5.0",
     "process": "0.11.10",
     "stream-browserify": "3.0.0",
-    "terser-webpack-plugin": "^5.3.3",
-    "util": "0.12.4",
-    "webpack": "^5.73.0",
-    "webpack-cli": "^4.10.0",
-    "webpack-dev-server": "^4.8.1"
+    "util": "0.12.4"
   },
   "engines": {
     "node": "^12 || ^14 || ^16 || ^18"
@@ -40,8 +34,5 @@
     "last 2 firefox version",
     "last 2 safari version",
     "last 2 edge version"
-  ],
-  "dependencies": {
-    "@noble/ed25519": "^1.7.1"
-  }
+  ]
 }
