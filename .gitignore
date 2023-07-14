@@ -1,3 +1,6 @@
+.vscode/*
+!.vscode/extensions.json
+
 .DS_Store
 
 ic_websocket_gateway/target

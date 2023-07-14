@@ -1,21 +1,31 @@
 type Message = record {
-  client_id: nat64;
-  key: text;
-  val: blob;
+  client_id : nat64;
+  key : text;
+  val : blob;
 };
 
 type CertMessages = record {
-  messages: vec Message;
-  cert: blob;
-  tree: blob;
+  messages : vec Message;
+  cert : blob;
+  tree : blob;
+};
+
+type ClientMessage = record {
+  content : blob;
+  sig : blob;
+};
+
+type GatewayMessage = variant {
+  FromGateway : record { blob; bool };
+  RelayedFromClient : ClientMessage;
 };
 
 service : {
-  "ws_register": (blob) -> ();
-  "ws_open": (blob, blob) -> (bool);
-  "ws_close": (nat64) -> ();
-  "ws_message": (blob) -> (bool);
-  "ws_get_messages": (nat64) -> (CertMessages) query;
+  "ws_register" : (blob) -> ();
+  "ws_open" : (blob, blob) -> (bool);
+  "ws_close" : (nat64) -> ();
+  "ws_message" : (GatewayMessage) -> (bool);
+  "ws_get_messages" : (nat64) -> (CertMessages) query;
 
-  "ws_wipe": () -> ();
-}
+  "ws_wipe" : () -> ();
+};

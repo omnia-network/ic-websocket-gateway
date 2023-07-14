@@ -1,35 +1,36 @@
-use ic_cdk::export::candid::CandidType;
+use ic_cdk::{export::candid::CandidType, print};
 use serde::{Deserialize, Serialize};
-use serde_cbor::{from_slice, Serializer};
+use serde_cbor::from_slice;
 
-use crate::{sock::send_message_from_canister, WebsocketMessage, PublicKeySlice};
+use crate::sock::{ws_send, PublicKeySlice, WebsocketMessage};
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct AppMessage {
     pub text: String,
 }
 
-pub fn ws_on_open(client_key: PublicKeySlice) {
+pub fn on_open(client_key: PublicKeySlice) {
     let msg = AppMessage {
         text: String::from("ping"),
     };
-    ws_send_app_message(client_key, msg);
+    send_app_message(client_key, msg);
 }
 
-pub fn ws_on_message(content: WebsocketMessage) {
+pub fn on_message(content: WebsocketMessage) {
     let app_msg: AppMessage = from_slice(&content.message).unwrap();
     let new_msg = AppMessage {
-        text: app_msg.text + " ping",
+        text: app_msg.clone().text + " ping",
     };
-    ws_send_app_message(content.client_key, new_msg)
+    print(format!("Received message: {:?}", app_msg));
+    send_app_message(content.client_key, new_msg)
 }
 
-pub fn ws_send_app_message(client_key: PublicKeySlice, msg: AppMessage) {
-    let mut msg_cbor = vec![];
-    let mut serializer = Serializer::new(&mut msg_cbor);
-    serializer.self_describe().unwrap();
-    msg.serialize(&mut serializer).unwrap();
+fn send_app_message(client_key: PublicKeySlice, msg: AppMessage) {
+    print(format!("Sending message: {:?}", msg));
+    ws_send(client_key, msg);
+}
 
-    send_message_from_canister(client_key, msg_cbor);
+pub fn on_close(client_key: PublicKeySlice) {
+    print(format!("Client {:?} disconnected", client_key));
 }

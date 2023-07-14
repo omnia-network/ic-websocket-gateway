@@ -10,11 +10,10 @@
         "ic_websocket_backend"
       ],
       "frontend": {
-        "entrypoint": "src/ic_websocket_frontend/src/index.html"
+        "entrypoint": "src/ic_websocket_frontend/dist/index.html"
       },
       "source": [
-        "src/ic_websocket_frontend/assets",
-        "dist/ic_websocket_frontend/"
+        "src/ic_websocket_frontend/dist"
       ],
       "type": "assets"
     }
@@ -26,5 +25,6 @@
     }
   },
   "output_env_file": ".env",
-  "version": 1
+  "version": 1,
+  "dfx": "0.14.1"
 }
