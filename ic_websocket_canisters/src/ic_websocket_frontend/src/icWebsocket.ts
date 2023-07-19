@@ -153,6 +153,10 @@ export default class IcWebSocket {
     this.sequenceNum += 1;
   }
 
+  close() {
+    this.wsInstance.close();
+  }
+
   private _bindWsEvents() {
     this.wsInstance.onopen = this._onWsOpen.bind(this);
     this.wsInstance.onmessage = this._onWsMessage.bind(this);
