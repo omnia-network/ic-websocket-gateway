@@ -87,14 +87,6 @@ export default class IcWebSocket {
       throw new Error("Canister actor does not implement the ws_message method");
     }
 
-    this.canisterActor = config.canisterActor;
-
-    this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
-    // TODO: IcWebSocket should accept parameters in the config object.
-    this.wsInstance = new WebSocket(url, protocols); // Gateway address. Here localhost to reproduce the demo.
-    this.wsInstance.binaryType = "arraybuffer";
-    this._bindWsEvents();
-
     if (config.persistKey) {
       // attempt to load the secret key from local storage (stored in hex format)
       const storedKey = localStorage.getItem(CLIENT_SECRET_KEY_STORAGE_KEY);
@@ -103,7 +95,7 @@ export default class IcWebSocket {
         console.log("Using stored key");
         this.secretKey = storedKey;
       } else {
-        console.log("Generating new key");
+        console.log("Generating and storing new key");
         this.secretKey = ed.utils.randomPrivateKey(); // Generate new key for this websocket connection.
         localStorage.setItem(CLIENT_SECRET_KEY_STORAGE_KEY, ed.etc.bytesToHex(this.secretKey));
       }
@@ -111,6 +103,14 @@ export default class IcWebSocket {
       console.log("Generating new key");
       this.secretKey = ed.utils.randomPrivateKey(); // Generate new key for this websocket connection.
     }
+
+    this.canisterActor = config.canisterActor;
+
+    this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
+    // TODO: IcWebSocket should accept parameters in the config object.
+    this.wsInstance = new WebSocket(url, protocols); // Gateway address. Here localhost to reproduce the demo.
+    this.wsInstance.binaryType = "arraybuffer";
+    this._bindWsEvents();
 
     this.agent = new HttpAgent({ host: config.networkUrl });
     if (config.localTest) {
