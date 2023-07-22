@@ -150,13 +150,18 @@ pub fn get_client_gateway(client_key: &PublicKeySlice) -> Option<Principal> {
 fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String> {
     match CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key)) {
         true => Ok(()),
-        false => Err(String::from("client's public key has not been previously registered by client"))
+        false => Err(String::from(
+            "client's public key has not been previously registered by client",
+        )),
     }
 }
 
 pub fn next_client_message_num(client_key: &PublicKeySlice) -> u64 {
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().get_mut(client_key).expect("message number for client key should be initialized").add(1)
+        map.borrow_mut()
+            .get_mut(client_key)
+            .expect("message number for client key should be initialized")
+            .add(1)
     })
 }
 
@@ -165,11 +170,11 @@ fn get_client_incoming_num(client_key: &PublicKeySlice) -> u64 {
 }
 
 fn increase_expected_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
-        match map.borrow_mut().get_mut(client_key) {
-            Some(num) => Ok(num.add(1)),
-            None => Err(String::from("next client sequence number not correctly initialized")),
-        }
+    CLIENT_INCOMING_NUM_MAP.with(|map| match map.borrow_mut().get_mut(client_key) {
+        Some(num) => Ok(num.add(1)),
+        None => Err(String::from(
+            "next client sequence number not correctly initialized",
+        )),
     })
 }
 
@@ -208,7 +213,7 @@ fn get_cert_messages(nonce: u64) -> CertMessages {
             None => {
                 s.insert(gateway.clone(), VecDeque::new());
                 s.get_mut(&gateway).unwrap()
-            }
+            },
             Some(map) => map,
         };
 
@@ -334,7 +339,10 @@ pub fn ws_register(client_key: PublicKeySlice) {
 
 pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> WsOpenResult {
     // check if the message relayed by the WS Gateway is of type FirstMessage
-    let FirstMessage { client_key, canister_id } = from_slice(&msg).map_err(|e| e.to_string())?;
+    let FirstMessage {
+        client_key,
+        canister_id,
+    } = from_slice(&msg).map_err(|e| e.to_string())?;
     // check if client_key is a Ed25519 public key
     let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
     // check if the signature realyed by the WS Gateway is a Ed25519 signature
@@ -370,7 +378,7 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
                 client_key,
                 sequence_num,
                 timestamp: _timestamp,
-                message
+                message,
             } = from_slice(&client_msg.content).map_err(|e| e.to_string())?;
 
             // check if the signature is a Ed25519 signature
@@ -382,8 +390,10 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
             check_registered_client_key(&client_key)?;
             // check if the signature on the content of ClientMessage verifies against the public key of the registered client
             // if so, the message came from the same client that registered its public key using ws_register
-            public_key.verify(&client_msg.content, &sig).map_err(|e| e.to_string())?;
-            
+            public_key
+                .verify(&client_msg.content, &sig)
+                .map_err(|e| e.to_string())?;
+
             // check if the incoming message has the expected sequence number
             if sequence_num == get_client_incoming_num(&client_key) {
                 // increse the expected sequence number by 1
@@ -404,7 +414,9 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
                 });
                 return handler_result;
             }
-            Err(String::from("incoming client's message relayed from WS Gateway does not have the expected sequence number"))
+            Err(String::from(
+                "incoming client's message relayed from WS Gateway does not have the expected sequence number",
+            ))
         },
         // WS Gateway notifies the canister of the established IC WebSocket connection
         GatewayMessage::IcWebSocketEstablished(client_key) => {
@@ -421,8 +433,7 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
                 Ok(())
             });
             handler_result
-        }
-        // TODO: remove registered client when connection is closed
+        }, // TODO: remove registered client when connection is closed
     }
 }
 
@@ -440,7 +451,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, m
     let gateway = match get_client_gateway(&client_key) {
         None => {
             return;
-        }
+        },
         Some(gateway) => gateway,
     };
 
@@ -488,7 +499,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, m
             None => {
                 s.insert(gateway.clone(), VecDeque::new());
                 s.get_mut(&gateway).unwrap()
-            }
+            },
             Some(map) => map,
         };
         gw_map.push_back(EncodedMessage {

@@ -2,7 +2,7 @@ use ic_cdk::{export::candid::CandidType, print};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 
-use crate::sock::{ws_send, PublicKeySlice, CanisterMessage};
+use crate::sock::{ws_send, CanisterMessage, PublicKeySlice};
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
