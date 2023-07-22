@@ -53,7 +53,7 @@ pub async fn ws_open(
     canister_id: &Principal,
     content: Vec<u8>,
     sig: Vec<u8>,
-) -> bool {
+) -> Result<(Vec<u8>, Principal), String> {
     let args = candid::encode_args((content, sig)).unwrap();
 
     let res = agent
@@ -63,7 +63,7 @@ pub async fn ws_open(
         .await
         .unwrap();
 
-    Decode!(&res, bool).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, Result<(Vec<u8>, Principal), String>).map_err(|e| e.to_string()).unwrap()
 }
 
 pub async fn ws_close(agent: &Agent, canister_id: &Principal, can_client_key: Vec<u8>) {

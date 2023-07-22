@@ -6,7 +6,6 @@ use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use ic_cdk::println;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
-use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -69,7 +68,6 @@ enum IcWsError {
 
 async fn check_canister_init(
     agent: &Agent,
-    client_addr: SocketAddr,
     message: Message,
 ) -> Result<(Vec<u8>, Principal), String> {
     if let Message::Binary(bytes) = message {
@@ -85,14 +83,7 @@ async fn check_canister_init(
         public_key
             .verify(&m.content, &sig)
             .map_err(|_| String::from("client's signature does not verify against public key"))?;
-        if canister_methods::ws_open(agent, &content.canister_id, m.content, m.sig).await {
-            println!("New WebSocket connection: {}", client_addr);
-            Ok((content.client_key, content.canister_id))
-        } else {
-            Err(String::from(
-                "canister could not verify client's signature against public key",
-            ))
-        }
+        canister_methods::ws_open(agent, &content.canister_id, m.content, m.sig).await
     } else {
         Err(String::from(
             "first message from client should be binary encoded",
@@ -103,7 +94,6 @@ async fn check_canister_init(
 async fn handle_connection(
     client_id: u64,
     agent: &Agent,
-    client_addr: SocketAddr,
     stream: TcpStream,
     connection_handler_tx: UnboundedSender<Result<GatewaySession, u64>>,
 ) -> Result<(), IcWsError> {
@@ -125,7 +115,7 @@ async fn handle_connection(
                                 }
                                 if is_first_message {
                                     // check if client correctly registered its public key in the backend canister
-                                    match check_canister_init(agent, client_addr, message.clone()).await {
+                                    match check_canister_init(agent, message.clone()).await {
                                         Ok((client_key, canister_id)) => {
                                             // tell the client that the IC WS connection is setup correctly
                                             ws_write.send(Message::Text("1".to_string())).await.map_err(|e| {
@@ -291,7 +281,7 @@ async fn main() {
     let client_id = Arc::new(Mutex::new(0)); // needed to know which gateway_session to delete in case of error or WS closed
                                              // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
-        while let Ok((stream, client_addr)) = listener.accept().await {
+        while let Ok((stream, _client_addr)) = listener.accept().await {
             let agent_cl = Arc::clone(&agent_cl);
             let connection_handler_tx_cl = connection_handler_tx.clone();
             let client_id = Arc::clone(&client_id);
@@ -306,7 +296,6 @@ async fn main() {
                 let end_connection_result = handle_connection(
                     next_client_id,
                     &*agent_cl,
-                    client_addr,
                     stream,
                     connection_handler_tx_cl,
                 )

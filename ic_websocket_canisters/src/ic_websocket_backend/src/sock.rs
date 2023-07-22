@@ -138,8 +138,11 @@ pub fn get_client_gateway(client_key: &PublicKeySlice) -> Option<Principal> {
     CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(client_key).cloned())
 }
 
-fn check_registered_client_key(client_key: &PublicKeySlice) -> bool {
-    CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key))
+fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String> {
+    match CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key)) {
+        true => Ok(()),
+        false => Err(String::from("client's public key has not been previously registered by client"))
+    }
 }
 
 pub fn next_client_message_num(client_key: PublicKeySlice) -> u64 {
@@ -311,35 +314,29 @@ pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: On
     });
 }
 
-// Client submits its public key and gets a new client_key back.
 pub fn ws_register(client_key: PublicKeySlice) {
-    // The identity (caller) used in this update call will be associated with this client_key. Remember this identity.
+    // associate the identity of the client to its public key received as input
     put_client_caller(client_key)
 }
 
-pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> bool {
-    let decoded: FirstMessage = from_slice(&msg).unwrap();
+pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> Result<(Vec<u8>, Principal), String> {
+    // check if the message relayed by the WS Gateway is of type FirstMessage
+    let FirstMessage { client_key, canister_id } = from_slice(&msg).map_err(|e| e.to_string())?;
+    // check if client_key is a Ed25519 public key
+    let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
+    // check if the signature realyed by the WS Gateway is a Ed25519 signature
+    let sig = Signature::from_slice(&sig).map_err(|e| e.to_string())?;
 
-    let client_key = decoded.client_key;
+    // check if client registered its public key by calling ws_register
+    check_registered_client_key(&client_key)?;
+    // check if the signature on FirstMessage verifies against the public key of the registered client
+    // if so, the first message came from the same client that registered its public key using ws_register
+    public_key.verify(&msg, &sig).map_err(|e| e.to_string())?;
 
-    if check_registered_client_key(&client_key) {
-        let sig = Signature::from_slice(&sig).unwrap();
+    // associate the identity of the WS Gateway to the public key of the client
+    put_client_gateway(client_key.clone());
 
-        return {
-            match PublicKey::from_slice(&client_key)
-                .unwrap()
-                .verify(&msg, &sig)
-            {
-                Ok(_) => {
-                    // Remember this gateway will get the messages for this client_key.
-                    put_client_gateway(client_key.clone());
-                    true
-                }
-                Err(_) => false,
-            }
-        };
-    }
-    false
+    Ok((client_key, canister_id))
 }
 
 pub fn ws_close(client_key: PublicKeySlice) {

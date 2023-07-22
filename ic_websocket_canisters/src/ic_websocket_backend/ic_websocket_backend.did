@@ -20,9 +20,14 @@ type GatewayMessage = variant {
   RelayedFromClient : ClientMessage;
 };
 
+type WsOpenResult = variant {
+  Ok : record { vec nat64; principal };
+  Err : text;
+}
+
 service : {
   "ws_register" : (blob) -> ();
-  "ws_open" : (blob, blob) -> (bool);
+  "ws_open" : (blob, blob) -> (WsOpenResult);
   "ws_close" : (nat64) -> ();
   "ws_message" : (GatewayMessage) -> (bool);
   "ws_get_messages" : (nat64) -> (CertMessages) query;

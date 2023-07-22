@@ -1,3 +1,4 @@
+use candid::Principal;
 use ic_cdk_macros::*;
 
 use canister::{on_close, on_message, on_open};
@@ -17,14 +18,19 @@ fn post_upgrade() {
     sock::init(on_open, on_message, on_close)
 }
 
+// method called by the client SDK when instantiating a new IcWebSocket
+// client submits its newly generated public key
 #[update]
 fn ws_register(client_key: PublicKeySlice) {
     sock::ws_register(client_key);
 }
 
-// Open the websocket connection.
+// method called by the WS Gateway after receiving FirstMessage from the client
+// WS Gateway relays FirstMessage sent by the client together with its signature
+// to prove that FirstMessage is actually coming from the same client that registered its public key
+// beforehand by calling ws_register()
 #[update]
-fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> bool {
+fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> Result<(Vec<u8>, Principal), String> {
     sock::ws_open(msg, sig)
 }
 
