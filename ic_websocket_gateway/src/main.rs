@@ -27,11 +27,20 @@ mod canister_methods;
 const URL: &str = "http://127.0.0.1:4943";
 const FETCH_KEY: bool = true;
 
+pub type PublicKeySlice = Vec<u8>;
+
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
 pub enum GatewayMessage {
+    DirectlyFromClient(CanisterMessage),
     RelayedFromClient(MessageFromClient),
     IcWebSocketEstablished(Vec<u8>),
+}
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterMessage {
+    pub message: Vec<u8>,
+    pub client_key: PublicKeySlice,
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]

@@ -10,12 +10,18 @@ type CertMessages = record {
   tree : blob;
 };
 
+type CanisterMessage = record {
+  client_key : blob;
+  message : blob;
+};
+
 type ClientMessage = record {
   content : blob;
   sig : blob;
 };
 
 type GatewayMessage = variant {
+  DirectlyFromClient : CanisterMessage;
   IcWebSocketEstablished : blob;
   RelayedFromClient : ClientMessage;
 };

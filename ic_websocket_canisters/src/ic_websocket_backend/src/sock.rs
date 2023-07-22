@@ -48,10 +48,12 @@ pub struct ClientMessage {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub enum GatewayMessage {
+    DirectlyFromClient(CanisterMessage),
     RelayedFromClient(ClientMessage),
     IcWebSocketEstablished(PublicKeySlice),
 }
 
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterMessage {
     pub message: Vec<u8>,
     pub client_key: PublicKeySlice,
@@ -135,6 +137,10 @@ fn put_client_caller(client_key: PublicKeySlice) {
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().insert(client_key, caller());
     })
+}
+
+fn get_client_caller(client_key: &PublicKeySlice) -> Option<Principal> {
+    CLIENT_CALLER_MAP.with(|map| Some(map.borrow().get(client_key)?.to_owned()))
 }
 
 fn put_client_gateway(client_key: PublicKeySlice) {
@@ -386,6 +392,28 @@ pub fn ws_close(client_key: PublicKeySlice) -> WsCloseResult {
 
 pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
     match msg {
+        // message sent directly from client
+        GatewayMessage::DirectlyFromClient(canister_message) => {
+            // check if the identity of the caller corresponds to the one registered for the given public key
+            if caller()
+                != get_client_caller(&canister_message.client_key).ok_or(String::from(
+                    "client was was not authenticated with II when it registered its public key",
+                ))?
+            {
+                return Err(String::from(
+                    "caller is not the same as the one which registered the public key",
+                ));
+            }
+            // call the on_message handler initialized in init()
+            let handler_result = HANDLERS.with(|h| {
+                // check if on_message method has been initialized during init()
+                let on_message_handler = h.borrow().on_message.to_owned()?;
+                // trigger the on_message handler initialized by canister
+                on_message_handler(canister_message);
+                Ok(())
+            });
+            return handler_result;
+        },
         // WS Gateway relays a message from the client
         GatewayMessage::RelayedFromClient(client_msg) => {
             let WebsocketMessage {
