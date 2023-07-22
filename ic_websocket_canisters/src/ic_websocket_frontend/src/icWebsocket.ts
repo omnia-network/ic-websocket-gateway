@@ -106,7 +106,7 @@ export default class IcWebSocket {
 
     this.canisterActor = config.canisterActor;
 
-    this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
+    this.nextReceivedNum = 0; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
     // TODO: IcWebSocket should accept parameters in the config object.
     this.wsInstance = new WebSocket(url, protocols); // Gateway address. Here localhost to reproduce the demo.
     this.wsInstance.binaryType = "arraybuffer";
@@ -198,7 +198,7 @@ export default class IcWebSocket {
   }
 
   private async _onWsMessage(event: MessageEvent<ArrayBuffer>) {
-    if (this.nextReceivedNum == -1) {
+    if (this.nextReceivedNum == 0) {
       // first received message
       console.log('[message]: first message', event.data);
       this.nextReceivedNum += 1;

@@ -31,7 +31,7 @@ const FETCH_KEY: bool = true;
 #[candid_path("ic_cdk::export::candid")]
 pub enum GatewayMessage {
     RelayedFromClient(MessageFromClient),
-    FromGateway(Vec<u8>, bool),
+    IcWebSocketEstablished(Vec<u8>),
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
@@ -341,14 +341,18 @@ async fn main() {
                         gateway_server.connected_canisters.get_mut(&gateway_session.canister_id.clone()).expect("poller channel should have been created").send((gateway_session.client_key.clone(), gateway_session.message_for_client_tx)).unwrap();
 
                         // notify canister that it can now send messages for the client corresponding to client_key
-                        let gateway_message = GatewayMessage::FromGateway(gateway_session.client_key.clone(), true);
-                        canister_methods::ws_message(&*agent, &gateway_session.canister_id, gateway_message).await;
+                        let gateway_message = GatewayMessage::IcWebSocketEstablished(gateway_session.client_key.clone());
+                        if let Err(e) = canister_methods::ws_message(&*agent, &gateway_session.canister_id, gateway_message).await {
+                            println!("Calling ws_message on canister failed: {}", e);
+                        }
                     },
                     Err(client_id) => {
                         match gateway_server.client_key_map.remove(&client_id) {
                             Some(client_key) => {
                                 let gateway_session = gateway_server.client_session_map.remove(&client_key).expect("gateway session should be registered");
-                                canister_methods::ws_close(&*agent, &gateway_session.canister_id, client_key).await;
+                                if let Err(e) = canister_methods::ws_close(&*agent, &gateway_session.canister_id, client_key).await {
+                                    println!("Calling ws_close on canister failed: {}", e);
+                                }
                                 println!("{} clients registered", gateway_server.client_session_map.len());
                             },
                             None => {

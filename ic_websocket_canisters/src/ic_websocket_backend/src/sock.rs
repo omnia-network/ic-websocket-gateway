@@ -6,6 +6,7 @@ use ic_certified_map::{labeled, labeled_hash, AsHashTree, Hash as ICHash, RbTree
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, Serializer};
 use sha2::{Digest, Sha256};
+use std::ops::Add;
 use std::{
     cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef, time::Duration,
 };
@@ -15,6 +16,9 @@ const MSG_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 50;
 
 pub type PublicKeySlice = Vec<u8>;
+pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
+pub type WsMessageResult = Result<(), String>;
+pub type WsCloseResult = Result<(), String>;
 
 pub struct KeyGatewayTime {
     key: String,
@@ -45,7 +49,12 @@ pub struct ClientMessage {
 #[candid_path("ic_cdk::export::candid")]
 pub enum GatewayMessage {
     RelayedFromClient(ClientMessage),
-    FromGateway(PublicKeySlice, bool),
+    IcWebSocketEstablished(PublicKeySlice),
+}
+
+pub struct CanisterMessage {
+    pub message: Vec<u8>,
+    pub client_key: PublicKeySlice,
 }
 
 // Messages have the following required fields (both ways).
@@ -145,33 +154,37 @@ fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String
     }
 }
 
-pub fn next_client_message_num(client_key: PublicKeySlice) -> u64 {
+pub fn next_client_message_num(client_key: &PublicKeySlice) -> u64 {
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        let mut map = map.borrow_mut();
-        match map.get(&client_key).cloned() {
-            None => {
-                map.insert(client_key, 0);
-                0
-            }
-            Some(num) => {
-                map.insert(client_key, num + 1);
-                num + 1
-            }
+        map.borrow_mut().get_mut(client_key).expect("message number for client key should be initialized").add(1)
+    })
+}
+
+fn get_client_incoming_num(client_key: &PublicKeySlice) -> u64 {
+    CLIENT_INCOMING_NUM_MAP.with(|map| *map.borrow().get(client_key).unwrap_or(&0))
+}
+
+fn increase_expected_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
+    CLIENT_INCOMING_NUM_MAP.with(|map| {
+        match map.borrow_mut().get_mut(client_key) {
+            Some(num) => Ok(num.add(1)),
+            None => Err(String::from("next client sequence number not correctly initialized")),
         }
     })
 }
 
-fn get_client_incoming_num(client_key: PublicKeySlice) -> u64 {
-    CLIENT_INCOMING_NUM_MAP.with(|map| *map.borrow().get(&client_key).unwrap_or(&0))
+fn add_client(client_key: PublicKeySlice) {
+    // associate the identity of the WS Gateway to the public key of the client
+    put_client_gateway(client_key.clone());
+    // initialize incoming client's message sequence number to 0
+    get_client_incoming_num(&client_key);
+    // initialize outgoing message sequence number to 0
+    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+        map.borrow_mut().insert(client_key, 0);
+    });
 }
 
-fn put_client_incoming_num(client_key: PublicKeySlice, num: u64) {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
-        map.borrow_mut().insert(client_key, num);
-    })
-}
-
-fn delete_client(client_key: PublicKeySlice) {
+fn remove_client(client_key: PublicKeySlice) {
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
@@ -288,29 +301,29 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
 // type ApplicationMessage<T: Deserialize + Serialize> = T;
 
 type OnOpenCallback = fn(PublicKeySlice);
-type OnMessageCallback = fn(WebsocketMessage);
+type OnMessageCallback = fn(CanisterMessage);
 type OnCloseCallback = fn(PublicKeySlice);
 
 struct Handlers {
-    on_open: Option<OnOpenCallback>,
-    on_message: Option<OnMessageCallback>,
-    on_close: Option<OnCloseCallback>,
+    on_open: Result<OnOpenCallback, String>,
+    on_message: Result<OnMessageCallback, String>,
+    on_close: Result<OnCloseCallback, String>,
 }
 
 thread_local! {
     /* flexible */ static HANDLERS: RefCell<Handlers> = RefCell::new(Handlers {
-        on_open: None,
-        on_message: None,
-        on_close: None,
+        on_open: Err(String::from("on_open handler not initialized")),
+        on_message: Err(String::from("on_message handler not initialized")),
+        on_close: Err(String::from("on_close handler not initialized")),
     });
 }
 
 pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: OnCloseCallback) {
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
-        h.on_open = Some(on_open);
-        h.on_message = Some(on_message);
-        h.on_close = Some(on_close);
+        h.on_open = Ok(on_open);
+        h.on_message = Ok(on_message);
+        h.on_close = Ok(on_close);
     });
 }
 
@@ -319,7 +332,7 @@ pub fn ws_register(client_key: PublicKeySlice) {
     put_client_caller(client_key)
 }
 
-pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> Result<(Vec<u8>, Principal), String> {
+pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> WsOpenResult {
     // check if the message relayed by the WS Gateway is of type FirstMessage
     let FirstMessage { client_key, canister_id } = from_slice(&msg).map_err(|e| e.to_string())?;
     // check if client_key is a Ed25519 public key
@@ -333,70 +346,83 @@ pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> Result<(Vec<u8>, Principal), Strin
     // if so, the first message came from the same client that registered its public key using ws_register
     public_key.verify(&msg, &sig).map_err(|e| e.to_string())?;
 
-    // associate the identity of the WS Gateway to the public key of the client
-    put_client_gateway(client_key.clone());
+    // initialize client maps
+    add_client(client_key.clone());
 
     Ok((client_key, canister_id))
 }
 
-pub fn ws_close(client_key: PublicKeySlice) {
-    delete_client(client_key.clone());
+pub fn ws_close(client_key: PublicKeySlice) -> WsCloseResult {
+    remove_client(client_key.clone());
 
     HANDLERS.with(|h| {
-        if let Some(on_close) = h.borrow().on_close {
-            on_close(client_key);
-        }
+        let on_close_handler = h.borrow().on_close.to_owned()?;
+        on_close_handler(client_key);
+        Ok(())
     })
 }
 
-pub fn ws_message(msg: GatewayMessage) -> bool {
+pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
     match msg {
-        GatewayMessage::RelayedFromClient(decoded_msg) => {
-            let content: WebsocketMessage = from_slice(&decoded_msg.content).unwrap();
+        // WS Gateway relays a message from the client
+        GatewayMessage::RelayedFromClient(client_msg) => {
+            let WebsocketMessage {
+                client_key,
+                sequence_num,
+                timestamp: _timestamp,
+                message
+            } = from_slice(&client_msg.content).map_err(|e| e.to_string())?;
 
-            // Verify the signature.
-            let sig = Signature::from_slice(&decoded_msg.sig).unwrap();
-            let valid = PublicKey::from_slice(&content.client_key)
-                .unwrap()
-                .verify(&decoded_msg.content, &sig);
+            // check if the signature is a Ed25519 signature
+            let sig = Signature::from_slice(&client_msg.sig).map_err(|e| e.to_string())?;
+            // check if client_key is a Ed25519 public key
+            let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
 
-            match valid {
-                Ok(_) => {
-                    // Verify the message sequence number.
-                    if content.sequence_num == get_client_incoming_num(content.client_key.clone()) {
-                        put_client_incoming_num(
-                            content.client_key.clone(),
-                            content.sequence_num + 1,
-                        );
-                        HANDLERS.with(|h| {
-                            if let Some(on_message) = h.borrow().on_message {
-                                on_message(content);
-                            }
-                        });
-                        true
-                    } else {
-                        false
-                    }
-                }
-                Err(_) => false,
-            }
-        }
-        GatewayMessage::FromGateway(client_key, can_send) => {
-            if can_send {
-                print(format!(
-                    "Can start notifying client with key: {:?}",
-                    client_key
-                ));
-                HANDLERS.with(|h| {
-                    if let Some(on_open) = h.borrow().on_open {
-                        on_open(client_key);
-                    }
+            // check if client registered its public key by calling ws_register
+            check_registered_client_key(&client_key)?;
+            // check if the signature on the content of ClientMessage verifies against the public key of the registered client
+            // if so, the message came from the same client that registered its public key using ws_register
+            public_key.verify(&client_msg.content, &sig).map_err(|e| e.to_string())?;
+            
+            // check if the incoming message has the expected sequence number
+            if sequence_num == get_client_incoming_num(&client_key) {
+                // increse the expected sequence number by 1
+                let next_seq_num = increase_expected_client_incoming_num(&client_key)?;
+                println!("Next sequence number: {}", next_seq_num);
+                // call the on_message handler initialized in init()
+                let handler_result = HANDLERS.with(|h| {
+                    // check if on_message method has been initialized during init()
+                    let on_message_handler = h.borrow().on_message.to_owned()?;
+                    // create messaeg to send to client
+                    let canister_message = CanisterMessage {
+                        message,
+                        client_key,
+                    };
+                    // trigger the on_message handler initialized by canister
+                    on_message_handler(canister_message);
+                    Ok(())
                 });
-            } else {
-                // TODO: remove registered client
+                return handler_result;
             }
-            can_send
+            Err(String::from("incoming client's message relayed from WS Gateway does not have the expected sequence number"))
+        },
+        // WS Gateway notifies the canister of the established IC WebSocket connection
+        GatewayMessage::IcWebSocketEstablished(client_key) => {
+            print(format!(
+                "Can start notifying client with key: {:?}",
+                client_key
+            ));
+            // call the on_open handler initialized in init()
+            let handler_result = HANDLERS.with(|h| {
+                // check if on_open method has been initialized during init()
+                let on_open_handler = h.borrow().on_open.to_owned()?;
+                // trigger the on_open handler initialized by canister
+                on_open_handler(client_key);
+                Ok(())
+            });
+            handler_result
         }
+        // TODO: remove registered client when connection is closed
     }
 }
 
@@ -445,7 +471,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, m
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
-        sequence_num: next_client_message_num(client_key.clone()),
+        sequence_num: next_client_message_num(&client_key),
         timestamp: time,
         message: msg_cbor,
     };

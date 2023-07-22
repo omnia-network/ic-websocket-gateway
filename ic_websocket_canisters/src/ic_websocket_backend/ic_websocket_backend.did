@@ -16,20 +16,25 @@ type ClientMessage = record {
 };
 
 type GatewayMessage = variant {
-  FromGateway : record { blob; bool };
+  IcWebSocketEstablished : blob;
   RelayedFromClient : ClientMessage;
 };
 
 type WsOpenResult = variant {
   Ok : record { vec nat64; principal };
   Err : text;
-}
+};
+
+type WsGenericResult = variant {
+  Ok : null;
+  Err : text;
+};
 
 service : {
   "ws_register" : (blob) -> ();
   "ws_open" : (blob, blob) -> (WsOpenResult);
-  "ws_close" : (nat64) -> ();
-  "ws_message" : (GatewayMessage) -> (bool);
+  "ws_close" : (nat64) -> (WsGenericResult);
+  "ws_message" : (GatewayMessage) -> (WsGenericResult);
   "ws_get_messages" : (nat64) -> (CertMessages) query;
 
   "ws_wipe" : () -> ();
