@@ -1,5 +1,7 @@
 use candid::CandidType;
-use canister_methods::CertMessages;
+use canister_methods::{
+    CanisterFirstMessageContent, OutputCertifiedMessages, RelayedClientMessage,
+};
 use ed25519_compact::{PublicKey, Signature};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
@@ -20,6 +22,8 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message, Result},
 };
 
+use crate::canister_methods::CanisterIncomingMessage;
+
 mod canister_methods;
 
 // url for local testing
@@ -27,45 +31,12 @@ mod canister_methods;
 const URL: &str = "http://127.0.0.1:4943";
 const FETCH_KEY: bool = true;
 
-pub type PublicKeySlice = Vec<u8>;
-
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-#[candid_path("ic_cdk::export::candid")]
-pub enum GatewayMessage {
-    DirectlyFromClient(CanisterMessage),
-    RelayedFromClient(MessageFromClient),
-    IcWebSocketEstablished(Vec<u8>),
-}
-
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterMessage {
-    pub message: Vec<u8>,
-    pub client_key: PublicKeySlice,
-}
-
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-#[candid_path("ic_cdk::export::candid")]
-pub struct MessageFromClient {
-    #[serde(with = "serde_bytes")]
-    content: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    sig: Vec<u8>,
-}
-
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-#[candid_path("ic_cdk::export::candid")]
-struct ClientCanisterId {
-    #[serde(with = "serde_bytes")]
-    client_key: Vec<u8>,
-    canister_id: Principal,
-}
-
 #[derive(Debug, Clone)]
 struct GatewaySession {
     client_id: u64,
     client_key: Vec<u8>,
     canister_id: Principal,
-    message_for_client_tx: UnboundedSender<CertMessage>,
+    message_for_client_tx: UnboundedSender<CertifiedMessage>,
 }
 
 #[derive(Debug)]
@@ -80,9 +51,9 @@ async fn check_canister_init(
     message: Message,
 ) -> Result<(Vec<u8>, Principal), String> {
     if let Message::Binary(bytes) = message {
-        let m = from_slice::<MessageFromClient>(&bytes)
+        let m = from_slice::<RelayedClientMessage>(&bytes)
             .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
-        let content = from_slice::<ClientCanisterId>(&m.content).map_err(|_| {
+        let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
             String::from("content of first message is not of type ClientCanisterId")
         })?;
         let sig = Signature::from_slice(&m.sig)
@@ -176,7 +147,7 @@ async fn handle_connection(
 }
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CertMessage {
+pub struct CertifiedMessage {
     pub key: String,
     #[serde(with = "serde_bytes")]
     pub val: Vec<u8>,
@@ -194,10 +165,11 @@ struct CanisterPoller {
 impl CanisterPoller {
     async fn run_polling(
         &self,
-        mut new_client_channel_rx: UnboundedReceiver<(Vec<u8>, UnboundedSender<CertMessage>)>,
+        mut new_client_channel_rx: UnboundedReceiver<(Vec<u8>, UnboundedSender<CertifiedMessage>)>,
     ) {
         // channels used to communicate with client's task connected to the client via WebSocket
-        let mut client_channels: HashMap<Vec<u8>, UnboundedSender<CertMessage>> = HashMap::new();
+        let mut client_channels: HashMap<Vec<u8>, UnboundedSender<CertifiedMessage>> =
+            HashMap::new();
         let mut nonce: u64 = 0;
         loop {
             select! {
@@ -219,7 +191,7 @@ impl CanisterPoller {
                             client_key, encoded_message.key
                         );
 
-                        let m = CertMessage {
+                        let m = CertifiedMessage {
                             key: encoded_message.key.clone(),
                             val: encoded_message.val,
                             cert: msgs.cert.clone(),
@@ -251,14 +223,20 @@ impl CanisterPoller {
     }
 }
 
-async fn get_canister_updates(agent: &Agent, canister_id: Principal, nonce: u64) -> CertMessages {
+async fn get_canister_updates(
+    agent: &Agent,
+    canister_id: Principal,
+    nonce: u64,
+) -> OutputCertifiedMessages {
     tokio::time::sleep(Duration::from_millis(200)).await;
-    canister_methods::ws_get_messages(agent, &canister_id, nonce).await
+    canister_methods::ws_get_messages(agent, &canister_id, nonce)
+        .await
+        .unwrap()
 }
 
 struct GatewayServer {
     connected_canisters:
-        HashMap<Principal, UnboundedSender<(Vec<u8>, UnboundedSender<CertMessage>)>>,
+        HashMap<Principal, UnboundedSender<(Vec<u8>, UnboundedSender<CertifiedMessage>)>>,
     client_session_map: HashMap<Vec<u8>, GatewaySession>,
     client_key_map: HashMap<u64, Vec<u8>>,
 }
@@ -346,7 +324,7 @@ async fn main() {
                         gateway_server.connected_canisters.get_mut(&gateway_session.canister_id.clone()).expect("poller channel should have been created").send((gateway_session.client_key.clone(), gateway_session.message_for_client_tx)).unwrap();
 
                         // notify canister that it can now send messages for the client corresponding to client_key
-                        let gateway_message = GatewayMessage::IcWebSocketEstablished(gateway_session.client_key.clone());
+                        let gateway_message = CanisterIncomingMessage::IcWebSocketEstablished(gateway_session.client_key.clone());
                         if let Err(e) = canister_methods::ws_message(&*agent, &gateway_session.canister_id, gateway_message).await {
                             println!("Calling ws_message on canister failed: {}", e);
                         }

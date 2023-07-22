@@ -1,47 +1,85 @@
-type Message = record {
-  client_id : nat64;
-  key : text;
-  val : blob;
-};
+type ClientPublicKey = blob;
 
-type CertMessages = record {
-  messages : vec Message;
-  cert : blob;
-  tree : blob;
-};
-
-type CanisterMessage = record {
+type DirectClientMessage = record {
   client_key : blob;
-  message : blob;
+  message : ClientPublicKey;
 };
 
-type ClientMessage = record {
+type RelayedFromClientMessage = record {
   content : blob;
   sig : blob;
 };
 
-type GatewayMessage = variant {
-  DirectlyFromClient : CanisterMessage;
-  IcWebSocketEstablished : blob;
-  RelayedFromClient : ClientMessage;
+type CanisterIncomingMessage = variant {
+  DirectlyFromClient : DirectClientMessage;
+  RelayedFromClient : RelayedFromClientMessage;
+  IcWebSocketEstablished : ClientPublicKey;
 };
 
-type WsOpenResult = variant {
-  Ok : record { vec nat64; principal };
-  Err : text;
+type OutputMessage = record {
+  client_key : ClientPublicKey;
+  key : text;
+  val : blob;
 };
 
-type WsGenericResult = variant {
+type OutputCertifiedMessages = record {
+  messages : vec OutputMessage;
+  cert : blob;
+  tree : blob;
+};
+
+type CanisterWsRegisterArguments = record {
+  client_key : ClientPublicKey;
+};
+
+type CanisterWsRegisterResult = variant {
   Ok : null;
   Err : text;
 };
 
+type CanisterWsOpenArguments = record {
+  msg : blob;
+  sig : blob;
+};
+
+type CanisterWsOpenResult = variant {
+  Ok : record { ClientPublicKey; principal };
+  Err : text;
+};
+
+type CanisterWsCloseArguments = record {
+  client_key : ClientPublicKey;
+};
+
+type CanisterWsCloseResult = variant {
+  Ok : null;
+  Err : text;
+};
+
+type CanisterWsMessageArguments = record {
+  msg : CanisterIncomingMessage;
+};
+
+type CanisterWsMessageResult = variant {
+  Ok : null;
+  Err : text;
+};
+
+type CanisterWsGetMessagesArguments = record {
+  nonce : nat64;
+};
+
+type CanisterWsGetMessagesResult = variant {
+  Ok : OutputCertifiedMessages;
+  Err : text;
+};
+
 service : {
-  "ws_register" : (blob) -> ();
-  "ws_open" : (blob, blob) -> (WsOpenResult);
-  "ws_close" : (nat64) -> (WsGenericResult);
-  "ws_message" : (GatewayMessage) -> (WsGenericResult);
-  "ws_get_messages" : (nat64) -> (CertMessages) query;
+  "ws_register" : (CanisterWsRegisterArguments) -> (CanisterWsRegisterResult);
+  "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
+  "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
+  "ws_message" : (CanisterWsMessageArguments) -> (CanisterWsMessageResult);
+  "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
 
   "ws_wipe" : () -> ();
 };

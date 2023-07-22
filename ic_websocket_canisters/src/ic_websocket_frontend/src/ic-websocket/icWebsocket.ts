@@ -6,7 +6,7 @@ import {
 import { Principal } from "@dfinity/principal";
 import * as ed from '@noble/ed25519';
 import { isMessageBodyValid } from "./utils";
-import type { ActorService } from "./types";
+import type { ActorService, CanisterWsMessageArguments, ClientPublicKey } from "./types";
 
 const CLIENT_SECRET_KEY_STORAGE_KEY = "ic_websocket_client_secret_key";
 
@@ -18,16 +18,10 @@ type WsMessageReceived = {
 }
 
 type WsMessageContentReceived = {
+  client_key: ClientPublicKey;
   sequence_num: number;
   timestamp: number;
   message: ArrayBuffer;
-};
-
-type WsMessageToSend = {
-  DirectlyFromClient: {
-    client_key: Uint8Array;
-    message: Uint8Array;
-  };
 };
 
 type IcWebSocketConfig<T extends ActorService> = {
@@ -254,7 +248,9 @@ export default class IcWebSocket<T extends ActorService> {
   private async _registerPublicKeyOnCanister(): Promise<Uint8Array | undefined> {
     const publicKey = await this._getPublicKey();
     // Put the public key in the canister
-    await this.canisterActor.ws_register(publicKey);
+    await this.canisterActor.ws_register({
+      client_key: publicKey,
+    });
 
     return publicKey;
   }
@@ -329,15 +325,17 @@ export default class IcWebSocket<T extends ActorService> {
     return Cbor.decode(incomingContent.message);
   }
 
-  private async _makeApplicationMessage(data: any): Promise<WsMessageToSend> {
+  private async _makeApplicationMessage(data: any): Promise<CanisterWsMessageArguments> {
     const content = Cbor.encode(data);
     const publicKey = await this._getPublicKey();
 
     return {
-      DirectlyFromClient: {
-        client_key: publicKey,
-        message: new Uint8Array(content),
-      },
+      msg: {
+        DirectlyFromClient: {
+          client_key: publicKey,
+          message: new Uint8Array(content),
+        },
+      }
     };
   }
 }

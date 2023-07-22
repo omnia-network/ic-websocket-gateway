@@ -6,37 +6,113 @@ use ic_agent::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::GatewayMessage;
+pub type ClientPublicKey = Vec<u8>;
 
-pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
-pub type WsMessageResult = Result<(), String>;
-pub type WsCloseResult = Result<(), String>;
+/// The result of `ws_open`.
+pub type CanisterWsOpenResult = Result<(Vec<u8>, Principal), String>;
+/// The result of `ws_message`.
+pub type CanisterWsMessageResult = Result<(), String>;
+/// The result of `ws_get_messages`.
+pub type CanisterWsGetMessagesResult = Result<OutputCertifiedMessages, String>;
+/// The result of `ws_close`.
+pub type CanisterWsCloseResult = Result<(), String>;
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-#[candid_path("ic_cdk::export::candid")]
-pub struct WebsocketMessage {
-    pub client_key: Vec<u8>,
-    pub sequence_num: u64,
-    pub timestamp: u64,
+/// The arguments for `ws_register`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsRegisterArguments {
     #[serde(with = "serde_bytes")]
+    client_key: ClientPublicKey,
+}
+
+/// The arguments for `ws_open`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsOpenArguments {
+    #[serde(with = "serde_bytes")]
+    msg: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    sig: Vec<u8>,
+}
+
+/// The arguments for `ws_close`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsCloseArguments {
+    #[serde(with = "serde_bytes")]
+    client_key: ClientPublicKey,
+}
+
+/// The arguments for `ws_message`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsMessageArguments {
+    msg: CanisterIncomingMessage,
+}
+
+/// The arguments for `ws_get_messages`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsGetMessagesArguments {
+    nonce: u64,
+}
+
+/// The first message received by the canister in `ws_open`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterFirstMessageContent {
+    #[serde(with = "serde_bytes")]
+    pub client_key: ClientPublicKey,
+    pub canister_id: Principal,
+}
+
+/// message + signature from client, **relayed** by the WS Gateway.
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct RelayedClientMessage {
+    #[serde(with = "serde_bytes")]
+    pub content: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>,
+}
+
+/// Message coming directly from client, not relayed by the WS Gateway.
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct DirectClientMessage {
     pub message: Vec<u8>,
+    pub client_key: ClientPublicKey,
 }
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct EncodedMessage {
-    pub client_key: Vec<u8>,
-    pub key: String,
-    #[serde(with = "serde_bytes")]
-    pub val: Vec<u8>,
+/// The possible messages received by the canister in `ws_message`.
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub enum CanisterIncomingMessage {
+    DirectlyFromClient(DirectClientMessage),
+    RelayedFromClient(RelayedClientMessage),
+    IcWebSocketEstablished(ClientPublicKey),
 }
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CertMessages {
-    pub messages: Vec<EncodedMessage>,
+/// Messages exchanged through the WebSocket.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct WebsocketMessage {
     #[serde(with = "serde_bytes")]
-    pub cert: Vec<u8>,
+    pub client_key: ClientPublicKey, // To or from client key.
+    pub sequence_num: u64, // Both ways, messages should arrive with sequence numbers 0, 1, 2...
+    pub timestamp: u64,    // Timestamp of when the message was made for the recipient to inspect.
     #[serde(with = "serde_bytes")]
-    pub tree: Vec<u8>,
+    pub message: Vec<u8>, // Application message encoded in binary.
+}
+
+/// Member of the list of messages returned to the polling WS Gateway.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct OutputMessage {
+    #[serde(with = "serde_bytes")]
+    pub client_key: ClientPublicKey, // The client that the gateway will forward the message to.
+    pub key: String, // Key for certificate verification.
+    #[serde(with = "serde_bytes")]
+    pub val: Vec<u8>, // Encoded WebsocketMessage.
+}
+
+/// List of messages returned to the polling gateway.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct OutputCertifiedMessages {
+    pub messages: Vec<OutputMessage>, // List of messages.
+    #[serde(with = "serde_bytes")]
+    pub cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
+    #[serde(with = "serde_bytes")]
+    pub tree: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
 }
 
 pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) -> Agent {
@@ -57,8 +133,8 @@ pub async fn ws_open(
     canister_id: &Principal,
     content: Vec<u8>,
     sig: Vec<u8>,
-) -> WsOpenResult {
-    let args = candid::encode_args((content, sig)).unwrap();
+) -> CanisterWsOpenResult {
+    let args = candid::encode_args((CanisterWsOpenArguments { msg: content, sig },)).unwrap();
 
     let res = agent
         .update(canister_id, "ws_open")
@@ -67,7 +143,7 @@ pub async fn ws_open(
         .await
         .unwrap();
 
-    Decode!(&res, WsOpenResult)
+    Decode!(&res, CanisterWsOpenResult)
         .map_err(|e| e.to_string())
         .unwrap()
 }
@@ -75,9 +151,9 @@ pub async fn ws_open(
 pub async fn ws_close(
     agent: &Agent,
     canister_id: &Principal,
-    can_client_key: Vec<u8>,
-) -> WsCloseResult {
-    let args = candid::encode_args((can_client_key,)).unwrap();
+    client_key: ClientPublicKey,
+) -> CanisterWsCloseResult {
+    let args = candid::encode_args((CanisterWsCloseArguments { client_key },)).unwrap();
 
     let res = agent
         .update(canister_id, "ws_close")
@@ -86,7 +162,7 @@ pub async fn ws_close(
         .await
         .unwrap();
 
-    Decode!(&res, WsCloseResult)
+    Decode!(&res, CanisterWsCloseResult)
         .map_err(|e| e.to_string())
         .unwrap()
 }
@@ -94,9 +170,9 @@ pub async fn ws_close(
 pub async fn ws_message(
     agent: &Agent,
     canister_id: &Principal,
-    mes: GatewayMessage,
-) -> WsMessageResult {
-    let args = candid::encode_args((mes,)).unwrap();
+    msg: CanisterIncomingMessage,
+) -> CanisterWsMessageResult {
+    let args = candid::encode_args((CanisterWsMessageArguments { msg },)).unwrap();
 
     let res = agent
         .update(canister_id, "ws_message")
@@ -105,13 +181,17 @@ pub async fn ws_message(
         .await
         .unwrap();
 
-    Decode!(&res, WsMessageResult)
+    Decode!(&res, CanisterWsMessageResult)
         .map_err(|e| e.to_string())
         .unwrap()
 }
 
-pub async fn ws_get_messages(agent: &Agent, canister_id: &Principal, nonce: u64) -> CertMessages {
-    let args = candid::encode_args((nonce,))
+pub async fn ws_get_messages(
+    agent: &Agent,
+    canister_id: &Principal,
+    nonce: u64,
+) -> CanisterWsGetMessagesResult {
+    let args = candid::encode_args((CanisterWsGetMessagesArguments { nonce },))
         .map_err(|e| e.to_string())
         .unwrap();
 
@@ -122,7 +202,7 @@ pub async fn ws_get_messages(agent: &Agent, canister_id: &Principal, nonce: u64)
         .await
         .unwrap();
 
-    Decode!(&res, CertMessages)
+    Decode!(&res, CanisterWsGetMessagesResult)
         .map_err(|e| e.to_string())
         .unwrap()
 }
