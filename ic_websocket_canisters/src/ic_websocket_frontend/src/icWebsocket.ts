@@ -148,8 +148,17 @@ export default class IcWebSocket {
 
   async send(data: any) {
     // we send the message directly to the canister, not to the gateway
-    const serialized = await this._makeMessage(data);
-    this.canisterActor.ws_message(serialized);
+    const message = await this._makeMessage(data);
+    try {
+      const sendResult = await this.canisterActor.ws_message(message);
+
+      if ("Err" in sendResult) {
+        throw new Error(sendResult.Err);
+      }
+    } catch (error) {
+      console.error("[send] Error:", error);
+      throw error;
+    }
     this.sequenceNum += 1;
   }
 
@@ -165,7 +174,7 @@ export default class IcWebSocket {
   }
 
   private async _onWsOpen() {
-    console.log("[open] Connection opened");
+    console.log("[open] WS opened");
     const publicKey = await ed.getPublicKeyAsync(this.secretKey);
     // Put the public key in the canister
     await this.canisterActor.ws_register(publicKey);
@@ -202,6 +211,8 @@ export default class IcWebSocket {
       // first received message
       console.log('[message]: first message', event.data);
       this.nextReceivedNum += 1;
+
+      console.log("[open] Connection opened");
 
       if (this.onopen) {
         this.onopen.call(this, new Event("open"));
