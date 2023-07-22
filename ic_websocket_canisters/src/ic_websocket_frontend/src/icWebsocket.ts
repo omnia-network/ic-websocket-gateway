@@ -106,7 +106,7 @@ export default class IcWebSocket {
 
     this.canisterActor = config.canisterActor;
 
-    this.nextReceivedNum = -1; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
+    this.nextReceivedNum = 0; // Received signed messages need to come in the correct order, with sequence numbers 0, 1, 2...
     // TODO: IcWebSocket should accept parameters in the config object.
     this.wsInstance = new WebSocket(url, protocols); // Gateway address. Here localhost to reproduce the demo.
     this.wsInstance.binaryType = "arraybuffer";
@@ -148,9 +148,18 @@ export default class IcWebSocket {
 
   async send(data: any) {
     // we send the message directly to the canister, not to the gateway
-    const serialized = await this._makeMessage(data);
-    this.canisterActor.ws_message(serialized);
+    const message = await this._makeMessage(data);
     this.sequenceNum += 1;
+    try {
+      const sendResult = await this.canisterActor.ws_message(message);
+
+      if ("Err" in sendResult) {
+        throw new Error(sendResult.Err);
+      }
+    } catch (error) {
+      console.error("[send] Error:", error);
+      throw error;
+    }
   }
 
   close() {
@@ -165,7 +174,7 @@ export default class IcWebSocket {
   }
 
   private async _onWsOpen() {
-    console.log("[open] Connection opened");
+    console.log("[open] WS opened");
     const publicKey = await ed.getPublicKeyAsync(this.secretKey);
     // Put the public key in the canister
     await this.canisterActor.ws_register(publicKey);
@@ -189,19 +198,18 @@ export default class IcWebSocket {
     // Send the first message
     const wsMessage = Cbor.encode(message);
     this.wsInstance.send(wsMessage);
-    this.sequenceNum = 0;
-
     console.log("[open] Sent first message");
-
     // the onopen callback is called when the first confirmation message is received from the canister
     // see _onWsMessage function
   }
 
   private async _onWsMessage(event: MessageEvent<ArrayBuffer>) {
-    if (this.nextReceivedNum == -1) {
+    if (this.nextReceivedNum == 0) {
       // first received message
       console.log('[message]: first message', event.data);
       this.nextReceivedNum += 1;
+
+      console.log("[open] Connection opened");
 
       if (this.onopen) {
         this.onopen.call(this, new Event("open"));

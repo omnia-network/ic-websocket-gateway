@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::GatewayMessage;
 
+pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
+pub type WsMessageResult = Result<(), String>;
+pub type WsCloseResult = Result<(), String>;
+
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct WebsocketMessage {
@@ -53,7 +57,7 @@ pub async fn ws_open(
     canister_id: &Principal,
     content: Vec<u8>,
     sig: Vec<u8>,
-) -> Result<(Vec<u8>, Principal), String> {
+) -> WsOpenResult {
     let args = candid::encode_args((content, sig)).unwrap();
 
     let res = agent
@@ -63,10 +67,16 @@ pub async fn ws_open(
         .await
         .unwrap();
 
-    Decode!(&res, Result<(Vec<u8>, Principal), String>).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsOpenResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
-pub async fn ws_close(agent: &Agent, canister_id: &Principal, can_client_key: Vec<u8>) {
+pub async fn ws_close(
+    agent: &Agent,
+    canister_id: &Principal,
+    can_client_key: Vec<u8>,
+) -> WsCloseResult {
     let args = candid::encode_args((can_client_key,)).unwrap();
 
     let res = agent
@@ -76,10 +86,16 @@ pub async fn ws_close(agent: &Agent, canister_id: &Principal, can_client_key: Ve
         .await
         .unwrap();
 
-    Decode!(&res, ()).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsCloseResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
-pub async fn ws_message(agent: &Agent, canister_id: &Principal, mes: GatewayMessage) -> bool {
+pub async fn ws_message(
+    agent: &Agent,
+    canister_id: &Principal,
+    mes: GatewayMessage,
+) -> WsMessageResult {
     let args = candid::encode_args((mes,)).unwrap();
 
     let res = agent
@@ -89,7 +105,9 @@ pub async fn ws_message(agent: &Agent, canister_id: &Principal, mes: GatewayMess
         .await
         .unwrap();
 
-    Decode!(&res, bool).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsMessageResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
 pub async fn ws_get_messages(agent: &Agent, canister_id: &Principal, nonce: u64) -> CertMessages {

@@ -1,8 +1,7 @@
-use candid::Principal;
 use ic_cdk_macros::*;
 
 use canister::{on_close, on_message, on_open};
-use sock::wipe;
+use sock::{wipe, WsCloseResult, WsMessageResult, WsOpenResult};
 use sock::{CertMessages, GatewayMessage, PublicKeySlice};
 
 mod canister;
@@ -30,19 +29,24 @@ fn ws_register(client_key: PublicKeySlice) {
 // to prove that FirstMessage is actually coming from the same client that registered its public key
 // beforehand by calling ws_register()
 #[update]
-fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> Result<(Vec<u8>, Principal), String> {
+fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> WsOpenResult {
     sock::ws_open(msg, sig)
 }
 
 // Close the websocket connection.
 #[update]
-fn ws_close(client_key: Vec<u8>) {
-    sock::ws_close(client_key);
+fn ws_close(client_key: Vec<u8>) -> WsCloseResult {
+    sock::ws_close(client_key)
 }
 
-// Gateway calls this method to pass on the message from the client to the canister.
+// method called by the WS Gateway to send a message of type GatewayMessage to the canister
+// GatewayMessage has two variants:
+// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
+//                           establishment of the IcWebSocketConnection
+// - RelayedFromClient: message sent from the client to the WS Gateway (via WebSocket) and
+//                      relayed to the canister by the WS Gateway
 #[update]
-fn ws_message(msg: GatewayMessage) -> bool {
+fn ws_message(msg: GatewayMessage) -> WsMessageResult {
     sock::ws_message(msg)
 }
 
