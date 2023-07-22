@@ -6,12 +6,9 @@ use ic_certified_map::{labeled, labeled_hash, AsHashTree, Hash as ICHash, RbTree
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, Serializer};
 use sha2::{Digest, Sha256};
-use std::{
-    cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef, time::Duration,
-};
+use std::{cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef};
 
 const LABEL_WEBSOCKET: &[u8] = b"websocket";
-const MSG_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 50;
 
 pub type PublicKeySlice = Vec<u8>;
@@ -19,12 +16,6 @@ pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
 pub type WsMessageResult = Result<(), String>;
 pub type WsSendResult = Result<(), String>;
 pub type WsCloseResult = Result<(), String>;
-
-pub struct KeyGatewayTime {
-    key: String,
-    gateway: Principal,
-    time: u64,
-}
 
 // The first message used in ws_open().
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
@@ -99,7 +90,6 @@ thread_local! {
     static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
     static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
     static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<EncodedMessage>>> = RefCell::new(HashMap::new());
-    static MESSAGE_DELETE_QUEUE: RefCell<VecDeque<KeyGatewayTime>> = RefCell::new(VecDeque::new());
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
     static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
@@ -119,9 +109,6 @@ pub fn wipe() {
     });
     GATEWAY_MESSAGES_MAP.with(|map| {
         map.borrow_mut().clear();
-    });
-    MESSAGE_DELETE_QUEUE.with(|vd| {
-        vd.borrow_mut().clear();
     });
     CERT_TREE.with(|t| {
         t.replace(RbTree::new());
@@ -274,17 +261,6 @@ fn get_cert_messages(nonce: u64) -> CertMessages {
     })
 }
 
-fn delete_message(message_info: &KeyGatewayTime) {
-    GATEWAY_MESSAGES_MAP.with(|s| {
-        let mut s = s.borrow_mut();
-        let gateway_messages = s.get_mut(&message_info.gateway).unwrap();
-        gateway_messages.pop_front();
-    });
-    CERT_TREE.with(|t| {
-        t.borrow_mut().delete(message_info.key.as_ref());
-    });
-}
-
 fn put_cert_for_message(key: String, value: &Vec<u8>) {
     let root_hash = CERT_TREE.with(|tree| {
         let mut tree = tree.borrow_mut();
@@ -294,20 +270,6 @@ fn put_cert_for_message(key: String, value: &Vec<u8>) {
 
     set_certified_data(&root_hash);
 }
-
-// fn get_cert_for_message(key: &String) -> (Vec<u8>, Vec<u8>) {
-//     CERT_TREE.with(|tree| {
-//         let tree = tree.borrow();
-//         let witness = tree.witness(key.as_ref());
-//         let tree = labeled(LABEL_WEBSOCKET, witness);
-
-//         let mut data = vec![];
-//         let mut serializer = Serializer::new(&mut data);
-//         serializer.self_describe().unwrap();
-//         tree.serialize(&mut serializer).unwrap();
-//         (data_certificate().unwrap(), data)
-//     })
-// }
 
 fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
     CERT_TREE.with(|tree| {
@@ -352,11 +314,15 @@ pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: On
     });
 }
 
+// register the public key that the client SDK has newly generated to initialize an IcWebSocket connection
 pub fn ws_register(client_key: PublicKeySlice) {
     // associate the identity of the client to its public key received as input
     put_client_caller(client_key)
 }
 
+// WS Gateway relays FirstMessage sent by the client together with its signature
+// to prove that FirstMessage is actually coming from the same client that registered its public key
+// beforehand by calling ws_register()
 pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> WsOpenResult {
     // check if the message relayed by the WS Gateway is of type FirstMessage
     let FirstMessage {
@@ -390,6 +356,13 @@ pub fn ws_close(client_key: PublicKeySlice) -> WsCloseResult {
     })
 }
 
+// GatewayMessage has three variants:
+// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
+//                           establishment of the IcWebSocketConnection
+// - RelayedFromClient: message sent from the client to the WS Gateway (via WebSocket) and
+//                      relayed to the canister by the WS Gateway
+// - DirectlyFromClient: message sent from directly client so that it is not necessary to
+//                       verify the signature
 pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
     match msg {
         // message sent directly from client
@@ -475,7 +448,8 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
                 Ok(())
             });
             handler_result
-        }, // TODO: remove registered client when connection is closed
+        },
+        // TODO: remove registered client when connection is closed
     }
 }
 
@@ -483,43 +457,27 @@ pub fn ws_get_messages(nonce: u64) -> CertMessages {
     get_cert_messages(nonce)
 }
 
+// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES_MAP
 pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     client_key: PublicKeySlice,
     msg: T,
 ) -> WsSendResult {
-    // serialize the message into msg_cbor
+    // serialize the message for the client into msg_cbor
     let mut msg_cbor = vec![];
     let mut serializer = Serializer::new(&mut msg_cbor);
-    serializer.self_describe().unwrap();
-    msg.serialize(&mut serializer).unwrap();
+    serializer.self_describe().map_err(|e| e.to_string())?;
+    msg.serialize(&mut serializer).map_err(|e| e.to_string())?;
 
+    // get the principal of the gateway that is polling the canister
     let gateway = get_client_gateway(&client_key)
         .ok_or(String::from("client has no corresponding gateway in map"))?;
 
     let time = time();
+
+    // the nonce in key is used by the WS Gateway to determine the message to start from in the next polling iteration
+    // the key is also passed to the client in order to validate the body of the certified message
     let key =
         gateway.clone().to_string() + "_" + &format!("{:0>20}", next_message_nonce().to_string());
-
-    MESSAGE_DELETE_QUEUE.with(|q| {
-        let mut q = q.borrow_mut();
-        q.push_back(KeyGatewayTime {
-            key: key.clone(),
-            gateway: gateway.clone(),
-            time,
-        });
-
-        let front = q.front().unwrap();
-        if Duration::from_nanos(time - front.time) > MSG_TIMEOUT {
-            delete_message(front);
-            q.pop_front();
-
-            let front = q.front().unwrap();
-            if Duration::from_nanos(time - front.time) > MSG_TIMEOUT {
-                delete_message(front);
-                q.pop_front();
-            }
-        }
-    });
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
@@ -528,12 +486,18 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
         message: msg_cbor,
     };
 
+    // serialize the message of type WebsocketMessage into data
     let mut data = vec![];
     let mut serializer = Serializer::new(&mut data);
-    serializer.self_describe().unwrap();
-    input.serialize(&mut serializer).unwrap();
+    serializer.self_describe().map_err(|e| e.to_string())?;
+    input
+        .serialize(&mut serializer)
+        .map_err(|e| e.to_string())?;
 
+    // certify data
     put_cert_for_message(key.clone(), &data);
+
+    // TODO: init GATEWAY_MESSAGES_MAP with one gateway principal during init()
     GATEWAY_MESSAGES_MAP.with(|s| {
         let mut s = s.borrow_mut();
         let gw_map = match s.get_mut(&gateway) {
