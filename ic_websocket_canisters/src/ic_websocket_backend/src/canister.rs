@@ -28,7 +28,9 @@ pub fn on_message(msg: CanisterMessage) {
 
 fn send_app_message(client_key: PublicKeySlice, msg: AppMessage) {
     print(format!("Sending message: {:?}", msg));
-    ws_send(client_key, msg);
+    if let Err(e) = ws_send(client_key, msg) {
+        println!("Could not send message: {}", e);
+    }
 }
 
 pub fn on_close(client_key: PublicKeySlice) {

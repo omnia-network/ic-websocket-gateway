@@ -6,7 +6,6 @@ use ic_certified_map::{labeled, labeled_hash, AsHashTree, Hash as ICHash, RbTree
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, Serializer};
 use sha2::{Digest, Sha256};
-use std::ops::Add;
 use std::{
     cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef, time::Duration,
 };
@@ -18,6 +17,7 @@ const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 50;
 pub type PublicKeySlice = Vec<u8>;
 pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
 pub type WsMessageResult = Result<(), String>;
+pub type WsSendResult = Result<(), String>;
 pub type WsCloseResult = Result<(), String>;
 
 pub struct KeyGatewayTime {
@@ -154,34 +154,49 @@ fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String
     }
 }
 
-pub fn next_client_message_num(client_key: &PublicKeySlice) -> u64 {
+fn init_client_message_num(client_key: PublicKeySlice) {
     CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().get_mut(client_key).expect("message number for client key should be initialized").add(1)
+        map.borrow_mut().insert(client_key, 0);
+    });
+}
+
+fn next_client_message_num(client_key: &PublicKeySlice) -> Result<u64, String> {
+    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+        let mut map = map.borrow_mut();
+        let num = *map.get(client_key).ok_or(String::from("next message num not initialized for client"))?;
+        map.insert(client_key.clone(), num + 1);
+        Ok(num + 1)
     })
 }
 
-fn get_client_incoming_num(client_key: &PublicKeySlice) -> u64 {
-    CLIENT_INCOMING_NUM_MAP.with(|map| *map.borrow().get(client_key).unwrap_or(&0))
+fn init_client_incoming_num(client_key: PublicKeySlice) {
+    CLIENT_INCOMING_NUM_MAP.with(|map| {
+        map.borrow_mut().insert(client_key, 0);
+    });
+}
+
+fn get_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
+    CLIENT_INCOMING_NUM_MAP.with(|map| {
+        let num = *map.borrow().get(client_key).ok_or(String::from("incoming message num not initialized for client"))?;
+        Ok(num)
+    })
 }
 
 fn increase_expected_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
+    let num = get_client_incoming_num(client_key)?;
     CLIENT_INCOMING_NUM_MAP.with(|map| {
-        match map.borrow_mut().get_mut(client_key) {
-            Some(num) => Ok(num.add(1)),
-            None => Err(String::from("next client sequence number not correctly initialized")),
-        }
-    })
+        map.borrow_mut().insert(client_key.clone(), num + 1)
+    });
+    Ok(num + 1)
 }
 
 fn add_client(client_key: PublicKeySlice) {
     // associate the identity of the WS Gateway to the public key of the client
     put_client_gateway(client_key.clone());
     // initialize incoming client's message sequence number to 0
-    get_client_incoming_num(&client_key);
+    init_client_incoming_num(client_key.clone());
     // initialize outgoing message sequence number to 0
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().insert(client_key, 0);
-    });
+    init_client_message_num(client_key);
 }
 
 fn remove_client(client_key: PublicKeySlice) {
@@ -385,7 +400,7 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
             public_key.verify(&client_msg.content, &sig).map_err(|e| e.to_string())?;
             
             // check if the incoming message has the expected sequence number
-            if sequence_num == get_client_incoming_num(&client_key) {
+            if sequence_num == get_client_incoming_num(&client_key)? {
                 // increse the expected sequence number by 1
                 let next_seq_num = increase_expected_client_incoming_num(&client_key)?;
                 println!("Next sequence number: {}", next_seq_num);
@@ -430,19 +445,14 @@ pub fn ws_get_messages(nonce: u64) -> CertMessages {
     get_cert_messages(nonce)
 }
 
-pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, msg: T) {
+pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, msg: T) -> WsSendResult {
     // serialize the message into msg_cbor
     let mut msg_cbor = vec![];
     let mut serializer = Serializer::new(&mut msg_cbor);
     serializer.self_describe().unwrap();
     msg.serialize(&mut serializer).unwrap();
 
-    let gateway = match get_client_gateway(&client_key) {
-        None => {
-            return;
-        }
-        Some(gateway) => gateway,
-    };
+    let gateway = get_client_gateway(&client_key).ok_or(String::from("client has no corresponding gateway in map"))?;
 
     let time = time();
     let key =
@@ -471,7 +481,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, m
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
-        sequence_num: next_client_message_num(&client_key),
+        sequence_num: next_client_message_num(&client_key)?,
         timestamp: time,
         message: msg_cbor,
     };
@@ -497,4 +507,5 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(client_key: PublicKeySlice, m
             val: data,
         });
     });
+    Ok(())
 }

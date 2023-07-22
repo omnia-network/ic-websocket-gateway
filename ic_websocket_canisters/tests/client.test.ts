@@ -72,7 +72,7 @@ describe("WS client", () => {
   it("should send and receive messages", async () => {
     let messageCounter = 0;
     // wrap the test in a promise so we can await it before ending the test
-    await expect(await new Promise<void>((resolve, reject) => {
+    await expect(new Promise<void>((resolve, reject) => {
       ws.onerror = (event) => {
         console.log("IcWebSocket error", event);
         expect(event).toBeNull();
@@ -97,7 +97,7 @@ describe("WS client", () => {
           reject(error);
         }
       };
-    })).rejects.not.toThrow();
+    })).resolves.not.toThrow();
   });
 
   it("should close the connection", async () => {

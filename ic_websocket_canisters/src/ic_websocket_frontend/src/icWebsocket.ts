@@ -149,6 +149,7 @@ export default class IcWebSocket {
   async send(data: any) {
     // we send the message directly to the canister, not to the gateway
     const message = await this._makeMessage(data);
+    this.sequenceNum += 1;
     try {
       const sendResult = await this.canisterActor.ws_message(message);
 
@@ -159,7 +160,6 @@ export default class IcWebSocket {
       console.error("[send] Error:", error);
       throw error;
     }
-    this.sequenceNum += 1;
   }
 
   close() {
@@ -198,10 +198,7 @@ export default class IcWebSocket {
     // Send the first message
     const wsMessage = Cbor.encode(message);
     this.wsInstance.send(wsMessage);
-    this.sequenceNum = 0;
-
     console.log("[open] Sent first message");
-
     // the onopen callback is called when the first confirmation message is received from the canister
     // see _onWsMessage function
   }
