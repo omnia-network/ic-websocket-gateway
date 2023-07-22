@@ -1,7 +1,7 @@
 use ic_cdk_macros::*;
 
 use canister::{on_close, on_message, on_open};
-use sock::{wipe, WsOpenResult, WsMessageResult, WsCloseResult};
+use sock::{wipe, WsCloseResult, WsMessageResult, WsOpenResult};
 use sock::{CertMessages, GatewayMessage, PublicKeySlice};
 
 mod canister;

@@ -67,10 +67,16 @@ pub async fn ws_open(
         .await
         .unwrap();
 
-    Decode!(&res, WsOpenResult).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsOpenResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
-pub async fn ws_close(agent: &Agent, canister_id: &Principal, can_client_key: Vec<u8>) -> WsCloseResult {
+pub async fn ws_close(
+    agent: &Agent,
+    canister_id: &Principal,
+    can_client_key: Vec<u8>,
+) -> WsCloseResult {
     let args = candid::encode_args((can_client_key,)).unwrap();
 
     let res = agent
@@ -80,10 +86,16 @@ pub async fn ws_close(agent: &Agent, canister_id: &Principal, can_client_key: Ve
         .await
         .unwrap();
 
-    Decode!(&res, WsCloseResult).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsCloseResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
-pub async fn ws_message(agent: &Agent, canister_id: &Principal, mes: GatewayMessage) -> WsMessageResult {
+pub async fn ws_message(
+    agent: &Agent,
+    canister_id: &Principal,
+    mes: GatewayMessage,
+) -> WsMessageResult {
     let args = candid::encode_args((mes,)).unwrap();
 
     let res = agent
@@ -93,7 +105,9 @@ pub async fn ws_message(agent: &Agent, canister_id: &Principal, mes: GatewayMess
         .await
         .unwrap();
 
-    Decode!(&res, WsMessageResult).map_err(|e| e.to_string()).unwrap()
+    Decode!(&res, WsMessageResult)
+        .map_err(|e| e.to_string())
+        .unwrap()
 }
 
 pub async fn ws_get_messages(agent: &Agent, canister_id: &Principal, nonce: u64) -> CertMessages {

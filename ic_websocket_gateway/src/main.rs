@@ -161,7 +161,7 @@ async fn handle_connection(
                     }
                 }
             }
-        }
+        },
         Err(e) => return Err(IcWsError::WsError(e)),
     }
 }
@@ -293,13 +293,9 @@ async fn main() {
                     *next_client_id
                 };
                 println!("\nNew client id: {}", next_client_id);
-                let end_connection_result = handle_connection(
-                    next_client_id,
-                    &*agent_cl,
-                    stream,
-                    connection_handler_tx_cl,
-                )
-                .await;
+                let end_connection_result =
+                    handle_connection(next_client_id, &*agent_cl, stream, connection_handler_tx_cl)
+                        .await;
                 println!("Client connection terminated: {:?}", end_connection_result);
             });
         }
