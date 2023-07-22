@@ -1,5 +1,6 @@
 import { ic_websocket_backend } from "../src/declarations/ic_websocket_backend";
-import IcWebSocket from "../src/ic_websocket_frontend/src/icWebsocket";
+import IcWebSocket from "../src/ic_websocket_frontend/src/ic-websocket/icWebsocket";
+import type { _SERVICE } from "../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
 
 /// IcWebsocket parameters
 const backendCanisterId = process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND || "";
@@ -10,7 +11,7 @@ const persistKey = false;
 
 /// test constants & variables
 const pingPongCount = 5;
-let ws: IcWebSocket;
+let ws: IcWebSocket<_SERVICE>;
 
 /// jest configuration
 jest.setTimeout(30_000);
