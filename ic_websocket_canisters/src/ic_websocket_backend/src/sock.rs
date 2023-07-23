@@ -152,12 +152,12 @@ thread_local! {
     static OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
     /// Maps the client's public key to the expected sequence number of the next incoming message (from that client).
     static INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
-    /// Maps the principal of the WS Gateway to the messages that have to be sent to it.
-    /// The WS Gateway specifies the index of the first message to get in the next polling iteration.
-    // TODO: keep messages only for gateway specified in init()
-    static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<CanisterOutputMessage>>> = RefCell::new(HashMap::new());
     /// Keeps track of the Merkle tree used for certified queries
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
+    /// Keeps track of the principal of the WS Gateway which polls the canister
+    static GATEWAY_PRINCIPAL: RefCell<Option<Principal>> = RefCell::new(None);
+    /// Keeps tarck of the messages that have to be sent to the WS Gateway
+    static MESSAGES_FOR_GATEWAY: RefCell<VecDeque<CanisterOutputMessage>> = RefCell::new(VecDeque::new());
     /// Keeps track of the nonce which:
     /// - the WS Gateway uses to specify the first index of the certified messages to be returned when polling
     /// - the client uses as part of the path in the Merkle tree in order to verify the certificate of the messages relayed by the WS Gateway
@@ -177,12 +177,13 @@ pub fn wipe() {
     INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().clear();
     });
-    GATEWAY_MESSAGES_MAP.with(|map| {
-        map.borrow_mut().clear();
-    });
     CERT_TREE.with(|t| {
         t.replace(RbTree::new());
     });
+    GATEWAY_PRINCIPAL.with(|p| {
+        *p.borrow_mut() = None;
+    });
+    MESSAGES_FOR_GATEWAY.with(|m| *m.borrow_mut() = VecDeque::new());
     NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
 
@@ -286,52 +287,46 @@ fn remove_client(client_key: ClientPublicKey) {
     });
 }
 
-fn get_cert_messages(nonce: u64) -> CanisterOutputCertifiedMessages {
-    GATEWAY_MESSAGES_MAP.with(|s| {
-        let gateway = caller();
-
-        let mut s = s.borrow_mut();
-        let gateway_messages_vec = match s.get_mut(&gateway) {
-            None => {
-                s.insert(gateway.clone(), VecDeque::new());
-                s.get_mut(&gateway).unwrap()
-            },
-            Some(map) => map,
-        };
-
+// gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
+fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
+    let gateway_principal = GATEWAY_PRINCIPAL.with(|p| {
+        p.borrow()
+            .expect("gateway principal not initialized")
+            .clone()
+    });
+    // check if the caller fo this method is the WS Gateway that has been set during the initialization of the SDK
+    if gateway_principal != caller() {
+        return Err(String::from("caller of get_cert_messages is not the gateway that has been registered during CDK initialization"));
+    }
+    MESSAGES_FOR_GATEWAY.with(|m| {
         let smallest_key =
-            gateway.clone().to_string() + "_" + &format!("{:0>20}", nonce.to_string());
-        let start_index = gateway_messages_vec.partition_point(|x| x.key < smallest_key);
+            gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string());
+        let start_index = m.borrow().partition_point(|x| x.key < smallest_key);
         let mut end_index = start_index;
-        while (end_index < gateway_messages_vec.len())
+        while (end_index < m.borrow().len())
             && (end_index < start_index + MAX_NUMBER_OF_RETURNED_MESSAGES)
         {
             end_index += 1;
         }
         let mut messages: Vec<CanisterOutputMessage> = Vec::with_capacity(end_index - start_index);
         for index in 0..(end_index - start_index) {
-            messages.push(
-                gateway_messages_vec
-                    .get(start_index + index)
-                    .unwrap()
-                    .clone(),
-            );
+            messages.push(m.borrow().get(start_index + index).unwrap().clone());
         }
         if end_index > start_index {
             let first_key = messages.first().unwrap().key.clone();
             let last_key = messages.last().unwrap().key.clone();
             let (cert, tree) = get_cert_for_range(&first_key, &last_key);
-            CanisterOutputCertifiedMessages {
+            Ok(CanisterOutputCertifiedMessages {
                 messages,
                 cert,
                 tree,
-            }
+            })
         } else {
-            CanisterOutputCertifiedMessages {
+            Ok(CanisterOutputCertifiedMessages {
                 messages,
                 cert: Vec::new(),
                 tree: Vec::new(),
-            }
+            })
         }
     })
 }
@@ -386,13 +381,25 @@ thread_local! {
     });
 }
 
-// canister specifies the handlers that the CDK uses to manage the IC WebSocket connection
-pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: OnCloseCallback) {
+// init CDK
+pub fn init(
+    on_open: OnOpenCallback,
+    on_message: OnMessageCallback,
+    on_close: OnCloseCallback,
+    gateway_principal: &str,
+) {
+    // set the handlers specified by the canister that the CDK uses to manage the IC WebSocket connection
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
         h.on_open = Ok(on_open);
         h.on_message = Ok(on_message);
         h.on_close = Ok(on_close);
+    });
+    // set the principal of the (only) WS Gateway that will be polling the canister
+    GATEWAY_PRINCIPAL.with(|p| {
+        let gateway_principal =
+            Principal::from_text(gateway_principal).expect("invalid gateway principal");
+        *p.borrow_mut() = Some(gateway_principal);
     });
 }
 
@@ -407,6 +414,7 @@ pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResul
 // to prove that the first message is actually coming from the same client that registered its public key
 // beforehand by calling ws_register()
 pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
+    // TODO: check if caller is the gateway that was registered during CDK initialization
     // decode the first message sent by the client
     let CanisterFirstMessageContent {
         client_key,
@@ -534,10 +542,10 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
 
 // gets messages that need to be sent to the WS Gateway in response of a polling iteration
 pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
-    Ok(get_cert_messages(args.nonce))
+    get_cert_messages(args.nonce)
 }
 
-// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES_MAP
+// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES
 pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     client_key: ClientPublicKey,
     msg: T,
@@ -577,20 +585,11 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     // certify data
     put_cert_for_message(key.clone(), &data);
 
-    // TODO: init GATEWAY_MESSAGES_MAP with one gateway principal during init()
-    GATEWAY_MESSAGES_MAP.with(|s| {
-        let mut s = s.borrow_mut();
-        let gw_map = match s.get_mut(&gateway) {
-            None => {
-                s.insert(gateway.clone(), VecDeque::new());
-                s.get_mut(&gateway).unwrap()
-            },
-            Some(map) => map,
-        };
+    MESSAGES_FOR_GATEWAY.with(|m| {
         // messages in the queue are inserted with contiguous and increasing nonces
         // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
         // is incremented by one in each call, and the message is pushed at the end of the queue
-        gw_map.push_back(CanisterOutputMessage {
+        m.borrow_mut().push_back(CanisterOutputMessage {
             client_key,
             key,
             val: data,

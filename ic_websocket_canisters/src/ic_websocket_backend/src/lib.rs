@@ -1,6 +1,6 @@
 use ic_cdk_macros::*;
 
-use canister::{on_close, on_message, on_open};
+use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
 use sock::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
@@ -13,12 +13,12 @@ mod sock;
 
 #[init]
 fn init() {
-    sock::init(on_open, on_message, on_close)
+    sock::init(on_open, on_message, on_close, GATEWAY_PRINCIPAL)
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    sock::init(on_open, on_message, on_close)
+    sock::init(on_open, on_message, on_close, GATEWAY_PRINCIPAL)
 }
 
 // method called by the client SDK when instantiating a new IcWebSocket
