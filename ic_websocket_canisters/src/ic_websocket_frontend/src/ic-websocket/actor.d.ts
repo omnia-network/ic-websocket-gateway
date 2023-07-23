@@ -2,21 +2,21 @@ import type { ActorMethod } from '@dfinity/agent';
 
 export type ClientPublicKey = Uint8Array | number[];
 
-export interface RelayedFromClientMessage {
+export interface RelayedClientMessage {
   'sig': Uint8Array | number[],
   'content': Uint8Array | number[],
 }
 
 export interface DirectClientMessage {
   'client_key': ClientPublicKey,
-  'message': ClientPublicKey,
+  'message': Uint8Array | number[],
 }
 
 export type CanisterIncomingMessage = {
-  'RelayedFromClient': RelayedFromClientMessage
+  'IcWebSocketEstablished': ClientPublicKey
 } |
-{ 'IcWebSocketEstablished': ClientPublicKey } |
-{ 'DirectlyFromClient': DirectClientMessage };
+{ 'DirectlyFromClient': DirectClientMessage } |
+{ 'RelayedByGateway': RelayedClientMessage };
 
 export interface CanisterWsMessageArguments { 'msg': CanisterIncomingMessage }
 export type CanisterWsMessageResult = { 'Ok': null } |
