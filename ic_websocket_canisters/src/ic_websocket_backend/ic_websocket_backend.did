@@ -16,14 +16,14 @@ type CanisterIncomingMessage = variant {
   IcWebSocketEstablished : ClientPublicKey;
 };
 
-type OutputMessage = record {
+type CanisterOutputMessage = record {
   client_key : ClientPublicKey;
   key : text;
   val : blob;
 };
 
-type OutputCertifiedMessages = record {
-  messages : vec OutputMessage;
+type CanisterOutputCertifiedMessages = record {
+  messages : vec CanisterOutputMessage;
   cert : blob;
   tree : blob;
 };
@@ -76,7 +76,7 @@ type CanisterWsGetMessagesArguments = record {
 };
 
 type CanisterWsGetMessagesResult = variant {
-  Ok : OutputCertifiedMessages;
+  Ok : CanisterOutputCertifiedMessages;
   Err : text;
 };
 
