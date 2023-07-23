@@ -9,13 +9,21 @@ use serde::{Deserialize, Serialize};
 pub type ClientPublicKey = Vec<u8>;
 
 /// The result of `ws_open`.
-pub type CanisterWsOpenResult = Result<(ClientPublicKey, Principal), String>;
+pub type CanisterWsOpenResult = Result<CanisterWsOpenValue, String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 /// The result of `ws_close`.
 pub type CanisterWsCloseResult = Result<(), String>;
+
+// The Ok value of CanisterWsOpenResult returned by `ws_open`
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsOpenValue {
+    pub client_key: ClientPublicKey,
+    pub canister_id: Principal,
+    pub nonce: u64,
+}
 
 /// The arguments for `ws_register`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]

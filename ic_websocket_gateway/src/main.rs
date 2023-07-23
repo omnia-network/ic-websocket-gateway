@@ -22,7 +22,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message, Result},
 };
 
-use crate::canister_methods::CanisterIncomingMessage;
+use crate::canister_methods::{CanisterIncomingMessage, CanisterWsOpenValue};
 
 mod canister_methods;
 
@@ -37,6 +37,7 @@ struct GatewaySession {
     client_key: ClientPublicKey,
     canister_id: Principal,
     message_for_client_tx: UnboundedSender<CertifiedMessage>,
+    nonce: u64,
 }
 
 #[derive(Debug)]
@@ -94,7 +95,11 @@ async fn handle_connection(
                                 if is_first_message {
                                     // check if client correctly registered its public key in the backend canister
                                     match check_canister_init(agent, message.clone()).await {
-                                        Ok((client_key, canister_id)) => {
+                                        Ok(CanisterWsOpenValue {
+                                            client_key,
+                                            canister_id,
+                                            nonce,
+                                        }) => {
                                             // tell the client that the IC WS connection is setup correctly
                                             ws_write.send(Message::Text("1".to_string())).await.map_err(|e| {
                                                 IcWsError::WsError(e)
@@ -109,6 +114,7 @@ async fn handle_connection(
                                                         client_key,
                                                         canister_id,
                                                         message_for_client_tx: message_for_client_tx_cl,
+                                                        nonce,
                                                     },
                                                 )
                                             ).expect("channel should be open on the main thread");
@@ -166,11 +172,12 @@ impl CanisterPoller {
     async fn run_polling(
         &self,
         mut new_client_channel_rx: UnboundedReceiver<ClientPollerChannelData>,
+        mut nonce: u64,
     ) {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
             HashMap::new();
-        let mut nonce: u64 = 0;
+        println!("Started poller from nonce: {}", nonce);
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
@@ -218,13 +225,13 @@ impl CanisterPoller {
                         }
 
                         nonce = encoded_message
-                                .key
-                                .split('_')
-                                .last()
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                            nonce += 1
+                            .key
+                            .split('_')
+                            .last()
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        nonce += 1
                     }
                 }
 
@@ -412,7 +419,7 @@ async fn main() {
                                         agent,
                                     };
                                     println!("Created new poller: canister: {}", poller.canister_id);
-                                    poller.run_polling(new_client_channel_rx).await;
+                                    poller.run_polling(new_client_channel_rx, gateway_session.nonce).await;
                                     println!("Poller task terminated: canister {}", poller.canister_id);
                                 }
                             });
