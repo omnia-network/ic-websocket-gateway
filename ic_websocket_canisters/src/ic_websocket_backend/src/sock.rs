@@ -573,10 +573,7 @@ pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMes
 ///
 /// Under the hood, the message is serialized and certified, and then it is added to the queue of messages
 /// that the WS Gateway will poll in the next iteration.
-pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
-    client_key: ClientPublicKey,
-    msg: T,
-) -> CanisterWsSendResult {
+pub fn ws_send<T: Serialize>(client_key: ClientPublicKey, msg: T) -> CanisterWsSendResult {
     // serialize the message for the client into msg_cbor
     let mut msg_cbor = vec![];
     let mut serializer = Serializer::new(&mut msg_cbor);
