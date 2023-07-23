@@ -98,6 +98,8 @@ async fn handle_connection(
                                         Ok(CanisterWsOpenValue {
                                             client_key,
                                             canister_id,
+                                            // nonce is used by a new poller to know which message nonce to start polling from (if needed)
+                                            // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                                             nonce,
                                         }) => {
                                             // tell the client that the IC WS connection is setup correctly
@@ -383,10 +385,10 @@ async fn main() {
                     Ok(gateway_session) => {
                         gateway_server.client_key_map.insert(gateway_session.client_id.clone(), gateway_session.client_key.clone());
                         gateway_server.client_session_map.insert(gateway_session.client_key.clone(), gateway_session.clone());
-                        let client_poller_channel_data = ClientPollerChannelData::NewClientChannel(gateway_session.client_key.clone(), gateway_session.message_for_client_tx.clone());
 
                         // check if client is connecting to a canister that is not yet being polled
                         // if so, create new poller task
+                        let client_poller_channel_data = ClientPollerChannelData::NewClientChannel(gateway_session.client_key.clone(), gateway_session.message_for_client_tx.clone());
                         let client_channel_tx = gateway_server.connected_canisters.get_mut(&gateway_session.canister_id.clone());
                         let needs_new_poller = match client_channel_tx {
                             Some(client_channel_tx) => {
@@ -419,6 +421,9 @@ async fn main() {
                                         agent,
                                     };
                                     println!("Created new poller: canister: {}", poller.canister_id);
+                                    // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
+                                    // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
+                                    // the new poller thread should not get those same messages again
                                     poller.run_polling(new_client_channel_rx, gateway_session.nonce).await;
                                     println!("Poller task terminated: canister {}", poller.canister_id);
                                 }
