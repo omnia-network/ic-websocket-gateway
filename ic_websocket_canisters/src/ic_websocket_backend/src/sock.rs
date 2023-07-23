@@ -93,12 +93,18 @@ pub struct DirectClientMessage {
     pub client_key: ClientPublicKey,
 }
 
-/// The possible messages received by the canister in `ws_message`.
+/// The variants of the possible messages received by the canister in `ws_message`.
+/// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
+///                           establishment of the IcWebSocketConnection
+/// - RelayedByGateway: message sent from the client to the WS Gateway (via WebSocket) and
+///                      relayed to the canister by the WS Gateway
+/// - DirectlyFromClient: message sent from directly client so that it is not necessary to
+///                       verify the signature
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub enum CanisterIncomingMessage {
     DirectlyFromClient(DirectClientMessage),
-    RelayedFromClient(RelayedClientMessage),
+    RelayedByGateway(RelayedClientMessage),
     IcWebSocketEstablished(ClientPublicKey),
 }
 
@@ -356,8 +362,14 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
 
 // type ApplicationMessage<T: Deserialize + Serialize> = T;
 
+/// handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
+/// is established
 type OnOpenCallback = fn(ClientPublicKey);
+/// handler initialized by the canister and triggered by the CDK once a message is received by
+/// the CDk (either directly from the client or relayed by the WS Gateway)
 type OnMessageCallback = fn(DirectClientMessage);
+/// handler initialized by the canister and triggered by the CDK once the WS Gateway closes the
+/// IC WebSocket connection
 type OnCloseCallback = fn(ClientPublicKey);
 
 struct WsHandlers {
@@ -374,6 +386,7 @@ thread_local! {
     });
 }
 
+// canister specifies the handlers that the CDK uses to manage the IC WebSocket connection
 pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: OnCloseCallback) {
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
@@ -418,6 +431,7 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     Ok((client_key, canister_id))
 }
 
+// closes the IC WebSocket connection with a client
 pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     remove_client(args.client_key.clone());
 
@@ -428,13 +442,7 @@ pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     })
 }
 
-// GatewayMessage has three variants:
-// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
-//                           establishment of the IcWebSocketConnection
-// - RelayedFromClient: message sent from the client to the WS Gateway (via WebSocket) and
-//                      relayed to the canister by the WS Gateway
-// - DirectlyFromClient: message sent from directly client so that it is not necessary to
-//                       verify the signature
+// handles the messages received by the canister
 pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     match args.msg {
         // message sent directly from client
@@ -460,7 +468,7 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
             return handler_result;
         },
         // WS Gateway relays a message from the client
-        CanisterIncomingMessage::RelayedFromClient(client_msg) => {
+        CanisterIncomingMessage::RelayedByGateway(client_msg) => {
             let WebsocketMessage {
                 client_key,
                 sequence_num,
@@ -524,6 +532,7 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     }
 }
 
+// gets messages that need to be sent to the WS Gateway in response of a polling iteration
 pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
     Ok(get_cert_messages(args.nonce))
 }
@@ -578,6 +587,9 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
             },
             Some(map) => map,
         };
+        // messages in the queue are inserted with contiguous and increasing nonces
+        // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
+        // is incremented by one in each call, and the message is pushed at the end of the queue
         gw_map.push_back(CanisterOutputMessage {
             client_key,
             key,
