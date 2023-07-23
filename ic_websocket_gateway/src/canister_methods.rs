@@ -80,7 +80,7 @@ pub struct DirectClientMessage {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub enum CanisterIncomingMessage {
     DirectlyFromClient(DirectClientMessage),
-    RelayedFromClient(RelayedClientMessage),
+    RelayedByGateway(RelayedClientMessage),
     IcWebSocketEstablished(ClientPublicKey),
 }
 

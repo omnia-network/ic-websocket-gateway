@@ -75,7 +75,7 @@ struct CanisterFirstMessageContent {
     canister_id: Principal,
 }
 
-/// message + signature from client, **relayed** by the WS Gateway.
+/// Message + signature from client, **relayed** by the WS Gateway.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct RelayedClientMessage {
@@ -93,12 +93,18 @@ pub struct DirectClientMessage {
     pub client_key: ClientPublicKey,
 }
 
-/// The possible messages received by the canister in `ws_message`.
+/// The variants of the possible messages received by the canister in `ws_message`.
+/// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
+///                           establishment of the IcWebSocketConnection
+/// - RelayedByGateway: message sent from the client to the WS Gateway (via WebSocket) and
+///                      relayed to the canister by the WS Gateway
+/// - DirectlyFromClient: message sent from directly client so that it is not necessary to
+///                       verify the signature
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub enum CanisterIncomingMessage {
     DirectlyFromClient(DirectClientMessage),
-    RelayedFromClient(RelayedClientMessage),
+    RelayedByGateway(RelayedClientMessage),
     IcWebSocketEstablished(ClientPublicKey),
 }
 
@@ -114,7 +120,7 @@ pub struct WebsocketMessage {
     pub message: Vec<u8>, // Application message encoded in binary.
 }
 
-/// Member of the list of messages returned to the polling WS Gateway.
+/// Element of the list of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct CanisterOutputMessage {
@@ -125,7 +131,7 @@ pub struct CanisterOutputMessage {
     val: Vec<u8>, // Encoded WebsocketMessage.
 }
 
-/// List of messages returned to the polling gateway.
+/// List of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct CanisterOutputCertifiedMessages {
@@ -137,12 +143,24 @@ pub struct CanisterOutputCertifiedMessages {
 }
 
 thread_local! {
+    /// Maps the client's public key to the client's identity (anonymous if not authenticated).
     static CLIENT_CALLER_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the WS Gateway's identity.
+    // TODO: fix the WS Gateway identity during init() (as we are assuming there is only one gateway polling the canister)
     static CLIENT_GATEWAY_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
-    static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
-    static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the sequence number to use for the next outgoing message (to that client).
+    static OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the expected sequence number of the next incoming message (from that client).
+    static INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
+    /// Maps the principal of the WS Gateway to the messages that have to be sent to it.
+    /// The WS Gateway specifies the index of the first message to get in the next polling iteration.
+    // TODO: keep messages only for gateway specified in init()
     static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<CanisterOutputMessage>>> = RefCell::new(HashMap::new());
+    /// Keeps track of the Merkle tree used for certified queries
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
+    /// Keeps track of the nonce which:
+    /// - the WS Gateway uses to specify the first index of the certified messages to be returned when polling
+    /// - the client uses as part of the path in the Merkle tree in order to verify the certificate of the messages relayed by the WS Gateway
     static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
 
@@ -153,10 +171,10 @@ pub fn wipe() {
     CLIENT_GATEWAY_MAP.with(|map| {
         map.borrow_mut().clear();
     });
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().clear();
     });
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().clear();
     });
     GATEWAY_MESSAGES_MAP.with(|map| {
@@ -201,14 +219,14 @@ fn check_registered_client_key(client_key: &ClientPublicKey) -> Result<(), Strin
     }
 }
 
-fn init_client_message_num(client_key: ClientPublicKey) {
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+fn init_outgoing_message_to_client_num(client_key: ClientPublicKey) {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().insert(client_key, 0);
     });
 }
 
-fn next_client_message_num(client_key: &ClientPublicKey) -> Result<u64, String> {
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+fn next_outgoing_message_to_client_num(client_key: &ClientPublicKey) -> Result<u64, String> {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         let mut map = map.borrow_mut();
         let num = *map
             .get(client_key)
@@ -218,14 +236,16 @@ fn next_client_message_num(client_key: &ClientPublicKey) -> Result<u64, String> 
     })
 }
 
-fn init_client_incoming_num(client_key: ClientPublicKey) {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+fn init_expected_incoming_message_from_client_num(client_key: ClientPublicKey) {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().insert(client_key, 0);
     });
 }
 
-fn get_client_incoming_num(client_key: &ClientPublicKey) -> Result<u64, String> {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+fn get_expected_incoming_message_from_client_num(
+    client_key: &ClientPublicKey,
+) -> Result<u64, String> {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         let num = *map.borrow().get(client_key).ok_or(String::from(
             "incoming message num not initialized for client",
         ))?;
@@ -233,9 +253,12 @@ fn get_client_incoming_num(client_key: &ClientPublicKey) -> Result<u64, String> 
     })
 }
 
-fn increase_expected_client_incoming_num(client_key: &ClientPublicKey) -> Result<u64, String> {
-    let num = get_client_incoming_num(client_key)?;
-    CLIENT_INCOMING_NUM_MAP.with(|map| map.borrow_mut().insert(client_key.clone(), num + 1));
+fn increment_expected_incoming_message_from_client_num(
+    client_key: &ClientPublicKey,
+) -> Result<u64, String> {
+    let num = get_expected_incoming_message_from_client_num(client_key)?;
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP
+        .with(|map| map.borrow_mut().insert(client_key.clone(), num + 1));
     Ok(num + 1)
 }
 
@@ -243,9 +266,9 @@ fn add_client(client_key: ClientPublicKey) {
     // associate the identity of the WS Gateway to the public key of the client
     put_client_gateway(client_key.clone());
     // initialize incoming client's message sequence number to 0
-    init_client_incoming_num(client_key.clone());
+    init_expected_incoming_message_from_client_num(client_key.clone());
     // initialize outgoing message sequence number to 0
-    init_client_message_num(client_key);
+    init_outgoing_message_to_client_num(client_key);
 }
 
 fn remove_client(client_key: ClientPublicKey) {
@@ -255,10 +278,10 @@ fn remove_client(client_key: ClientPublicKey) {
     CLIENT_GATEWAY_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
 }
@@ -339,8 +362,14 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
 
 // type ApplicationMessage<T: Deserialize + Serialize> = T;
 
+/// handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
+/// is established
 type OnOpenCallback = fn(ClientPublicKey);
+/// handler initialized by the canister and triggered by the CDK once a message is received by
+/// the CDk (either directly from the client or relayed by the WS Gateway)
 type OnMessageCallback = fn(DirectClientMessage);
+/// handler initialized by the canister and triggered by the CDK once the WS Gateway closes the
+/// IC WebSocket connection
 type OnCloseCallback = fn(ClientPublicKey);
 
 struct WsHandlers {
@@ -357,6 +386,7 @@ thread_local! {
     });
 }
 
+// canister specifies the handlers that the CDK uses to manage the IC WebSocket connection
 pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: OnCloseCallback) {
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
@@ -401,6 +431,7 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     Ok((client_key, canister_id))
 }
 
+// closes the IC WebSocket connection with a client
 pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     remove_client(args.client_key.clone());
 
@@ -411,13 +442,7 @@ pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     })
 }
 
-// GatewayMessage has three variants:
-// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
-//                           establishment of the IcWebSocketConnection
-// - RelayedFromClient: message sent from the client to the WS Gateway (via WebSocket) and
-//                      relayed to the canister by the WS Gateway
-// - DirectlyFromClient: message sent from directly client so that it is not necessary to
-//                       verify the signature
+// handles the messages received by the canister
 pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     match args.msg {
         // message sent directly from client
@@ -443,7 +468,7 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
             return handler_result;
         },
         // WS Gateway relays a message from the client
-        CanisterIncomingMessage::RelayedFromClient(client_msg) => {
+        CanisterIncomingMessage::RelayedByGateway(client_msg) => {
             let WebsocketMessage {
                 client_key,
                 sequence_num,
@@ -465,10 +490,9 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
                 .map_err(|e| e.to_string())?;
 
             // check if the incoming message has the expected sequence number
-            if sequence_num == get_client_incoming_num(&client_key)? {
+            if sequence_num == get_expected_incoming_message_from_client_num(&client_key)? {
                 // increse the expected sequence number by 1
-                let next_seq_num = increase_expected_client_incoming_num(&client_key)?;
-                println!("Next sequence number: {}", next_seq_num);
+                increment_expected_incoming_message_from_client_num(&client_key)?;
                 // call the on_message handler initialized in init()
                 let handler_result = HANDLERS.with(|h| {
                     // check if on_message method has been initialized during init()
@@ -508,6 +532,7 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     }
 }
 
+// gets messages that need to be sent to the WS Gateway in response of a polling iteration
 pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
     Ok(get_cert_messages(args.nonce))
 }
@@ -536,7 +561,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
-        sequence_num: next_client_message_num(&client_key)?,
+        sequence_num: next_outgoing_message_to_client_num(&client_key)?,
         timestamp: time,
         message: msg_cbor,
     };
@@ -562,6 +587,9 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
             },
             Some(map) => map,
         };
+        // messages in the queue are inserted with contiguous and increasing nonces
+        // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
+        // is incremented by one in each call, and the message is pushed at the end of the queue
         gw_map.push_back(CanisterOutputMessage {
             client_key,
             key,

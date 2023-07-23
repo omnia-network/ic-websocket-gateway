@@ -5,14 +5,14 @@ type DirectClientMessage = record {
   message : blob;
 };
 
-type RelayedFromClientMessage = record {
+type RelayedClientMessage = record {
   content : blob;
   sig : blob;
 };
 
 type CanisterIncomingMessage = variant {
   DirectlyFromClient : DirectClientMessage;
-  RelayedFromClient : RelayedFromClientMessage;
+  RelayedByGateway : RelayedClientMessage;
   IcWebSocketEstablished : ClientPublicKey;
 };
 
