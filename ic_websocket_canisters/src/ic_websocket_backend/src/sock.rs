@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::{cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef};
 
 const LABEL_WEBSOCKET: &[u8] = b"websocket";
-const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 50;
+const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 10;
 
 pub type ClientPublicKey = Vec<u8>;
 
@@ -299,18 +299,21 @@ fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
         return Err(String::from("caller of get_cert_messages is not the gateway that has been registered during CDK initialization"));
     }
     MESSAGES_FOR_GATEWAY.with(|m| {
+        // smallest key  used to determine the first of the messages from the queue which has to be returned to the WS Gateway
         let smallest_key =
             gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string());
+        // partition the queue at the message which has the key with the nonce specified as argument to get_cert_messages
         let start_index = m.borrow().partition_point(|x| x.key < smallest_key);
-        let mut end_index = start_index;
-        while (end_index < m.borrow().len())
-            && (end_index < start_index + MAX_NUMBER_OF_RETURNED_MESSAGES)
-        {
-            end_index += 1;
+        // message at index corresponding to end index is excluded
+        let end_index;
+        if m.borrow().len() - start_index > MAX_NUMBER_OF_RETURNED_MESSAGES {
+            end_index = start_index + MAX_NUMBER_OF_RETURNED_MESSAGES;
+        } else {
+            end_index = m.borrow().len();
         }
         let mut messages: Vec<CanisterOutputMessage> = Vec::with_capacity(end_index - start_index);
-        for index in 0..(end_index - start_index) {
-            messages.push(m.borrow().get(start_index + index).unwrap().clone());
+        for index in start_index..end_index {
+            messages.push(m.borrow().get(index).unwrap().clone());
         }
         if end_index > start_index {
             let first_key = messages.first().unwrap().key.clone();
