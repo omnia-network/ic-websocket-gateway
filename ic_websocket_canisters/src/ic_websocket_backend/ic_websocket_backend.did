@@ -1,8 +1,8 @@
 type ClientPublicKey = blob;
 
 type DirectClientMessage = record {
-  client_key : blob;
-  message : ClientPublicKey;
+  client_key : ClientPublicKey;
+  message : blob;
 };
 
 type RelayedFromClientMessage = record {

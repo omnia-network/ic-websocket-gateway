@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub type ClientPublicKey = Vec<u8>;
 
 /// The result of `ws_open`.
-pub type CanisterWsOpenResult = Result<(Vec<u8>, Principal), String>;
+pub type CanisterWsOpenResult = Result<(ClientPublicKey, Principal), String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.

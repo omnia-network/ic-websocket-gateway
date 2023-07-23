@@ -8,7 +8,7 @@ export interface RelayedFromClientMessage {
 }
 
 export interface DirectClientMessage {
-  'client_key': Uint8Array | number[],
+  'client_key': ClientPublicKey,
   'message': ClientPublicKey,
 }
 
