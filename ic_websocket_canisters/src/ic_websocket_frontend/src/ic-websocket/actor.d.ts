@@ -1,3 +1,5 @@
+import type { ActorMethod } from '@dfinity/agent';
+
 export type ClientPublicKey = Uint8Array | number[];
 
 export interface RelayedFromClientMessage {

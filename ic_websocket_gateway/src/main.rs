@@ -1,6 +1,6 @@
 use candid::CandidType;
 use canister_methods::{
-    CanisterFirstMessageContent, OutputCertifiedMessages, RelayedClientMessage,
+    CanisterFirstMessageContent, CanisterOutputCertifiedMessages, RelayedClientMessage,
 };
 use ed25519_compact::{PublicKey, Signature};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
@@ -227,7 +227,7 @@ async fn get_canister_updates(
     agent: &Agent,
     canister_id: Principal,
     nonce: u64,
-) -> OutputCertifiedMessages {
+) -> CanisterOutputCertifiedMessages {
     tokio::time::sleep(Duration::from_millis(200)).await;
     canister_methods::ws_get_messages(agent, &canister_id, nonce)
         .await

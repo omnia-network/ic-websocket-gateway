@@ -20,7 +20,7 @@ pub type CanisterWsOpenResult = Result<(Vec<u8>, Principal), String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
-pub type CanisterWsGetMessagesResult = Result<OutputCertifiedMessages, String>;
+pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 /// The result of `ws_send`.
 pub type CanisterWsSendResult = Result<(), String>;
 /// The result of `ws_close`.
@@ -117,7 +117,7 @@ pub struct WebsocketMessage {
 /// Member of the list of messages returned to the polling WS Gateway.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub struct OutputMessage {
+pub struct CanisterOutputMessage {
     #[serde(with = "serde_bytes")]
     client_key: ClientPublicKey, // The client that the gateway will forward the message to.
     key: String, // Key for certificate verification.
@@ -128,8 +128,8 @@ pub struct OutputMessage {
 /// List of messages returned to the polling gateway.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub struct OutputCertifiedMessages {
-    messages: Vec<OutputMessage>, // List of messages.
+pub struct CanisterOutputCertifiedMessages {
+    messages: Vec<CanisterOutputMessage>, // List of messages.
     #[serde(with = "serde_bytes")]
     cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
     #[serde(with = "serde_bytes")]
@@ -141,7 +141,7 @@ thread_local! {
     static CLIENT_GATEWAY_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
     static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
     static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
-    static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<OutputMessage>>> = RefCell::new(HashMap::new());
+    static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<CanisterOutputMessage>>> = RefCell::new(HashMap::new());
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
     static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
@@ -263,7 +263,7 @@ fn remove_client(client_key: ClientPublicKey) {
     });
 }
 
-fn get_cert_messages(nonce: u64) -> OutputCertifiedMessages {
+fn get_cert_messages(nonce: u64) -> CanisterOutputCertifiedMessages {
     GATEWAY_MESSAGES_MAP.with(|s| {
         let gateway = caller();
 
@@ -285,7 +285,7 @@ fn get_cert_messages(nonce: u64) -> OutputCertifiedMessages {
         {
             end_index += 1;
         }
-        let mut messages: Vec<OutputMessage> = Vec::with_capacity(end_index - start_index);
+        let mut messages: Vec<CanisterOutputMessage> = Vec::with_capacity(end_index - start_index);
         for index in 0..(end_index - start_index) {
             messages.push(
                 gateway_messages_vec
@@ -298,13 +298,13 @@ fn get_cert_messages(nonce: u64) -> OutputCertifiedMessages {
             let first_key = messages.first().unwrap().key.clone();
             let last_key = messages.last().unwrap().key.clone();
             let (cert, tree) = get_cert_for_range(&first_key, &last_key);
-            OutputCertifiedMessages {
+            CanisterOutputCertifiedMessages {
                 messages,
                 cert,
                 tree,
             }
         } else {
-            OutputCertifiedMessages {
+            CanisterOutputCertifiedMessages {
                 messages,
                 cert: Vec::new(),
                 tree: Vec::new(),
@@ -562,7 +562,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
             },
             Some(map) => map,
         };
-        gw_map.push_back(OutputMessage {
+        gw_map.push_back(CanisterOutputMessage {
             client_key,
             key,
             val: data,

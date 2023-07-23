@@ -13,7 +13,7 @@ pub type CanisterWsOpenResult = Result<(Vec<u8>, Principal), String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
-pub type CanisterWsGetMessagesResult = Result<OutputCertifiedMessages, String>;
+pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 /// The result of `ws_close`.
 pub type CanisterWsCloseResult = Result<(), String>;
 
@@ -97,7 +97,7 @@ pub struct WebsocketMessage {
 
 /// Member of the list of messages returned to the polling WS Gateway.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-pub struct OutputMessage {
+pub struct CanisterOutputMessage {
     #[serde(with = "serde_bytes")]
     pub client_key: ClientPublicKey, // The client that the gateway will forward the message to.
     pub key: String, // Key for certificate verification.
@@ -107,8 +107,8 @@ pub struct OutputMessage {
 
 /// List of messages returned to the polling gateway.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-pub struct OutputCertifiedMessages {
-    pub messages: Vec<OutputMessage>, // List of messages.
+pub struct CanisterOutputCertifiedMessages {
+    pub messages: Vec<CanisterOutputMessage>, // List of messages.
     #[serde(with = "serde_bytes")]
     pub cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
     #[serde(with = "serde_bytes")]

@@ -6,18 +6,18 @@ import {
 import { Principal } from "@dfinity/principal";
 import * as ed from '@noble/ed25519';
 import { isMessageBodyValid } from "./utils";
-import type { ActorService, CanisterWsMessageArguments, ClientPublicKey } from "./types";
+import type { ActorService, CanisterWsMessageArguments, ClientPublicKey } from "./actor";
 
 const CLIENT_SECRET_KEY_STORAGE_KEY = "ic_websocket_client_secret_key";
 
-type WsMessageReceived = {
+type ClientIncomingMessage = {
   key: string;
   cert: ArrayBuffer;
   tree: ArrayBuffer;
   val: ArrayBuffer;
 }
 
-type WsMessageContentReceived = {
+type ClientIncomingMessageContent = {
   client_key: ClientPublicKey;
   sequence_num: number;
   timestamp: number;
@@ -286,11 +286,11 @@ export default class IcWebSocket<T extends ActorService> {
     return wsMessage;
   }
 
-  private _decodeIncomingMessage(buf: ArrayBuffer): WsMessageReceived {
-    return Cbor.decode<WsMessageReceived>(buf);
+  private _decodeIncomingMessage(buf: ArrayBuffer): ClientIncomingMessage {
+    return Cbor.decode<ClientIncomingMessage>(buf);
   }
 
-  private async _isIncomingMessageValid(incomingMessage: WsMessageReceived): Promise<boolean> {
+  private async _isIncomingMessageValid(incomingMessage: ClientIncomingMessage): Promise<boolean> {
     const key = incomingMessage.key;
     const val = new Uint8Array(incomingMessage.val);
     const cert = incomingMessage.cert;
@@ -302,26 +302,26 @@ export default class IcWebSocket<T extends ActorService> {
     return isValid;
   }
 
-  private _getContentFromIncomingMessage(incomingMessage: WsMessageReceived): WsMessageContentReceived {
+  private _getContentFromIncomingMessage(incomingMessage: ClientIncomingMessage): ClientIncomingMessageContent {
     const val = new Uint8Array(incomingMessage.val);
-    const incomingContent = Cbor.decode<WsMessageContentReceived>(val);
+    const incomingContent = Cbor.decode<ClientIncomingMessageContent>(val);
 
     return incomingContent;
   }
 
-  private _isIncomingMessageSequenceNumberValid(incomingContent: WsMessageContentReceived): boolean {
+  private _isIncomingMessageSequenceNumberValid(incomingContent: ClientIncomingMessageContent): boolean {
     const receivedNum = incomingContent.sequence_num;
     console.log(`Received message sequence number: ${receivedNum}`)
     return receivedNum === this.nextReceivedNum;
   }
 
-  private _inspectIncomingMessageTimestamp(incomingContent: WsMessageContentReceived) {
+  private _inspectIncomingMessageTimestamp(incomingContent: ClientIncomingMessageContent) {
     const time = incomingContent.timestamp;
     const delaySeconds = (Date.now() * (10 ** 6) - time) / (10 ** 9);
     console.log(`(time now) - (message timestamp) = ${delaySeconds}s`);
   }
 
-  private _getApplicationMessageFromIncomingContent(incomingContent: WsMessageContentReceived) {
+  private _getApplicationMessageFromIncomingContent(incomingContent: ClientIncomingMessageContent) {
     return Cbor.decode(incomingContent.message);
   }
 
