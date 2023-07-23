@@ -24,7 +24,7 @@ type ClientIncomingMessageContent = {
   message: ArrayBuffer;
 };
 
-type IcWebSocketConfig<T extends ActorService> = {
+export type IcWebSocketConfig<T extends ActorService> = {
   /**
    * The canister id of the canister to open the websocket to.
    */
