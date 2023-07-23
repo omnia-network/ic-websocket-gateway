@@ -9,75 +9,141 @@ use sha2::{Digest, Sha256};
 use std::{cell::RefCell, collections::HashMap, collections::VecDeque, convert::AsRef};
 
 const LABEL_WEBSOCKET: &[u8] = b"websocket";
-const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 50;
+const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 10;
 
-pub type PublicKeySlice = Vec<u8>;
-pub type WsOpenResult = Result<(Vec<u8>, Principal), String>;
-pub type WsMessageResult = Result<(), String>;
-pub type WsSendResult = Result<(), String>;
-pub type WsCloseResult = Result<(), String>;
+pub type ClientPublicKey = Vec<u8>;
 
-// The first message used in ws_open().
+/// The result of `ws_register`.
+pub type CanisterWsRegisterResult = Result<(), String>;
+/// The result of `ws_open`.
+pub type CanisterWsOpenResult = Result<CanisterWsOpenValue, String>;
+/// The result of `ws_message`.
+pub type CanisterWsMessageResult = Result<(), String>;
+/// The result of `ws_get_messages`.
+pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
+/// The result of `ws_send`.
+pub type CanisterWsSendResult = Result<(), String>;
+/// The result of `ws_close`.
+pub type CanisterWsCloseResult = Result<(), String>;
+
+// The Ok value of CanisterWsOpenResult returned by `ws_open`
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsOpenValue {
+    client_key: ClientPublicKey,
+    canister_id: Principal,
+    nonce: u64,
+}
+
+/// The arguments for `ws_register`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 #[candid_path("ic_cdk::export::candid")]
-struct FirstMessage {
+pub struct CanisterWsRegisterArguments {
     #[serde(with = "serde_bytes")]
-    client_key: PublicKeySlice,
+    client_key: ClientPublicKey,
+}
+
+/// The arguments for `ws_open`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
+pub struct CanisterWsOpenArguments {
+    #[serde(with = "serde_bytes")]
+    msg: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    sig: Vec<u8>,
+}
+
+/// The arguments for `ws_close`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
+pub struct CanisterWsCloseArguments {
+    #[serde(with = "serde_bytes")]
+    client_key: ClientPublicKey,
+}
+
+/// The arguments for `ws_message`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
+pub struct CanisterWsMessageArguments {
+    msg: CanisterIncomingMessage,
+}
+
+/// The arguments for `ws_get_messages`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
+pub struct CanisterWsGetMessagesArguments {
+    nonce: u64,
+}
+
+/// The first message received by the canister in `ws_open`.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+#[candid_path("ic_cdk::export::candid")]
+struct CanisterFirstMessageContent {
+    #[serde(with = "serde_bytes")]
+    client_key: ClientPublicKey,
     canister_id: Principal,
 }
 
-// Encoded message + signature from client.
+/// Message + signature from client, **relayed** by the WS Gateway.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub struct ClientMessage {
+pub struct RelayedClientMessage {
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
     #[serde(with = "serde_bytes")]
     sig: Vec<u8>,
 }
 
+/// Message coming directly from client, not relayed by the WS Gateway.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub enum GatewayMessage {
-    DirectlyFromClient(CanisterMessage),
-    RelayedFromClient(ClientMessage),
-    IcWebSocketEstablished(PublicKeySlice),
-}
-
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CanisterMessage {
+pub struct DirectClientMessage {
     pub message: Vec<u8>,
-    pub client_key: PublicKeySlice,
+    pub client_key: ClientPublicKey,
 }
 
-// Messages have the following required fields (both ways).
+/// The variants of the possible messages received by the canister in `ws_message`.
+/// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
+///                           establishment of the IcWebSocketConnection
+/// - RelayedByGateway: message sent from the client to the WS Gateway (via WebSocket) and
+///                      relayed to the canister by the WS Gateway
+/// - DirectlyFromClient: message sent from directly client so that it is not necessary to
+///                       verify the signature
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[candid_path("ic_cdk::export::candid")]
+pub enum CanisterIncomingMessage {
+    DirectlyFromClient(DirectClientMessage),
+    RelayedByGateway(RelayedClientMessage),
+    IcWebSocketEstablished(ClientPublicKey),
+}
+
+/// Messages exchanged through the WebSocket.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
 pub struct WebsocketMessage {
     #[serde(with = "serde_bytes")]
-    pub client_key: PublicKeySlice, // To or from client key.
+    pub client_key: ClientPublicKey, // To or from client key.
     pub sequence_num: u64, // Both ways, messages should arrive with sequence numbers 0, 1, 2...
     pub timestamp: u64,    // Timestamp of when the message was made for the recipient to inspect.
     #[serde(with = "serde_bytes")]
     pub message: Vec<u8>, // Application message encoded in binary.
 }
 
-// One message in the list returned to the gateway polling for messages.
+/// Element of the list of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub struct EncodedMessage {
+pub struct CanisterOutputMessage {
     #[serde(with = "serde_bytes")]
-    client_key: PublicKeySlice, // The client that the gateway will forward the message to.
+    client_key: ClientPublicKey, // The client that the gateway will forward the message to.
     key: String, // Key for certificate verification.
     #[serde(with = "serde_bytes")]
     val: Vec<u8>, // Encoded WebsocketMessage.
 }
 
-// List of messages returned to the polling gateway.
+/// List of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]
-pub struct CertMessages {
-    messages: Vec<EncodedMessage>, // List of messages.
+pub struct CanisterOutputCertifiedMessages {
+    messages: Vec<CanisterOutputMessage>, // List of messages.
     #[serde(with = "serde_bytes")]
     cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
     #[serde(with = "serde_bytes")]
@@ -85,62 +151,67 @@ pub struct CertMessages {
 }
 
 thread_local! {
-    static CLIENT_CALLER_MAP: RefCell<HashMap<PublicKeySlice, Principal>> = RefCell::new(HashMap::new());
-    static CLIENT_GATEWAY_MAP: RefCell<HashMap<PublicKeySlice, Principal>> = RefCell::new(HashMap::new());
-    static CLIENT_MESSAGE_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
-    static CLIENT_INCOMING_NUM_MAP: RefCell<HashMap<PublicKeySlice, u64>> = RefCell::new(HashMap::new());
-    static GATEWAY_MESSAGES_MAP: RefCell<HashMap<Principal, VecDeque<EncodedMessage>>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the client's identity (anonymous if not authenticated).
+    static CLIENT_CALLER_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the sequence number to use for the next outgoing message (to that client).
+    static OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
+    /// Maps the client's public key to the expected sequence number of the next incoming message (from that client).
+    static INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
+    /// Keeps track of the Merkle tree used for certified queries
     static CERT_TREE: RefCell<RbTree<String, ICHash>> = RefCell::new(RbTree::new());
-    static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
+    /// Keeps track of the principal of the WS Gateway which polls the canister
+    static GATEWAY_PRINCIPAL: RefCell<Option<Principal>> = RefCell::new(None);
+    /// Keeps tarck of the messages that have to be sent to the WS Gateway
+    static MESSAGES_FOR_GATEWAY: RefCell<VecDeque<CanisterOutputMessage>> = RefCell::new(VecDeque::new());
+    /// Keeps track of the nonce which:
+    /// - the WS Gateway uses to specify the first index of the certified messages to be returned when polling
+    /// - the client uses as part of the path in the Merkle tree in order to verify the certificate of the messages relayed by the WS Gateway
+    static OUTGOING_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
 
 pub fn wipe() {
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().clear();
     });
-    CLIENT_GATEWAY_MAP.with(|map| {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().clear();
     });
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().clear();
-    });
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
-        map.borrow_mut().clear();
-    });
-    GATEWAY_MESSAGES_MAP.with(|map| {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().clear();
     });
     CERT_TREE.with(|t| {
         t.replace(RbTree::new());
     });
-    NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
+    GATEWAY_PRINCIPAL.with(|p| {
+        *p.borrow_mut() = None;
+    });
+    MESSAGES_FOR_GATEWAY.with(|m| *m.borrow_mut() = VecDeque::new());
+    OUTGOING_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
 
-fn next_message_nonce() -> u64 {
-    NEXT_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
+fn get_outgoing_message_nonce() -> u64 {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.borrow().clone())
 }
 
-fn put_client_caller(client_key: PublicKeySlice) {
+fn next_outgoing_message_nonce() -> u64 {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
+}
+
+fn put_client_caller(client_key: ClientPublicKey) {
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().insert(client_key, caller());
     })
 }
 
-fn get_client_caller(client_key: &PublicKeySlice) -> Option<Principal> {
+fn get_client_caller(client_key: &ClientPublicKey) -> Option<Principal> {
     CLIENT_CALLER_MAP.with(|map| Some(map.borrow().get(client_key)?.to_owned()))
 }
 
-fn put_client_gateway(client_key: PublicKeySlice) {
-    CLIENT_GATEWAY_MAP.with(|map| {
-        map.borrow_mut().insert(client_key, caller());
-    })
+pub fn get_gateway_principal() -> Option<Principal> {
+    GATEWAY_PRINCIPAL.with(|g| *g.borrow())
 }
 
-pub fn get_client_gateway(client_key: &PublicKeySlice) -> Option<Principal> {
-    CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(client_key).cloned())
-}
-
-fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String> {
+fn check_registered_client_key(client_key: &ClientPublicKey) -> Result<(), String> {
     match CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key)) {
         true => Ok(()),
         false => Err(String::from(
@@ -149,14 +220,14 @@ fn check_registered_client_key(client_key: &PublicKeySlice) -> Result<(), String
     }
 }
 
-fn init_client_message_num(client_key: PublicKeySlice) {
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+fn init_outgoing_message_to_client_num(client_key: ClientPublicKey) {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().insert(client_key, 0);
     });
 }
 
-fn next_client_message_num(client_key: &PublicKeySlice) -> Result<u64, String> {
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
+fn next_outgoing_message_to_client_num(client_key: &ClientPublicKey) -> Result<u64, String> {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         let mut map = map.borrow_mut();
         let num = *map
             .get(client_key)
@@ -166,14 +237,16 @@ fn next_client_message_num(client_key: &PublicKeySlice) -> Result<u64, String> {
     })
 }
 
-fn init_client_incoming_num(client_key: PublicKeySlice) {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+fn init_expected_incoming_message_from_client_num(client_key: ClientPublicKey) {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().insert(client_key, 0);
     });
 }
 
-fn get_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+fn get_expected_incoming_message_from_client_num(
+    client_key: &ClientPublicKey,
+) -> Result<u64, String> {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         let num = *map.borrow().get(client_key).ok_or(String::from(
             "incoming message num not initialized for client",
         ))?;
@@ -181,84 +254,88 @@ fn get_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
     })
 }
 
-fn increase_expected_client_incoming_num(client_key: &PublicKeySlice) -> Result<u64, String> {
-    let num = get_client_incoming_num(client_key)?;
-    CLIENT_INCOMING_NUM_MAP.with(|map| map.borrow_mut().insert(client_key.clone(), num + 1));
+fn increment_expected_incoming_message_from_client_num(
+    client_key: &ClientPublicKey,
+) -> Result<u64, String> {
+    let num = get_expected_incoming_message_from_client_num(client_key)?;
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP
+        .with(|map| map.borrow_mut().insert(client_key.clone(), num + 1));
     Ok(num + 1)
 }
 
-fn add_client(client_key: PublicKeySlice) {
-    // associate the identity of the WS Gateway to the public key of the client
-    put_client_gateway(client_key.clone());
+fn add_client(client_key: ClientPublicKey) {
     // initialize incoming client's message sequence number to 0
-    init_client_incoming_num(client_key.clone());
+    init_expected_incoming_message_from_client_num(client_key.clone());
     // initialize outgoing message sequence number to 0
-    init_client_message_num(client_key);
+    init_outgoing_message_to_client_num(client_key);
 }
 
-fn remove_client(client_key: PublicKeySlice) {
+fn remove_client(client_key: ClientPublicKey) {
     CLIENT_CALLER_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
-    CLIENT_GATEWAY_MAP.with(|map| {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
-    CLIENT_MESSAGE_NUM_MAP.with(|map| {
-        map.borrow_mut().remove(&client_key);
-    });
-    CLIENT_INCOMING_NUM_MAP.with(|map| {
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
 }
 
-fn get_cert_messages(nonce: u64) -> CertMessages {
-    GATEWAY_MESSAGES_MAP.with(|s| {
-        let gateway = caller();
+// gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
+fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
+    // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
+    let gateway_principal = caller_is_registered_gateway()?;
 
-        let mut s = s.borrow_mut();
-        let gateway_messages_vec = match s.get_mut(&gateway) {
-            None => {
-                s.insert(gateway.clone(), VecDeque::new());
-                s.get_mut(&gateway).unwrap()
-            },
-            Some(map) => map,
-        };
-
+    MESSAGES_FOR_GATEWAY.with(|m| {
+        // smallest key  used to determine the first of the messages from the queue which has to be returned to the WS Gateway
         let smallest_key =
-            gateway.clone().to_string() + "_" + &format!("{:0>20}", nonce.to_string());
-        let start_index = gateway_messages_vec.partition_point(|x| x.key < smallest_key);
-        let mut end_index = start_index;
-        while (end_index < gateway_messages_vec.len())
-            && (end_index < start_index + MAX_NUMBER_OF_RETURNED_MESSAGES)
-        {
-            end_index += 1;
+            gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string());
+        // partition the queue at the message which has the key with the nonce specified as argument to get_cert_messages
+        let start_index = m.borrow().partition_point(|x| x.key < smallest_key);
+        // message at index corresponding to end index is excluded
+        let end_index;
+        if m.borrow().len() - start_index > MAX_NUMBER_OF_RETURNED_MESSAGES {
+            end_index = start_index + MAX_NUMBER_OF_RETURNED_MESSAGES;
+        } else {
+            end_index = m.borrow().len();
         }
-        let mut messages: Vec<EncodedMessage> = Vec::with_capacity(end_index - start_index);
-        for index in 0..(end_index - start_index) {
-            messages.push(
-                gateway_messages_vec
-                    .get(start_index + index)
-                    .unwrap()
-                    .clone(),
-            );
+        let mut messages: Vec<CanisterOutputMessage> = Vec::with_capacity(end_index - start_index);
+        for index in start_index..end_index {
+            messages.push(m.borrow().get(index).unwrap().clone());
         }
         if end_index > start_index {
             let first_key = messages.first().unwrap().key.clone();
             let last_key = messages.last().unwrap().key.clone();
             let (cert, tree) = get_cert_for_range(&first_key, &last_key);
-            CertMessages {
+            Ok(CanisterOutputCertifiedMessages {
                 messages,
                 cert,
                 tree,
-            }
+            })
         } else {
-            CertMessages {
+            Ok(CanisterOutputCertifiedMessages {
                 messages,
                 cert: Vec::new(),
                 tree: Vec::new(),
-            }
+            })
         }
     })
+}
+
+fn caller_is_registered_gateway() -> Result<Principal, String> {
+    let gateway_principal = GATEWAY_PRINCIPAL.with(|p| {
+        p.borrow()
+            .expect("gateway principal not initialized")
+            .clone()
+    });
+    // check if the caller is the same as the one that was registered during the initialization of the CDK
+    if gateway_principal != caller() {
+        return Err(String::from(
+            "caller is not the gateway that has been registered during CDK initialization",
+        ));
+    }
+    Ok(gateway_principal)
 }
 
 fn put_cert_for_message(key: String, value: &Vec<u8>) {
@@ -287,86 +364,113 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
 
 // type ApplicationMessage<T: Deserialize + Serialize> = T;
 
-type OnOpenCallback = fn(PublicKeySlice);
-type OnMessageCallback = fn(CanisterMessage);
-type OnCloseCallback = fn(PublicKeySlice);
+/// handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
+/// is established
+type OnOpenCallback = fn(ClientPublicKey);
+/// handler initialized by the canister and triggered by the CDK once a message is received by
+/// the CDk (either directly from the client or relayed by the WS Gateway)
+type OnMessageCallback = fn(DirectClientMessage);
+/// handler initialized by the canister and triggered by the CDK once the WS Gateway closes the
+/// IC WebSocket connection
+type OnCloseCallback = fn(ClientPublicKey);
 
-struct Handlers {
+struct WsHandlers {
     on_open: Result<OnOpenCallback, String>,
     on_message: Result<OnMessageCallback, String>,
     on_close: Result<OnCloseCallback, String>,
 }
 
 thread_local! {
-    /* flexible */ static HANDLERS: RefCell<Handlers> = RefCell::new(Handlers {
+    /* flexible */ static HANDLERS: RefCell<WsHandlers> = RefCell::new(WsHandlers {
         on_open: Err(String::from("on_open handler not initialized")),
         on_message: Err(String::from("on_message handler not initialized")),
         on_close: Err(String::from("on_close handler not initialized")),
     });
 }
 
-pub fn init(on_open: OnOpenCallback, on_message: OnMessageCallback, on_close: OnCloseCallback) {
+// init CDK
+pub fn init(
+    on_open: OnOpenCallback,
+    on_message: OnMessageCallback,
+    on_close: OnCloseCallback,
+    gateway_principal: &str,
+) {
+    // set the handlers specified by the canister that the CDK uses to manage the IC WebSocket connection
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
         h.on_open = Ok(on_open);
         h.on_message = Ok(on_message);
         h.on_close = Ok(on_close);
     });
+    // set the principal of the (only) WS Gateway that will be polling the canister
+    GATEWAY_PRINCIPAL.with(|p| {
+        let gateway_principal =
+            Principal::from_text(gateway_principal).expect("invalid gateway principal");
+        *p.borrow_mut() = Some(gateway_principal);
+    });
 }
 
 // register the public key that the client SDK has newly generated to initialize an IcWebSocket connection
-pub fn ws_register(client_key: PublicKeySlice) {
+pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
     // associate the identity of the client to its public key received as input
-    put_client_caller(client_key)
+    put_client_caller(args.client_key);
+    Ok(())
 }
 
-// WS Gateway relays FirstMessage sent by the client together with its signature
-// to prove that FirstMessage is actually coming from the same client that registered its public key
+// WS Gateway relays the first message sent by the client together with its signature
+// to prove that the first message is actually coming from the same client that registered its public key
 // beforehand by calling ws_register()
-pub fn ws_open(msg: Vec<u8>, sig: Vec<u8>) -> WsOpenResult {
-    // check if the message relayed by the WS Gateway is of type FirstMessage
-    let FirstMessage {
+pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
+    // check if caller is the gateway that was registered during CDK initialization
+    caller_is_registered_gateway()?;
+    // decode the first message sent by the client
+    let CanisterFirstMessageContent {
         client_key,
         canister_id,
-    } = from_slice(&msg).map_err(|e| e.to_string())?;
+    } = from_slice(&args.msg).map_err(|e| e.to_string())?;
     // check if client_key is a Ed25519 public key
     let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
     // check if the signature realyed by the WS Gateway is a Ed25519 signature
-    let sig = Signature::from_slice(&sig).map_err(|e| e.to_string())?;
+    let sig = Signature::from_slice(&args.sig).map_err(|e| e.to_string())?;
 
     // check if client registered its public key by calling ws_register
     check_registered_client_key(&client_key)?;
-    // check if the signature on FirstMessage verifies against the public key of the registered client
+    // check if the signature on the first message verifies against the public key of the registered client
     // if so, the first message came from the same client that registered its public key using ws_register
-    public_key.verify(&msg, &sig).map_err(|e| e.to_string())?;
+    public_key
+        .verify(&args.msg, &sig)
+        .map_err(|e| e.to_string())?;
 
     // initialize client maps
     add_client(client_key.clone());
 
-    Ok((client_key, canister_id))
+    Ok(CanisterWsOpenValue {
+        client_key,
+        canister_id,
+        // returns the current nonce so that in case the WS Gateway has to open a new poller for this canister
+        // it knows which nonce to start polling from. This is needed in order to make sure that the WS Gateway
+        // does not poll messages it has already relayed when a new it starts polling a canister
+        // (which it might have already polled previously with another thread that was closed after the last client disconnected)
+        nonce: get_outgoing_message_nonce(),
+    })
 }
 
-pub fn ws_close(client_key: PublicKeySlice) -> WsCloseResult {
-    remove_client(client_key.clone());
+// closes the IC WebSocket connection with a client
+pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
+    remove_client(args.client_key.clone());
 
     HANDLERS.with(|h| {
         let on_close_handler = h.borrow().on_close.to_owned()?;
-        on_close_handler(client_key);
+        on_close_handler(args.client_key);
         Ok(())
     })
 }
 
-// GatewayMessage has three variants:
-// - IcWebSocketEstablished: message sent from WS Gateway to the canister to notify it about the
-//                           establishment of the IcWebSocketConnection
-// - RelayedFromClient: message sent from the client to the WS Gateway (via WebSocket) and
-//                      relayed to the canister by the WS Gateway
-// - DirectlyFromClient: message sent from directly client so that it is not necessary to
-//                       verify the signature
-pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
-    match msg {
+// handles the messages received by the canister
+pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
+    match args.msg {
         // message sent directly from client
-        GatewayMessage::DirectlyFromClient(canister_message) => {
+        CanisterIncomingMessage::DirectlyFromClient(canister_message) => {
             // check if the identity of the caller corresponds to the one registered for the given public key
             if caller()
                 != get_client_caller(&canister_message.client_key).ok_or(String::from(
@@ -388,7 +492,7 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
             return handler_result;
         },
         // WS Gateway relays a message from the client
-        GatewayMessage::RelayedFromClient(client_msg) => {
+        CanisterIncomingMessage::RelayedByGateway(client_msg) => {
             let WebsocketMessage {
                 client_key,
                 sequence_num,
@@ -403,23 +507,22 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
 
             // check if client registered its public key by calling ws_register
             check_registered_client_key(&client_key)?;
-            // check if the signature on the content of ClientMessage verifies against the public key of the registered client
+            // check if the signature on the content of the client message verifies against the public key of the registered client
             // if so, the message came from the same client that registered its public key using ws_register
             public_key
                 .verify(&client_msg.content, &sig)
                 .map_err(|e| e.to_string())?;
 
             // check if the incoming message has the expected sequence number
-            if sequence_num == get_client_incoming_num(&client_key)? {
+            if sequence_num == get_expected_incoming_message_from_client_num(&client_key)? {
                 // increse the expected sequence number by 1
-                let next_seq_num = increase_expected_client_incoming_num(&client_key)?;
-                println!("Next sequence number: {}", next_seq_num);
+                increment_expected_incoming_message_from_client_num(&client_key)?;
                 // call the on_message handler initialized in init()
                 let handler_result = HANDLERS.with(|h| {
                     // check if on_message method has been initialized during init()
                     let on_message_handler = h.borrow().on_message.to_owned()?;
                     // create messaeg to send to client
-                    let canister_message = CanisterMessage {
+                    let canister_message = DirectClientMessage {
                         message,
                         client_key,
                     };
@@ -434,7 +537,7 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
             ))
         },
         // WS Gateway notifies the canister of the established IC WebSocket connection
-        GatewayMessage::IcWebSocketEstablished(client_key) => {
+        CanisterIncomingMessage::IcWebSocketEstablished(client_key) => {
             print(format!(
                 "Can start notifying client with key: {:?}",
                 client_key
@@ -453,15 +556,16 @@ pub fn ws_message(msg: GatewayMessage) -> WsMessageResult {
     }
 }
 
-pub fn ws_get_messages(nonce: u64) -> CertMessages {
-    get_cert_messages(nonce)
+// gets messages that need to be sent to the WS Gateway in response of a polling iteration
+pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
+    get_cert_messages(args.nonce)
 }
 
-// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES_MAP
+// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES
 pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
-    client_key: PublicKeySlice,
+    client_key: ClientPublicKey,
     msg: T,
-) -> WsSendResult {
+) -> CanisterWsSendResult {
     // serialize the message for the client into msg_cbor
     let mut msg_cbor = vec![];
     let mut serializer = Serializer::new(&mut msg_cbor);
@@ -469,19 +573,21 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     msg.serialize(&mut serializer).map_err(|e| e.to_string())?;
 
     // get the principal of the gateway that is polling the canister
-    let gateway = get_client_gateway(&client_key)
-        .ok_or(String::from("client has no corresponding gateway in map"))?;
+    let gateway = get_gateway_principal().ok_or(String::from(
+        "gateway principal has not been registered during CDK initialization",
+    ))?;
 
     let time = time();
 
     // the nonce in key is used by the WS Gateway to determine the message to start from in the next polling iteration
     // the key is also passed to the client in order to validate the body of the certified message
-    let key =
-        gateway.clone().to_string() + "_" + &format!("{:0>20}", next_message_nonce().to_string());
+    let key = gateway.clone().to_string()
+        + "_"
+        + &format!("{:0>20}", next_outgoing_message_nonce().to_string());
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
-        sequence_num: next_client_message_num(&client_key)?,
+        sequence_num: next_outgoing_message_to_client_num(&client_key)?,
         timestamp: time,
         message: msg_cbor,
     };
@@ -497,17 +603,11 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     // certify data
     put_cert_for_message(key.clone(), &data);
 
-    // TODO: init GATEWAY_MESSAGES_MAP with one gateway principal during init()
-    GATEWAY_MESSAGES_MAP.with(|s| {
-        let mut s = s.borrow_mut();
-        let gw_map = match s.get_mut(&gateway) {
-            None => {
-                s.insert(gateway.clone(), VecDeque::new());
-                s.get_mut(&gateway).unwrap()
-            },
-            Some(map) => map,
-        };
-        gw_map.push_back(EncodedMessage {
+    MESSAGES_FOR_GATEWAY.with(|m| {
+        // messages in the queue are inserted with contiguous and increasing nonces
+        // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
+        // is incremented by one in each call, and the message is pushed at the end of the queue
+        m.borrow_mut().push_back(CanisterOutputMessage {
             client_key,
             key,
             val: data,

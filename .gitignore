@@ -5,6 +5,7 @@
 .DS_Store
 
 ic_websocket_gateway/target
+ic_websocket_gateway/data
 
 ic_websocket_canisters/target
 ic_websocket_canisters/node_modules

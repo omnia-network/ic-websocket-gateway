@@ -1,4 +1,4 @@
-import IcWebSocket from "./icWebsocket";
+import IcWebSocket from "./ic-websocket/icWebsocket";
 import addNotification from "./utils/addNotification";
 import { ic_websocket_backend } from "../../declarations/ic_websocket_backend";
 
@@ -31,8 +31,8 @@ ws.onopen = () => {
   console.log("IcWebSocket opened");
 };
 
-ws.onmessage = (event) => {
-  addNotification(event.data);
+ws.onmessage = (event: MessageEvent<{ text: string }>) => {
+  addNotification(event.data.text);
 
   // wait 5 seconds and send a pong (just as an example, the timeout is not part of the protocol)
   setTimeout(() => {

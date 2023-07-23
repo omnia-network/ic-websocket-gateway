@@ -1,5 +1,6 @@
 import { ic_websocket_backend } from "../src/declarations/ic_websocket_backend";
-import IcWebSocket from "../src/ic_websocket_frontend/src/icWebsocket";
+import IcWebSocket from "../src/ic_websocket_frontend/src/ic-websocket/icWebsocket";
+import type { _SERVICE } from "../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
 
 /// IcWebsocket parameters
 const backendCanisterId = process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND || "";
@@ -10,7 +11,7 @@ const persistKey = false;
 
 /// test constants & variables
 const pingPongCount = 5;
-let ws: IcWebSocket;
+let ws: IcWebSocket<_SERVICE>;
 
 /// jest configuration
 jest.setTimeout(30_000);
@@ -72,48 +73,51 @@ describe("WS client", () => {
   it("should send and receive messages", async () => {
     let messageCounter = 0;
     // wrap the test in a promise so we can await it before ending the test
-    await expect(new Promise<void>((resolve, reject) => {
+
+    const promisifiedHandlers = new Promise<void>((resolve, reject) => {
       ws.onerror = (event) => {
-        console.log("IcWebSocket error", event);
-        expect(event).toBeNull();
+        console.error("IcWebSocket error:", event.error);
+        reject(event.error);
       };
 
-      ws.onmessage = async (event) => {
-        expect(event.data).toEqual(reconstructWsMessage(messageCounter));
+      ws.onmessage = async (event: MessageEvent<{ text: string; }>) => {
+        if (!(event.data.text === reconstructWsMessage(messageCounter))) {
+          return reject("Received message does not match expected message");
+        }
 
         messageCounter++;
-        const indices = getIndicesOf("ping", event.data);
+        const indices = getIndicesOf("ping", event.data.text);
         if (messageCounter === pingPongCount) {
           // close the test after the last message
           return resolve();
         }
         expect(indices.length).toBe(messageCounter);
 
-        try {
-          await ws.send({
-            text: event.data + "-pong",
-          });
-        } catch (error) {
-          reject(error);
-        }
+        await ws.send({
+          text: event.data.text + "-pong",
+        });
       };
-    })).resolves.not.toThrow();
+    });
+
+    await expect(promisifiedHandlers).resolves.not.toThrow();
   });
 
   it("should close the connection", async () => {
     // wrap the test in a promise so we can await it before ending the test
-    await new Promise<void>((resolve) => {
+    const promisifiedHandlers = new Promise<void>((resolve, reject) => {
       ws.onerror = (event) => {
-        console.log("IcWebSocket error", event);
-        expect(event).toBeNull();
+        console.error("IcWebSocket error:", event.error);
+        reject(event.error);
       };
 
       ws.onclose = () => {
         // close the test after closing the connection
-        return resolve();
+        resolve();
       };
 
       ws.close();
     });
+
+    await expect(promisifiedHandlers).resolves.not.toThrow();
   });
 });
