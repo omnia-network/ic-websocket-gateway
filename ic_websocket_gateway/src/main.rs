@@ -6,10 +6,9 @@ use canister_methods::{
 use ed25519_compact::{PublicKey, Signature};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
-use ic_cdk::println;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs, path::Path, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -291,6 +290,26 @@ async fn remove_client_from_server(
     }
 }
 
+fn load_key_pair() -> ring::signature::Ed25519KeyPair {
+    if !Path::new("./data").is_dir() {
+        fs::create_dir("./data").unwrap();
+    }
+
+    if !Path::new("./data/key_pair").is_file() {
+        let rng = ring::rand::SystemRandom::new();
+        let key_pair = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
+            .expect("Could not generate a key pair.");
+        // TODO: print out seed phrase
+        fs::write("./data/key_pair", key_pair.as_ref()).unwrap();
+        ring::signature::Ed25519KeyPair::from_pkcs8(key_pair.as_ref())
+            .expect("Could not read the key pair.")
+    } else {
+        let key_pair = fs::read("./data/key_pair").unwrap();
+        ring::signature::Ed25519KeyPair::from_pkcs8(&key_pair)
+            .expect("Could not read the key pair.")
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ClientPollerChannelData {
     NewClientChannel(ClientPublicKey, UnboundedSender<CertifiedMessage>),
@@ -309,14 +328,14 @@ async fn main() {
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     println!("Listening on: {}", addr);
 
-    let rng = ring::rand::SystemRandom::new();
-    let key_pair = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
-        .expect("Could not generate a key pair.");
-    let identity = BasicIdentity::from_key_pair(
-        ring::signature::Ed25519KeyPair::from_pkcs8(key_pair.as_ref())
-            .expect("Could not read the key pair."),
-    );
+    let key_pair = load_key_pair();
+    let identity = BasicIdentity::from_key_pair(key_pair);
+
     let agent = Arc::new(canister_methods::get_new_agent(URL, identity, FETCH_KEY).await);
+    println!(
+        "Gateway Agent principal: {}",
+        agent.get_principal().expect("Principal should be set")
+    );
 
     let mut gateway_server = GatewayServer {
         connected_canisters: HashMap::default(),
