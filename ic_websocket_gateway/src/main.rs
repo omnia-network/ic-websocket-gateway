@@ -1,7 +1,7 @@
 use candid::CandidType;
 use canister_methods::{
-    CanisterFirstMessageContent, CanisterOutputCertifiedMessages, ClientPublicKey,
-    RelayedClientMessage,
+    CanisterFirstMessageContent, CanisterOutputCertifiedMessages, CanisterWsOpenResult,
+    ClientPublicKey, RelayedClientMessage,
 };
 use ed25519_compact::{PublicKey, Signature};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
@@ -46,10 +46,7 @@ enum IcWsError {
     WsClose(String),             // WebSocket closed by client
 }
 
-async fn check_canister_init(
-    agent: &Agent,
-    message: Message,
-) -> Result<(ClientPublicKey, Principal), String> {
+async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
     if let Message::Binary(bytes) = message {
         let m = from_slice::<RelayedClientMessage>(&bytes)
             .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
@@ -379,13 +376,11 @@ async fn main() {
                     Ok(gateway_session) => {
                         gateway_server.client_key_map.insert(gateway_session.client_id.clone(), gateway_session.client_key.clone());
                         gateway_server.client_session_map.insert(gateway_session.client_key.clone(), gateway_session.clone());
-                        // check if client is connecting to a canister that is not yet being polled
-                        // if so, create new poller task
-
                         let client_poller_channel_data = ClientPollerChannelData::NewClientChannel(gateway_session.client_key.clone(), gateway_session.message_for_client_tx.clone());
 
+                        // check if client is connecting to a canister that is not yet being polled
+                        // if so, create new poller task
                         let client_channel_tx = gateway_server.connected_canisters.get_mut(&gateway_session.canister_id.clone());
-
                         let needs_new_poller = match client_channel_tx {
                             Some(client_channel_tx) => {
                                 if client_channel_tx.send(client_poller_channel_data.clone()).is_err() {

@@ -145,9 +145,6 @@ pub struct CanisterOutputCertifiedMessages {
 thread_local! {
     /// Maps the client's public key to the client's identity (anonymous if not authenticated).
     static CLIENT_CALLER_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
-    /// Maps the client's public key to the WS Gateway's identity.
-    // TODO: fix the WS Gateway identity during init() (as we are assuming there is only one gateway polling the canister)
-    static CLIENT_GATEWAY_MAP: RefCell<HashMap<ClientPublicKey, Principal>> = RefCell::new(HashMap::new());
     /// Maps the client's public key to the sequence number to use for the next outgoing message (to that client).
     static OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP: RefCell<HashMap<ClientPublicKey, u64>> = RefCell::new(HashMap::new());
     /// Maps the client's public key to the expected sequence number of the next incoming message (from that client).
@@ -166,9 +163,6 @@ thread_local! {
 
 pub fn wipe() {
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().clear();
-    });
-    CLIENT_GATEWAY_MAP.with(|map| {
         map.borrow_mut().clear();
     });
     OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
@@ -201,14 +195,8 @@ fn get_client_caller(client_key: &ClientPublicKey) -> Option<Principal> {
     CLIENT_CALLER_MAP.with(|map| Some(map.borrow().get(client_key)?.to_owned()))
 }
 
-fn put_client_gateway(client_key: ClientPublicKey) {
-    CLIENT_GATEWAY_MAP.with(|map| {
-        map.borrow_mut().insert(client_key, caller());
-    })
-}
-
-pub fn get_client_gateway(client_key: &ClientPublicKey) -> Option<Principal> {
-    CLIENT_GATEWAY_MAP.with(|map| map.borrow().get(client_key).cloned())
+pub fn get_gateway_principal() -> Option<Principal> {
+    GATEWAY_PRINCIPAL.with(|g| *g.borrow())
 }
 
 fn check_registered_client_key(client_key: &ClientPublicKey) -> Result<(), String> {
@@ -264,8 +252,6 @@ fn increment_expected_incoming_message_from_client_num(
 }
 
 fn add_client(client_key: ClientPublicKey) {
-    // associate the identity of the WS Gateway to the public key of the client
-    put_client_gateway(client_key.clone());
     // initialize incoming client's message sequence number to 0
     init_expected_incoming_message_from_client_num(client_key.clone());
     // initialize outgoing message sequence number to 0
@@ -274,9 +260,6 @@ fn add_client(client_key: ClientPublicKey) {
 
 fn remove_client(client_key: ClientPublicKey) {
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().remove(&client_key);
-    });
-    CLIENT_GATEWAY_MAP.with(|map| {
         map.borrow_mut().remove(&client_key);
     });
     OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
@@ -289,15 +272,9 @@ fn remove_client(client_key: ClientPublicKey) {
 
 // gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
 fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
-    let gateway_principal = GATEWAY_PRINCIPAL.with(|p| {
-        p.borrow()
-            .expect("gateway principal not initialized")
-            .clone()
-    });
-    // check if the caller fo this method is the WS Gateway that has been set during the initialization of the SDK
-    if gateway_principal != caller() {
-        return Err(String::from("caller of get_cert_messages is not the gateway that has been registered during CDK initialization"));
-    }
+    // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
+    let gateway_principal = caller_is_registered_gateway()?;
+
     MESSAGES_FOR_GATEWAY.with(|m| {
         // smallest key  used to determine the first of the messages from the queue which has to be returned to the WS Gateway
         let smallest_key =
@@ -332,6 +309,21 @@ fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
             })
         }
     })
+}
+
+fn caller_is_registered_gateway() -> Result<Principal, String> {
+    let gateway_principal = GATEWAY_PRINCIPAL.with(|p| {
+        p.borrow()
+            .expect("gateway principal not initialized")
+            .clone()
+    });
+    // check if the caller is the same as the one that was registered during the initialization of the CDK
+    if gateway_principal != caller() {
+        return Err(String::from(
+            "caller is not the gateway that has been registered during CDK initialization",
+        ));
+    }
+    Ok(gateway_principal)
 }
 
 fn put_cert_for_message(key: String, value: &Vec<u8>) {
@@ -417,7 +409,8 @@ pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResul
 // to prove that the first message is actually coming from the same client that registered its public key
 // beforehand by calling ws_register()
 pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
-    // TODO: check if caller is the gateway that was registered during CDK initialization
+    // check if caller is the gateway that was registered during CDK initialization
+    caller_is_registered_gateway()?;
     // decode the first message sent by the client
     let CanisterFirstMessageContent {
         client_key,
@@ -560,8 +553,9 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     msg.serialize(&mut serializer).map_err(|e| e.to_string())?;
 
     // get the principal of the gateway that is polling the canister
-    let gateway = get_client_gateway(&client_key)
-        .ok_or(String::from("client has no corresponding gateway in map"))?;
+    let gateway = get_gateway_principal().ok_or(String::from(
+        "gateway principal has not been registered during CDK initialization",
+    ))?;
 
     let time = time();
 
