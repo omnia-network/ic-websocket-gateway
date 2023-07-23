@@ -16,7 +16,7 @@ pub type ClientPublicKey = Vec<u8>;
 /// The result of `ws_register`.
 pub type CanisterWsRegisterResult = Result<(), String>;
 /// The result of `ws_open`.
-pub type CanisterWsOpenResult = Result<(ClientPublicKey, Principal), String>;
+pub type CanisterWsOpenResult = Result<CanisterWsOpenValue, String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
@@ -25,6 +25,14 @@ pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, S
 pub type CanisterWsSendResult = Result<(), String>;
 /// The result of `ws_close`.
 pub type CanisterWsCloseResult = Result<(), String>;
+
+// The Ok value of CanisterWsOpenResult returned by `ws_open`
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct CanisterWsOpenValue {
+    client_key: ClientPublicKey,
+    canister_id: Principal,
+    nonce: u64,
+}
 
 /// The arguments for `ws_register`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
@@ -158,7 +166,7 @@ thread_local! {
     /// Keeps track of the nonce which:
     /// - the WS Gateway uses to specify the first index of the certified messages to be returned when polling
     /// - the client uses as part of the path in the Merkle tree in order to verify the certificate of the messages relayed by the WS Gateway
-    static NEXT_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
+    static OUTGOING_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
 }
 
 pub fn wipe() {
@@ -178,11 +186,15 @@ pub fn wipe() {
         *p.borrow_mut() = None;
     });
     MESSAGES_FOR_GATEWAY.with(|m| *m.borrow_mut() = VecDeque::new());
-    NEXT_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
+    OUTGOING_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
 
-fn next_message_nonce() -> u64 {
-    NEXT_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
+fn get_outgoing_message_nonce() -> u64 {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.borrow().clone())
+}
+
+fn next_outgoing_message_nonce() -> u64 {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
 }
 
 fn put_client_caller(client_key: ClientPublicKey) {
@@ -432,7 +444,15 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     // initialize client maps
     add_client(client_key.clone());
 
-    Ok((client_key, canister_id))
+    Ok(CanisterWsOpenValue {
+        client_key,
+        canister_id,
+        // returns the current nonce so that in case the WS Gateway has to open a new poller for this canister
+        // it knows which nonce to start polling from. This is needed in order to make sure that the WS Gateway
+        // does not poll messages it has already relayed when a new it starts polling a canister
+        // (which it might have already polled previously with another thread that was closed after the last client disconnected)
+        nonce: get_outgoing_message_nonce(),
+    })
 }
 
 // closes the IC WebSocket connection with a client
@@ -561,8 +581,9 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
 
     // the nonce in key is used by the WS Gateway to determine the message to start from in the next polling iteration
     // the key is also passed to the client in order to validate the body of the certified message
-    let key =
-        gateway.clone().to_string() + "_" + &format!("{:0>20}", next_message_nonce().to_string());
+    let key = gateway.clone().to_string()
+        + "_"
+        + &format!("{:0>20}", next_outgoing_message_nonce().to_string());
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
