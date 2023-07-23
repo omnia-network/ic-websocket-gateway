@@ -5,7 +5,7 @@ use serde_cbor::from_slice;
 use crate::sock::{ws_send, ClientPublicKey, DirectClientMessage};
 
 pub const GATEWAY_PRINCIPAL: &str =
-    "v5lpu-3wfe4-hmdpu-fordq-dnnfm-v2iya-ihejh-gtl4o-wyycy-kdblq-iae";
+    "sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae";
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[candid_path("ic_cdk::export::candid")]

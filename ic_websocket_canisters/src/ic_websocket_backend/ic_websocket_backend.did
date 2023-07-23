@@ -42,14 +42,14 @@ type CanisterWsOpenArguments = record {
   sig : blob;
 };
 
-type CanisterWsOpenValue = record {
+type CanisterWsOpenResultValue = record {
   client_key : ClientPublicKey;
   canister_id : principal;
   nonce : nat64;
 };
 
 type CanisterWsOpenResult = variant {
-  Ok : CanisterWsOpenValue;
+  Ok : CanisterWsOpenResultValue;
   Err : text;
 };
 

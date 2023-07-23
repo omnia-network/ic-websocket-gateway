@@ -1,15 +1,18 @@
 use candid::CandidType;
 use candid::Decode;
+use ed25519_compact::{PublicKey, Signature};
 use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, export::Principal,
     identity::BasicIdentity, Agent,
 };
 use serde::{Deserialize, Serialize};
+use serde_cbor::from_slice;
+use tokio_tungstenite::tungstenite::Message;
 
 pub type ClientPublicKey = Vec<u8>;
 
 /// The result of `ws_open`.
-pub type CanisterWsOpenResult = Result<CanisterWsOpenValue, String>;
+pub type CanisterWsOpenResult = Result<CanisterWsOpenResultValue, String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
@@ -17,9 +20,9 @@ pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, S
 /// The result of `ws_close`.
 pub type CanisterWsCloseResult = Result<(), String>;
 
-// The Ok value of CanisterWsOpenResult returned by `ws_open`
+/// The Ok value of CanisterWsOpenResult returned by `ws_open`
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterWsOpenValue {
+pub struct CanisterWsOpenResultValue {
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
     pub nonce: u64,
@@ -134,6 +137,28 @@ pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) 
         agent.fetch_root_key().await.unwrap();
     }
     agent
+}
+
+pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
+    if let Message::Binary(bytes) = message {
+        let m = from_slice::<RelayedClientMessage>(&bytes)
+            .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
+        let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
+            String::from("content of first message is not of type ClientCanisterId")
+        })?;
+        let sig = Signature::from_slice(&m.sig)
+            .map_err(|_| String::from("first message does not contain a valid signature"))?;
+        let public_key = PublicKey::from_slice(&content.client_key)
+            .map_err(|_| String::from("first message does not contain a valid public key"))?;
+        public_key
+            .verify(&m.content, &sig)
+            .map_err(|_| String::from("client's signature does not verify against public key"))?;
+        ws_open(agent, &content.canister_id, m.content, m.sig).await
+    } else {
+        Err(String::from(
+            "first message from client should be binary encoded",
+        ))
+    }
 }
 
 pub async fn ws_open(

@@ -16,7 +16,7 @@ pub type ClientPublicKey = Vec<u8>;
 /// The result of `ws_register`.
 pub type CanisterWsRegisterResult = Result<(), String>;
 /// The result of `ws_open`.
-pub type CanisterWsOpenResult = Result<CanisterWsOpenValue, String>;
+pub type CanisterWsOpenResult = Result<CanisterWsOpenResultValue, String>;
 /// The result of `ws_message`.
 pub type CanisterWsMessageResult = Result<(), String>;
 /// The result of `ws_get_messages`.
@@ -28,7 +28,7 @@ pub type CanisterWsCloseResult = Result<(), String>;
 
 // The Ok value of CanisterWsOpenResult returned by `ws_open`
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterWsOpenValue {
+pub struct CanisterWsOpenResultValue {
     client_key: ClientPublicKey,
     canister_id: Principal,
     nonce: u64,
@@ -207,8 +207,8 @@ fn get_client_caller(client_key: &ClientPublicKey) -> Option<Principal> {
     CLIENT_CALLER_MAP.with(|map| Some(map.borrow().get(client_key)?.to_owned()))
 }
 
-pub fn get_gateway_principal() -> Option<Principal> {
-    GATEWAY_PRINCIPAL.with(|g| *g.borrow())
+fn get_gateway_principal() -> Principal {
+    GATEWAY_PRINCIPAL.with(|g| g.borrow().expect("gateway principal should be initialized"))
 }
 
 fn check_registered_client_key(client_key: &ClientPublicKey) -> Result<(), String> {
@@ -284,8 +284,7 @@ fn remove_client(client_key: ClientPublicKey) {
 
 // gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
 fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
-    // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
-    let gateway_principal = caller_is_registered_gateway()?;
+    let gateway_principal = get_gateway_principal();
 
     MESSAGES_FOR_GATEWAY.with(|m| {
         // smallest key  used to determine the first of the messages from the queue which has to be returned to the WS Gateway
@@ -323,19 +322,16 @@ fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
     })
 }
 
-fn caller_is_registered_gateway() -> Result<Principal, String> {
-    let gateway_principal = GATEWAY_PRINCIPAL.with(|p| {
-        p.borrow()
-            .expect("gateway principal not initialized")
-            .clone()
-    });
+/// Checks if the caller of the method is the same as the one that was registered during the initialization of the CDK
+fn check_caller_is_registered_gateway() -> Result<(), String> {
+    let gateway_principal = get_gateway_principal();
     // check if the caller is the same as the one that was registered during the initialization of the CDK
     if gateway_principal != caller() {
         return Err(String::from(
             "caller is not the gateway that has been registered during CDK initialization",
         ));
     }
-    Ok(gateway_principal)
+    Ok(())
 }
 
 fn put_cert_for_message(key: String, value: &Vec<u8>) {
@@ -410,19 +406,24 @@ pub fn init(
     });
 }
 
-// register the public key that the client SDK has newly generated to initialize an IcWebSocket connection
+/// Handles the register event received from the client.
+///
+/// Registers the public key that the client SDK has generated to initialize an IcWebSocket connection.
 pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
+    // TODO: check who is the caller, which can be a client or the anonymous principal
     // associate the identity of the client to its public key received as input
     put_client_caller(args.client_key);
     Ok(())
 }
 
-// WS Gateway relays the first message sent by the client together with its signature
-// to prove that the first message is actually coming from the same client that registered its public key
-// beforehand by calling ws_register()
+/// Handles the WS connection open event received from the WS Gateway
+///
+/// WS Gateway relays the first message sent by the client together with its signature
+/// to prove that the first message is actually coming from the same client that registered its public key
+/// beforehand by calling ws_register()
 pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
-    // check if caller is the gateway that was registered during CDK initialization
-    caller_is_registered_gateway()?;
+    // the caller must be the gateway that was registered during CDK initialization
+    check_caller_is_registered_gateway()?;
     // decode the first message sent by the client
     let CanisterFirstMessageContent {
         client_key,
@@ -444,7 +445,7 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     // initialize client maps
     add_client(client_key.clone());
 
-    Ok(CanisterWsOpenValue {
+    Ok(CanisterWsOpenResultValue {
         client_key,
         canister_id,
         // returns the current nonce so that in case the WS Gateway has to open a new poller for this canister
@@ -455,8 +456,11 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     })
 }
 
-// closes the IC WebSocket connection with a client
+/// Handles the WS connection close event received from the WS Gateway
 pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
+    // the caller must be the gateway that was registered during CDK initialization
+    check_caller_is_registered_gateway()?;
+
     remove_client(args.client_key.clone());
 
     HANDLERS.with(|h| {
@@ -466,8 +470,9 @@ pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     })
 }
 
-// handles the messages received by the canister
+/// Handles the WS messages received  either directly from the client or relayed by the WS Gateway
 pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
+    // TODO: check the caller, which can be either the WS Gateway or the client, but not another canister or the anonymous principal
     match args.msg {
         // message sent directly from client
         CanisterIncomingMessage::DirectlyFromClient(canister_message) => {
@@ -556,12 +561,18 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     }
 }
 
-// gets messages that need to be sent to the WS Gateway in response of a polling iteration
+/// Returns messages to the WS Gateway in response of a polling iteration.
 pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
+    // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
+    check_caller_is_registered_gateway()?;
+
     get_cert_messages(args.nonce)
 }
 
-// messages that the canister wants to send to some client are stored in GATEWAY_MESSAGES
+/// Sends a message to the client.
+///
+/// Under the hood, the message is serialized and certified, and then it is added to the queue of messages
+/// that the WS Gateway will poll in the next iteration.
 pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     client_key: ClientPublicKey,
     msg: T,
@@ -573,9 +584,7 @@ pub fn ws_send<'a, T: Deserialize<'a> + Serialize>(
     msg.serialize(&mut serializer).map_err(|e| e.to_string())?;
 
     // get the principal of the gateway that is polling the canister
-    let gateway = get_gateway_principal().ok_or(String::from(
-        "gateway principal has not been registered during CDK initialization",
-    ))?;
+    let gateway = get_gateway_principal();
 
     let time = time();
 

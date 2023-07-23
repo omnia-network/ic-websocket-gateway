@@ -1,13 +1,9 @@
 use candid::CandidType;
-use canister_methods::{
-    CanisterFirstMessageContent, CanisterOutputCertifiedMessages, CanisterWsOpenResult,
-    ClientPublicKey, RelayedClientMessage,
-};
-use ed25519_compact::{PublicKey, Signature};
+use canister_methods::{CanisterOutputCertifiedMessages, ClientPublicKey};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
-use serde_cbor::{from_slice, to_vec};
+use serde_cbor::to_vec;
 use std::{collections::HashMap, fs, path::Path, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -22,7 +18,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message, Result},
 };
 
-use crate::canister_methods::{CanisterIncomingMessage, CanisterWsOpenValue};
+use crate::canister_methods::{CanisterIncomingMessage, CanisterWsOpenResultValue};
 
 mod canister_methods;
 
@@ -45,28 +41,6 @@ enum IcWsError {
     InitializationError(String), // error due to the client not following the IC WS initialization protocol
     WsError(Error),              // WebSocket error
     WsClose(String),             // WebSocket closed by client
-}
-
-async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
-    if let Message::Binary(bytes) = message {
-        let m = from_slice::<RelayedClientMessage>(&bytes)
-            .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
-        let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
-            String::from("content of first message is not of type ClientCanisterId")
-        })?;
-        let sig = Signature::from_slice(&m.sig)
-            .map_err(|_| String::from("first message does not contain a valid signature"))?;
-        let public_key = PublicKey::from_slice(&content.client_key)
-            .map_err(|_| String::from("first message does not contain a valid public key"))?;
-        public_key
-            .verify(&m.content, &sig)
-            .map_err(|_| String::from("client's signature does not verify against public key"))?;
-        canister_methods::ws_open(agent, &content.canister_id, m.content, m.sig).await
-    } else {
-        Err(String::from(
-            "first message from client should be binary encoded",
-        ))
-    }
 }
 
 async fn handle_connection(
@@ -94,8 +68,8 @@ async fn handle_connection(
                                 }
                                 if is_first_message {
                                     // check if client correctly registered its public key in the backend canister
-                                    match check_canister_init(agent, message.clone()).await {
-                                        Ok(CanisterWsOpenValue {
+                                    match canister_methods::check_canister_init(agent, message.clone()).await {
+                                        Ok(CanisterWsOpenResultValue {
                                             client_key,
                                             canister_id,
                                             // nonce is used by a new poller to know which message nonce to start polling from (if needed)
@@ -179,7 +153,10 @@ impl CanisterPoller {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
             HashMap::new();
-        println!("Started poller from nonce: {}", nonce);
+        println!(
+            "Started poller: canister: {}, nonce: {}",
+            self.canister_id, nonce
+        );
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
