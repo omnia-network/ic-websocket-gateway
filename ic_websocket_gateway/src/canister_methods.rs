@@ -153,6 +153,7 @@ pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsO
         public_key
             .verify(&m.content, &sig)
             .map_err(|_| String::from("client's signature does not verify against public key"))?;
+        // if all checks pass, call the ws_open method of the canister which the WS Gateway has to poll from
         ws_open(agent, &content.canister_id, m.content, m.sig).await
     } else {
         Err(String::from(

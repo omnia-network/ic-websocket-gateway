@@ -24,11 +24,19 @@ mod canister_methods;
 const URL: &str = "http://127.0.0.1:4943";
 const FETCH_KEY: bool = true;
 
+/// possible states of the WebSocket connection:
+/// - established
+/// - closed
 #[derive(Debug, Clone)]
 enum WsConnectionState {
+    /// WebSocket connection between client and WS Gateway established
+    // does not imply that the IC WebSocket connection has also been established
     ConnectionEstablished(GatewaySession),
+    /// WebSocket connection between client and WS Gateway closed
     ConnectionClosed(u64),
 }
+
+/// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
 #[derive(Debug, Clone)]
 struct GatewaySession {
     client_id: u64,
@@ -38,11 +46,15 @@ struct GatewaySession {
     nonce: u64,
 }
 
+/// possible errors that can occur during a IC WebSocket connection
 #[derive(Debug)]
 enum IcWsError {
-    InitializationError(String), // error due to the client not following the IC WS initialization protocol
-    WsError(Error),              // WebSocket error
-    WsClose(String),             // WebSocket closed by client
+    /// error due to the client not following the IC WS initialization protocol
+    InitializationError(String),
+    /// WebSocket error
+    WsError(Error),
+    /// WebSocket closed by client
+    WsClose(String),
 }
 
 async fn handle_client_connection(
@@ -62,14 +74,18 @@ async fn handle_client_connection(
                     msg_res = ws_read.try_next() => {
                         match msg_res {
                             Ok(Some(message)) => {
+                                // check if the WebSocket connection is closed
                                 if message.is_close() {
+                                    // let the main task know that it should remove the client's session from the WS Gateway state
                                     client_connection_handler_tx.send(
                                         WsConnectionState::ConnectionClosed(client_id)
                                     ).expect("channel should be open on the main thread");
+                                    // return error so that the connection handler task can terminate
                                     return Err(IcWsError::WsClose(format!("WebSocket stream has been closed by the client with id: {}", client_id)));
                                 }
+                                // check if it is the first message being sent by the client via WebSocket
                                 if is_first_message {
-                                    // check if client correctly registered its public key in the backend canister
+                                    // check if client followed the IC WebSocket connection establishment protocol
                                     match canister_methods::check_canister_init(agent, message.clone()).await {
                                         Ok(CanisterWsOpenResultValue {
                                             client_key,
@@ -78,13 +94,15 @@ async fn handle_client_connection(
                                             // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                                             nonce,
                                         }) => {
-                                            // tell the client that the IC WS connection is setup correctly
+                                            // let the client know that the IC WS connection is setup correctly
                                             ws_write.send(Message::Text("1".to_string())).await.map_err(|e| {
                                                 IcWsError::WsError(e)
                                             })?;
 
-                                            // create a new GatewaySession and send it to the main thread
+                                            // create a new sender side of the channel which will be used to send canister messages
+                                            // from the poller task directly to the client's connection handler task
                                             let message_for_client_tx_cl = message_for_client_tx.clone();
+                                            // instantiate a new GatewaySession and send it to the main thread
                                             client_connection_handler_tx.send(
                                                 WsConnectionState::ConnectionEstablished(
                                                     GatewaySession {
@@ -102,9 +120,12 @@ async fn handle_client_connection(
                                             ws_write.send(Message::Text("0".to_string())).await.map_err(|e| {
                                                 IcWsError::WsError(e)
                                             })?;
+                                            // if this branch is executed, the Ok branch is never been executed, hence the WS Gateway state
+                                            // does not contain any session for this client and therefore there is no cleanup needed
                                             return Err(IcWsError::InitializationError(e));
                                         }
                                     };
+                                    // makes sure that this branch is executed at most once
                                     is_first_message = false;
                                 }
                                 else {
@@ -112,13 +133,16 @@ async fn handle_client_connection(
                                     // println!("Client sent message: {:?}", message);
                                 }
                             }
+                            // in these cases, client's session should have been cleaned up on the WS Gateway state already
+                            // once the connection handler received Message::Close
+                            // therefore, no additional cleanup is needed
                             Ok(None) => return Err(IcWsError::WsError(Error::AlreadyClosed)),
                             Err(err) => return Err(IcWsError::WsError(err))
                         }
                     }
-                    // wait for message to send to client
+                    // wait for canister message to send to client
                     Some(message) = message_for_client_rx.recv() => {
-                        // send canister message to client, cbor encoded
+                        // relay canister message to client, cbor encoded
                         ws_write.send(Message::Binary(to_vec(&message).unwrap())).await.map_err(|e| {
                             IcWsError::WsError(e)
                         })?;
@@ -126,6 +150,7 @@ async fn handle_client_connection(
                 }
             }
         },
+        // no cleanup needed on the WS Gateway has the client's session has never been created
         Err(e) => return Err(IcWsError::WsError(e)),
     }
 }
@@ -360,7 +385,7 @@ async fn main() {
     let (client_connection_handler_tx, mut client_connection_handler_rx) =
         mpsc::unbounded_channel();
 
-    // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
+    // spawn a task which keeps accepting incoming connection requests from WebSocket clients
     tokio::spawn(async move {
         let mut next_client_id = 0; // needed to know which gateway_session to delete in case of error or WS closed
         while let Ok((stream, _client_addr)) = listener.accept().await {
@@ -412,7 +437,6 @@ async fn main() {
                         };
 
                         if needs_new_poller {
-
                             // [main task]              [poller task]
                             // poller_channel_tx -----> poller_channel_rx
 
@@ -453,6 +477,7 @@ async fn main() {
                         }
                     },
                     WsConnectionState::ConnectionClosed(client_id) => {
+                        // cleanup client's session from WS Gateway state
                         remove_client_from_server(&mut gateway_server, client_id, &agent).await
                     }
                 }
