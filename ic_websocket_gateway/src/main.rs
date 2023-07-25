@@ -8,10 +8,7 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use tokio_tungstenite::{
     accept_async,
@@ -328,27 +325,27 @@ async fn main() {
 
     let (connection_handler_tx, mut connection_handler_rx) = mpsc::unbounded_channel();
     let agent_cl = Arc::clone(&agent);
-    let client_id = Arc::new(Mutex::new(0)); // needed to know which gateway_session to delete in case of error or WS closed
 
     // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
+        let mut next_client_id = 0; // needed to know which gateway_session to delete in case of error or WS closed
         while let Ok((stream, _client_addr)) = listener.accept().await {
             let agent_cl = Arc::clone(&agent_cl);
             let connection_handler_tx_cl = connection_handler_tx.clone();
-            let client_id = Arc::clone(&client_id);
             // spawn a connection handler task for each incoming connection
+            let current_client_id = next_client_id;
             tokio::spawn(async move {
-                let next_client_id = {
-                    let mut next_client_id = client_id.lock().await;
-                    *next_client_id += 1;
-                    *next_client_id
-                };
-                println!("\nNew client id: {}", next_client_id);
-                let end_connection_result =
-                    handle_connection(next_client_id, &*agent_cl, stream, connection_handler_tx_cl)
-                        .await;
+                println!("\nNew client id: {}", current_client_id);
+                let end_connection_result = handle_connection(
+                    current_client_id,
+                    &*agent_cl,
+                    stream,
+                    connection_handler_tx_cl,
+                )
+                .await;
                 println!("Client connection terminated: {:?}", end_connection_result);
             });
+            next_client_id += 1;
         }
     });
 
