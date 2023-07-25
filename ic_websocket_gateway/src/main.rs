@@ -12,7 +12,7 @@ use tokio::{
 };
 use tokio_tungstenite::{
     accept_async,
-    tungstenite::{Error, Message, Result},
+    tungstenite::{Error, Message},
 };
 
 use crate::canister_methods::{CanisterIncomingMessage, CanisterWsOpenResultValue};
@@ -27,6 +27,7 @@ const FETCH_KEY: bool = true;
 /// possible states of the WebSocket connection:
 /// - established
 /// - closed
+/// - error
 #[derive(Debug, Clone)]
 enum WsConnectionState {
     /// WebSocket connection between client and WS Gateway established
@@ -34,6 +35,8 @@ enum WsConnectionState {
     ConnectionEstablished(GatewaySession),
     /// WebSocket connection between client and WS Gateway closed
     ConnectionClosed(u64),
+    /// error while handling WebSocket connection
+    ConnectionError(IcWsError),
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -47,14 +50,12 @@ struct GatewaySession {
 }
 
 /// possible errors that can occur during a IC WebSocket connection
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum IcWsError {
     /// error due to the client not following the IC WS initialization protocol
     InitializationError(String),
     /// WebSocket error
-    WsError(Error),
-    /// WebSocket closed by client
-    WsClose(String),
+    WsError(String),
 }
 
 async fn handle_client_connection(
@@ -62,7 +63,7 @@ async fn handle_client_connection(
     agent: &Agent,
     stream: TcpStream,
     client_connection_handler_tx: UnboundedSender<WsConnectionState>,
-) -> Result<(), IcWsError> {
+) {
     match accept_async(stream).await {
         Ok(ws_stream) => {
             let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -80,8 +81,8 @@ async fn handle_client_connection(
                                     client_connection_handler_tx.send(
                                         WsConnectionState::ConnectionClosed(client_id)
                                     ).expect("channel should be open on the main thread");
-                                    // return error so that the connection handler task can terminate
-                                    return Err(IcWsError::WsClose(format!("WebSocket stream has been closed by the client with id: {}", client_id)));
+                                    // break from the loop so that the connection handler task can terminate
+                                    break;
                                 }
                                 // check if it is the first message being sent by the client via WebSocket
                                 if is_first_message {
@@ -95,9 +96,7 @@ async fn handle_client_connection(
                                             nonce,
                                         }) => {
                                             // let the client know that the IC WS connection is setup correctly
-                                            ws_write.send(Message::Text("1".to_string())).await.map_err(|e| {
-                                                IcWsError::WsError(e)
-                                            })?;
+                                            ws_write.send(Message::Text("1".to_string())).await.expect("WS connection should be open");
 
                                             // create a new sender side of the channel which will be used to send canister messages
                                             // from the poller task directly to the client's connection handler task
@@ -117,12 +116,14 @@ async fn handle_client_connection(
                                         },
                                         Err(e) => {
                                             // tell the client that the setup of the IC WS connection failed
-                                            ws_write.send(Message::Text("0".to_string())).await.map_err(|e| {
-                                                IcWsError::WsError(e)
-                                            })?;
+                                            ws_write.send(Message::Text("0".to_string())).await.expect("WS connection should be open");
                                             // if this branch is executed, the Ok branch is never been executed, hence the WS Gateway state
                                             // does not contain any session for this client and therefore there is no cleanup needed
-                                            return Err(IcWsError::InitializationError(e));
+                                            client_connection_handler_tx
+                                                .send(WsConnectionState::ConnectionError(IcWsError::InitializationError(e)))
+                                                .expect("channel should be open on the main thread");
+                                            // break from the loop so that the connection handler task can terminate
+                                            break;
                                         }
                                     };
                                     // makes sure that this branch is executed at most once
@@ -133,25 +134,42 @@ async fn handle_client_connection(
                                     // println!("Client sent message: {:?}", message);
                                 }
                             }
-                            // in these cases, client's session should have been cleaned up on the WS Gateway state already
+                            // in this case, client's session should have been cleaned up on the WS Gateway state already
                             // once the connection handler received Message::Close
                             // therefore, no additional cleanup is needed
-                            Ok(None) => return Err(IcWsError::WsError(Error::AlreadyClosed)),
-                            Err(err) => return Err(IcWsError::WsError(err))
+                            Ok(None) => {
+                                client_connection_handler_tx
+                                    .send(WsConnectionState::ConnectionError(IcWsError::WsError(Error::AlreadyClosed.to_string())))
+                                    .expect("channel should be open on the main thread");
+                                // break from the loop so that the connection handler task can terminate
+                                break;
+                            },
+                            Err(e) => {
+                                // TODO: the gateway session might have been already created on the gateway and has to be cleaned up !!!
+                                client_connection_handler_tx
+                                    .send(WsConnectionState::ConnectionError(IcWsError::WsError(e.to_string())))
+                                    .expect("channel should be open on the main thread");
+                                // break from the loop so that the connection handler task can terminate
+                                break;
+                            }
                         }
                     }
                     // wait for canister message to send to client
                     Some(message) = message_for_client_rx.recv() => {
                         // relay canister message to client, cbor encoded
-                        ws_write.send(Message::Binary(to_vec(&message).unwrap())).await.map_err(|e| {
-                            IcWsError::WsError(e)
-                        })?;
+                        ws_write.send(Message::Binary(to_vec(&message).unwrap())).await.expect("WS connection should be open");
                     }
                 }
             }
         },
         // no cleanup needed on the WS Gateway has the client's session has never been created
-        Err(e) => return Err(IcWsError::WsError(e)),
+        Err(e) => {
+            client_connection_handler_tx
+                .send(WsConnectionState::ConnectionError(IcWsError::WsError(
+                    e.to_string(),
+                )))
+                .expect("channel should be open on the main thread");
+        },
     }
 }
 
@@ -369,7 +387,7 @@ async fn start_ws_gateway(addr: &str, identity: BasicIdentity) -> GatewayServer 
     );
 
     // [main task]                         [client connection handler task]
-    // client_connection_handler_rx -----> client_connection_handler_tx
+    // client_connection_handler_rx <----- client_connection_handler_tx
 
     // channel used to send the state of the client connection
     // the client connection handler task sends the session information when the WebSocket connection is established and
@@ -400,14 +418,13 @@ async fn handle_incoming_requests(
         let current_client_id = next_client_id;
         tokio::spawn(async move {
             println!("\nNew client id: {}", current_client_id);
-            let end_connection_result = handle_client_connection(
+            handle_client_connection(
                 current_client_id,
                 &*agent_cl,
                 stream,
                 client_connection_handler_tx_cl,
             )
             .await;
-            println!("Client connection terminated: {:?}", end_connection_result);
         });
         next_client_id += 1;
     }
@@ -504,6 +521,9 @@ async fn main() {
                     WsConnectionState::ConnectionClosed(client_id) => {
                         // cleanup client's session from WS Gateway state
                         remove_client_from_server(&mut gateway_server, client_id).await
+                    },
+                    WsConnectionState::ConnectionError(e) => {
+                        println!("{:?}", e);
                     }
                 }
 
