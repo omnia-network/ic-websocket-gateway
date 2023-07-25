@@ -25,6 +25,11 @@ const URL: &str = "http://127.0.0.1:4943";
 const FETCH_KEY: bool = true;
 
 #[derive(Debug, Clone)]
+enum WsConnectionState {
+    ConnectionEstablished(GatewaySession),
+    ConnectionClosed(u64),
+}
+#[derive(Debug, Clone)]
 struct GatewaySession {
     client_id: u64,
     client_key: ClientPublicKey,
@@ -40,11 +45,11 @@ enum IcWsError {
     WsClose(String),             // WebSocket closed by client
 }
 
-async fn handle_connection(
+async fn handle_client_connection(
     client_id: u64,
     agent: &Agent,
     stream: TcpStream,
-    connection_handler_tx: UnboundedSender<Result<GatewaySession, u64>>,
+    client_connection_handler_tx: UnboundedSender<WsConnectionState>,
 ) -> Result<(), IcWsError> {
     match accept_async(stream).await {
         Ok(ws_stream) => {
@@ -58,8 +63,8 @@ async fn handle_connection(
                         match msg_res {
                             Ok(Some(message)) => {
                                 if message.is_close() {
-                                    connection_handler_tx.send(
-                                        Err(client_id)
+                                    client_connection_handler_tx.send(
+                                        WsConnectionState::ConnectionClosed(client_id)
                                     ).expect("channel should be open on the main thread");
                                     return Err(IcWsError::WsClose(format!("WebSocket stream has been closed by the client with id: {}", client_id)));
                                 }
@@ -80,8 +85,8 @@ async fn handle_connection(
 
                                             // create a new GatewaySession and send it to the main thread
                                             let message_for_client_tx_cl = message_for_client_tx.clone();
-                                            connection_handler_tx.send(
-                                                Ok(
+                                            client_connection_handler_tx.send(
+                                                WsConnectionState::ConnectionEstablished(
                                                     GatewaySession {
                                                         client_id,
                                                         client_key,
@@ -144,7 +149,7 @@ struct CanisterPoller {
 impl CanisterPoller {
     async fn run_polling(
         &self,
-        mut new_client_channel_rx: UnboundedReceiver<ClientPollerChannelData>,
+        mut poller_channel_rx: UnboundedReceiver<ClientPollerChannelData>,
         mut nonce: u64,
     ) {
         // channels used to communicate with client's WebSocket task
@@ -157,7 +162,7 @@ impl CanisterPoller {
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
-                Some(channel_data) = new_client_channel_rx.recv() => {
+                Some(channel_data) = poller_channel_rx.recv() => {
                     match channel_data {
                         ClientPollerChannelData::NewClientChannel(client_key, client_channel) => {
                             println!("Adding new client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
@@ -225,6 +230,18 @@ async fn get_canister_updates(
     canister_methods::ws_get_messages(agent, &canister_id, nonce)
         .await
         .unwrap()
+}
+
+fn add_client_to_server(gateway_server: &mut GatewayServer, gateway_session: GatewaySession) {
+    let client_key = gateway_session.client_key.clone();
+    let client_id = gateway_session.client_id.clone();
+
+    gateway_server
+        .client_key_map
+        .insert(client_id, client_key.clone());
+    gateway_server
+        .client_session_map
+        .insert(client_key, gateway_session);
 }
 
 async fn remove_client_from_server(
@@ -296,9 +313,18 @@ enum ClientPollerChannelData {
     ClientDisconnected(ClientPublicKey),
 }
 
+/// state of the WS Gateway containing:
+/// - canisters it is polling
+/// - sessions with the clients connected to it via WebSocket
+/// - id of each client
 struct GatewayServer {
+    /// maps the principal of the canister to the sender side of the channel used to communicate with the poller task
     connected_canisters: HashMap<Principal, UnboundedSender<ClientPollerChannelData>>,
+    /// maps the client's public key to the state of the client's session
     client_session_map: HashMap<ClientPublicKey, GatewaySession>,
+    /// maps the client id to its public key
+    // needed because when a client disconnects, we only know its id but in order to clean the state of the client's session
+    // we need to know the public key of the client
     client_key_map: HashMap<u64, ClientPublicKey>,
 }
 
@@ -312,6 +338,8 @@ async fn main() {
     let identity = BasicIdentity::from_key_pair(key_pair);
 
     let agent = Arc::new(canister_methods::get_new_agent(URL, identity, FETCH_KEY).await);
+    let agent_cl = Arc::clone(&agent);
+
     println!(
         "Gateway Agent principal: {}",
         agent.get_principal().expect("Principal should be set")
@@ -323,24 +351,30 @@ async fn main() {
         client_key_map: HashMap::default(),
     };
 
-    let (connection_handler_tx, mut connection_handler_rx) = mpsc::unbounded_channel();
-    let agent_cl = Arc::clone(&agent);
+    // [main task]                         [client connection handler task]
+    // client_connection_handler_rx -----> client_connection_handler_tx
+
+    // channel used to send the state of the client connection
+    // the client connection handler task sends the session information when the WebSocket connection is established and
+    // the id the of the client when the connection is closed
+    let (client_connection_handler_tx, mut client_connection_handler_rx) =
+        mpsc::unbounded_channel();
 
     // spawn a task which keeps accepting and handling incoming connection requests from WebSocket clients
     tokio::spawn(async move {
         let mut next_client_id = 0; // needed to know which gateway_session to delete in case of error or WS closed
         while let Ok((stream, _client_addr)) = listener.accept().await {
             let agent_cl = Arc::clone(&agent_cl);
-            let connection_handler_tx_cl = connection_handler_tx.clone();
+            let client_connection_handler_tx_cl = client_connection_handler_tx.clone();
             // spawn a connection handler task for each incoming connection
             let current_client_id = next_client_id;
             tokio::spawn(async move {
                 println!("\nNew client id: {}", current_client_id);
-                let end_connection_result = handle_connection(
+                let end_connection_result = handle_client_connection(
                     current_client_id,
                     &*agent_cl,
                     stream,
-                    connection_handler_tx_cl,
+                    client_connection_handler_tx_cl,
                 )
                 .await;
                 println!("Client connection terminated: {:?}", end_connection_result);
@@ -354,11 +388,11 @@ async fn main() {
             // wait for new connection handler task to send the client'c connection result
             // which is either a GatewaySession if the connection was successful
             // or the client_id if the connection was closed before the client was registered
-            Some(connection_result) = connection_handler_rx.recv() => {
-                match connection_result {
-                    Ok(gateway_session) => {
-                        gateway_server.client_key_map.insert(gateway_session.client_id.clone(), gateway_session.client_key.clone());
-                        gateway_server.client_session_map.insert(gateway_session.client_key.clone(), gateway_session.clone());
+            Some(connection_state) = client_connection_handler_rx.recv() => {
+                match connection_state {
+                    WsConnectionState::ConnectionEstablished(gateway_session) => {
+                        // add client's session state to the WS Gateway state
+                        add_client_to_server(&mut gateway_server, gateway_session.clone());
 
                         // check if client is connecting to a canister that is not yet being polled
                         // if so, create new poller task
@@ -378,13 +412,17 @@ async fn main() {
                         };
 
                         if needs_new_poller {
+
+                            // [main task]              [poller task]
+                            // poller_channel_tx -----> poller_channel_rx
+
                             // channel used to communicate with the poller task
-                            // sender side of new client's channel are sent to the poller using new_client_channel_tx
-                            // so that it can use them to send canister updates directly to the client's task
-                            let (new_client_channel_tx, new_client_channel_rx) = mpsc::unbounded_channel();
+                            // the channel is used to send to the poller the sender side of a new client's channel
+                            // so that the poller can send canister messages directly to the client's task
+                            let (poller_channel_tx, poller_channel_rx) = mpsc::unbounded_channel();
 
                             // register new poller and the channel used to send client's channels to it
-                            gateway_server.connected_canisters.insert(gateway_session.canister_id.clone(), new_client_channel_tx.clone());
+                            gateway_server.connected_canisters.insert(gateway_session.canister_id.clone(), poller_channel_tx.clone());
                             let agent = Arc::clone(&agent);
 
                             // spawn new canister poller task
@@ -398,23 +436,23 @@ async fn main() {
                                     // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
                                     // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                                     // the new poller thread should not get those same messages again
-                                    poller.run_polling(new_client_channel_rx, gateway_session.nonce).await;
+                                    poller.run_polling(poller_channel_rx, gateway_session.nonce).await;
                                     println!("Poller task terminated: canister {}", poller.canister_id);
                                 }
                             });
 
-                            new_client_channel_tx.send(client_poller_channel_data).unwrap();
+                            poller_channel_tx.send(client_poller_channel_data).unwrap();
                         }
 
                         // notify canister that it can now send messages for the client corresponding to client_key
-                        let gateway_message = CanisterIncomingMessage::IcWebSocketEstablished(gateway_session.client_key.clone());
+                        let gateway_message = CanisterIncomingMessage::IcWebSocketEstablished(gateway_session.client_key);
                         if let Err(e) = canister_methods::ws_message(&*agent, &gateway_session.canister_id, gateway_message).await {
                             println!("Calling ws_message on canister failed: {}", e);
 
                             remove_client_from_server(&mut gateway_server, gateway_session.client_id, &agent).await
                         }
                     },
-                    Err(client_id) => {
+                    WsConnectionState::ConnectionClosed(client_id) => {
                         remove_client_from_server(&mut gateway_server, client_id, &agent).await
                     }
                 }
