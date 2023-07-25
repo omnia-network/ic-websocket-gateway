@@ -538,12 +538,14 @@ async fn main() {
 // !!! tests have to be run using "cargo test -- --test-threads=1" !!!
 // running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
+    use candid::Principal;
     use serde::Serialize;
     use serde_cbor::Serializer;
     use std::net::TcpStream;
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
+    use crate::canister_methods::CanisterFirstMessageContent;
     use crate::canister_methods::RelayedClientMessage;
     use crate::load_key_pair;
     use crate::start_accepting_incoming_connections;
@@ -647,6 +649,97 @@ mod tests {
             return assert_eq!(
                 e,
                 String::from("content of first message is not of type CanisterFirstMessageContent")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn first_message_should_contain_valid_signature() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // but with an invalid signature
+        let content = CanisterFirstMessageContent {
+            client_key: vec![],
+            canister_id: Principal::anonymous(),
+        };
+        let mut serialized_content = vec![];
+        let mut serializer = Serializer::new(&mut serialized_content);
+        serializer.self_describe().unwrap();
+        content.serialize(&mut serializer).unwrap();
+
+        let message = RelayedClientMessage {
+            content: serialized_content,
+            sig: vec![],
+        };
+        let mut serialized_message = vec![];
+        let mut serializer = Serializer::new(&mut serialized_message);
+        serializer.self_describe().unwrap();
+        message.serialize(&mut serializer).unwrap();
+
+        client
+            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("first message does not contain a valid signature")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn first_message_should_contain_valid_public_key() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // but with an invalid public key
+        let content = CanisterFirstMessageContent {
+            client_key: vec![],
+            canister_id: Principal::anonymous(),
+        };
+        let mut serialized_content = vec![];
+        let mut serializer = Serializer::new(&mut serialized_content);
+        serializer.self_describe().unwrap();
+        content.serialize(&mut serializer).unwrap();
+
+        let valid_signature = vec![
+            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
+            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
+            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
+            220, 6, 56, 9, 157, 126, 4,
+        ];
+
+        let message = RelayedClientMessage {
+            content: serialized_content,
+            sig: valid_signature,
+        };
+        let mut serialized_message = vec![];
+        let mut serializer = Serializer::new(&mut serialized_message);
+        serializer.self_describe().unwrap();
+        message.serialize(&mut serializer).unwrap();
+
+        client
+            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("first message does not contain a valid public key")
             );
         }
         panic!("ws_connection_state does not have the expected type");
