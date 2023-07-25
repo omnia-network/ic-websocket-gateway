@@ -387,6 +387,41 @@ async fn start_ws_gateway(addr: &str, identity: BasicIdentity) -> GatewayServer 
     }
 }
 
+async fn handle_incoming_requests(
+    agent: Arc<Agent>,
+    listener: Arc<TcpListener>,
+    client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+) {
+    let mut next_client_id = 0; // needed to know which gateway_session to delete in case of error or WS closed
+    while let Ok((stream, _client_addr)) = listener.accept().await {
+        let agent_cl = Arc::clone(&agent);
+        let client_connection_handler_tx_cl = client_connection_handler_tx.clone();
+        // spawn a connection handler task for each incoming connection
+        let current_client_id = next_client_id;
+        tokio::spawn(async move {
+            println!("\nNew client id: {}", current_client_id);
+            let end_connection_result = handle_client_connection(
+                current_client_id,
+                &*agent_cl,
+                stream,
+                client_connection_handler_tx_cl,
+            )
+            .await;
+            println!("Client connection terminated: {:?}", end_connection_result);
+        });
+        next_client_id += 1;
+    }
+}
+
+fn start_accepting_incoming_connections(gateway_server: &GatewayServer) {
+    let agent = Arc::clone(&gateway_server.agent);
+    let listener = Arc::clone(&gateway_server.listener);
+    let client_connection_handler_tx = gateway_server.client_connection_handler_tx.clone();
+    tokio::spawn(async move {
+        handle_incoming_requests(agent, listener, client_connection_handler_tx).await
+    });
+}
+
 #[tokio::main]
 async fn main() {
     let addr = "127.0.0.1:8080";
@@ -396,30 +431,7 @@ async fn main() {
     let mut gateway_server = start_ws_gateway(addr, identity).await;
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    let agent = Arc::clone(&gateway_server.agent);
-    let listener = gateway_server.listener.clone();
-    let client_connection_handler_tx = gateway_server.client_connection_handler_tx.clone();
-    tokio::spawn(async move {
-        let mut next_client_id = 0; // needed to know which gateway_session to delete in case of error or WS closed
-        while let Ok((stream, _client_addr)) = listener.accept().await {
-            let agent_cl = Arc::clone(&agent);
-            let client_connection_handler_tx_cl = client_connection_handler_tx.clone();
-            // spawn a connection handler task for each incoming connection
-            let current_client_id = next_client_id;
-            tokio::spawn(async move {
-                println!("\nNew client id: {}", current_client_id);
-                let end_connection_result = handle_client_connection(
-                    current_client_id,
-                    &*agent_cl,
-                    stream,
-                    client_connection_handler_tx_cl,
-                )
-                .await;
-                println!("Client connection terminated: {:?}", end_connection_result);
-            });
-            next_client_id += 1;
-        }
-    });
+    start_accepting_incoming_connections(&gateway_server);
 
     loop {
         select! {
