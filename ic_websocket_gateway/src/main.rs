@@ -68,6 +68,7 @@ async fn handle_client_connection(
         Ok(ws_stream) => {
             let (mut ws_write, mut ws_read) = ws_stream.split();
             let mut is_first_message = true;
+            // create channel which will be used to send messages from the canister poller directly to this client
             let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
             loop {
                 select! {
@@ -523,7 +524,7 @@ async fn main() {
                         remove_client_from_server(&mut gateway_server, client_id).await
                     },
                     WsConnectionState::ConnectionError(e) => {
-                        println!("{:?}", e);
+                        println!("Connection handler terminated with an error: {:?}", e);
                     }
                 }
 
@@ -535,40 +536,58 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use crate::start_accepting_incoming_connections;
-    use crate::start_ws_gateway;
-
-    use super::load_key_pair;
-    use super::BasicIdentity;
+    use std::net::TcpStream;
+    use websocket::sync::Client;
     use websocket::ClientBuilder;
 
-    fn mock_websocket_client(addr: &str) {
-        let mut client = ClientBuilder::new(&format!("ws://{}", addr))
+    use crate::load_key_pair;
+    use crate::start_accepting_incoming_connections;
+    use crate::start_ws_gateway;
+    use crate::BasicIdentity;
+    use crate::GatewayServer;
+    use crate::IcWsError;
+    use crate::WsConnectionState;
+
+    fn get_mock_websocket_client(addr: &str) -> Client<TcpStream> {
+        ClientBuilder::new(&format!("ws://{}", addr))
             .unwrap()
             .connect_insecure()
-            .expect("Error connecting to WebSocket server.");
-
-        // Send a message to the server after connecting
-        client
-            .send_message(&websocket::OwnedMessage::Text(String::from("diocane")))
-            .unwrap();
+            .expect("Error connecting to WebSocket server.")
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_works() {
+    async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
         let addr = "127.0.0.1:8080";
         let key_pair = load_key_pair();
         let identity = BasicIdentity::from_key_pair(key_pair);
 
         let gateway_server = start_ws_gateway(addr, identity).await;
-
         start_accepting_incoming_connections(&gateway_server);
+        let client = get_mock_websocket_client(addr);
+        (client, gateway_server)
+    }
 
-        mock_websocket_client(addr);
+    #[tokio::test(flavor = "multi_thread")]
+    async fn client_should_send_binary_first_message() {
+        let (mut client, mut server) = start_client_server().await;
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-        assert_eq!(4, 4);
+        // client sends the first message as text to the server right after connecting
+        client
+            .send_message(&websocket::OwnedMessage::Text(String::from(
+                "first message",
+            )))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("first message from client should be binary encoded")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
     }
 }
