@@ -535,6 +535,8 @@ async fn main() {
 }
 
 #[cfg(test)]
+// !!! tests have to be run using "cargo test -- --test-threads=1" !!!
+// running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
     use std::net::TcpStream;
     use websocket::sync::Client;
@@ -586,6 +588,29 @@ mod tests {
             return assert_eq!(
                 e,
                 String::from("first message from client should be binary encoded")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn client_should_send_binary_first_message_of_correct_type() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client sends the first message as binary to the server right after connecting but serialized from a type which is not MessageFromClient
+        client
+            .send_message(&websocket::OwnedMessage::Binary(Vec::<u8>::new()))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("first message is not of type MessageFromClient")
             );
         }
         panic!("ws_connection_state does not have the expected type");
