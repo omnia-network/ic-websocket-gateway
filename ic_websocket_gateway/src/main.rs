@@ -610,7 +610,7 @@ mod tests {
         {
             return assert_eq!(
                 e,
-                String::from("first message is not of type MessageFromClient")
+                String::from("first message is not of type RelayedClientMessage")
             );
         }
         panic!("ws_connection_state does not have the expected type");
