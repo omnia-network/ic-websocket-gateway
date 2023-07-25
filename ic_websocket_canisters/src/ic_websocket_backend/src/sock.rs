@@ -193,13 +193,13 @@ fn get_outgoing_message_nonce() -> u64 {
     OUTGOING_MESSAGE_NONCE.with(|n| n.borrow().clone())
 }
 
-fn next_outgoing_message_nonce() -> u64 {
-    OUTGOING_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1))
+fn increment_outgoing_message_nonce() {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.replace_with(|&mut old| old + 1));
 }
 
-fn put_client_caller(client_key: ClientPublicKey) {
+fn put_client_caller(client_key: ClientPublicKey, caller: Principal) {
     CLIENT_CALLER_MAP.with(|map| {
-        map.borrow_mut().insert(client_key, caller());
+        map.borrow_mut().insert(client_key, caller);
     })
 }
 
@@ -212,12 +212,13 @@ fn get_gateway_principal() -> Principal {
 }
 
 fn check_registered_client_key(client_key: &ClientPublicKey) -> Result<(), String> {
-    match CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key)) {
-        true => Ok(()),
-        false => Err(String::from(
+    if !CLIENT_CALLER_MAP.with(|map| map.borrow().contains_key(client_key)) {
+        return Err(String::from(
             "client's public key has not been previously registered by client",
-        )),
+        ));
     }
+
+    Ok(())
 }
 
 fn init_outgoing_message_to_client_num(client_key: ClientPublicKey) {
@@ -226,14 +227,22 @@ fn init_outgoing_message_to_client_num(client_key: ClientPublicKey) {
     });
 }
 
-fn next_outgoing_message_to_client_num(client_key: &ClientPublicKey) -> Result<u64, String> {
+fn get_outgoing_message_to_client_num(client_key: &ClientPublicKey) -> Result<u64, String> {
+    OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
+        let map = map.borrow();
+        let num = *map.get(client_key).ok_or(String::from(
+            "outgoing message to client num not initialized for client",
+        ))?;
+        Ok(num)
+    })
+}
+
+fn increment_outgoing_message_to_client_num(client_key: &ClientPublicKey) -> Result<(), String> {
+    let num = get_outgoing_message_to_client_num(client_key)?;
     OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
         let mut map = map.borrow_mut();
-        let num = *map
-            .get(client_key)
-            .ok_or(String::from("next message num not initialized for client"))?;
         map.insert(client_key.clone(), num + 1);
-        Ok(num + 1)
+        Ok(())
     })
 }
 
@@ -248,7 +257,7 @@ fn get_expected_incoming_message_from_client_num(
 ) -> Result<u64, String> {
     INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
         let num = *map.borrow().get(client_key).ok_or(String::from(
-            "incoming message num not initialized for client",
+            "expected incoming message num not initialized for client",
         ))?;
         Ok(num)
     })
@@ -256,11 +265,13 @@ fn get_expected_incoming_message_from_client_num(
 
 fn increment_expected_incoming_message_from_client_num(
     client_key: &ClientPublicKey,
-) -> Result<u64, String> {
+) -> Result<(), String> {
     let num = get_expected_incoming_message_from_client_num(client_key)?;
-    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP
-        .with(|map| map.borrow_mut().insert(client_key.clone(), num + 1));
-    Ok(num + 1)
+    INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
+        let mut map = map.borrow_mut();
+        map.insert(client_key.clone(), num + 1);
+        Ok(())
+    })
 }
 
 fn add_client(client_key: ClientPublicKey) {
@@ -282,51 +293,67 @@ fn remove_client(client_key: ClientPublicKey) {
     });
 }
 
-// gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
-fn get_cert_messages(nonce: u64) -> CanisterWsGetMessagesResult {
-    let gateway_principal = get_gateway_principal();
+fn get_message_for_gateway_key(gateway_principal: Principal, nonce: u64) -> String {
+    gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string())
+}
 
+fn get_messages_for_gateway_range(gateway_principal: Principal, nonce: u64) -> (usize, usize) {
     MESSAGES_FOR_GATEWAY.with(|m| {
-        // smallest key  used to determine the first of the messages from the queue which has to be returned to the WS Gateway
-        let smallest_key =
-            gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string());
+        // smallest key used to determine the first message from the queue which has to be returned to the WS Gateway
+        let smallest_key = get_message_for_gateway_key(gateway_principal, nonce);
         // partition the queue at the message which has the key with the nonce specified as argument to get_cert_messages
-        let start_index = m.borrow().partition_point(|x| x.key < smallest_key);
+        let start_index = m.borrow().partition_point(|x| {
+            let is_lower = x.key < smallest_key;
+            is_lower
+        });
         // message at index corresponding to end index is excluded
-        let end_index;
-        if m.borrow().len() - start_index > MAX_NUMBER_OF_RETURNED_MESSAGES {
+        let mut end_index = m.borrow().len();
+        if end_index - start_index > MAX_NUMBER_OF_RETURNED_MESSAGES {
             end_index = start_index + MAX_NUMBER_OF_RETURNED_MESSAGES;
-        } else {
-            end_index = m.borrow().len();
         }
+        (start_index, end_index)
+    })
+}
+
+fn get_messages_for_gateway(start_index: usize, end_index: usize) -> Vec<CanisterOutputMessage> {
+    MESSAGES_FOR_GATEWAY.with(|m| {
         let mut messages: Vec<CanisterOutputMessage> = Vec::with_capacity(end_index - start_index);
         for index in start_index..end_index {
             messages.push(m.borrow().get(index).unwrap().clone());
         }
-        if end_index > start_index {
-            let first_key = messages.first().unwrap().key.clone();
-            let last_key = messages.last().unwrap().key.clone();
-            let (cert, tree) = get_cert_for_range(&first_key, &last_key);
-            Ok(CanisterOutputCertifiedMessages {
-                messages,
-                cert,
-                tree,
-            })
-        } else {
-            Ok(CanisterOutputCertifiedMessages {
-                messages,
-                cert: Vec::new(),
-                tree: Vec::new(),
-            })
-        }
+        messages
+    })
+}
+
+// gets the messages in GATEWAY_MESSAGES starting from the one with the specified nonce
+fn get_cert_messages(gateway_principal: Principal, nonce: u64) -> CanisterWsGetMessagesResult {
+    let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, nonce);
+    let messages = get_messages_for_gateway(start_index, end_index);
+
+    if messages.is_empty() {
+        return Ok(CanisterOutputCertifiedMessages {
+            messages,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        });
+    }
+
+    let first_key = messages.first().unwrap().key.clone();
+    let last_key = messages.last().unwrap().key.clone();
+    let (cert, tree) = get_cert_for_range(&first_key, &last_key);
+
+    Ok(CanisterOutputCertifiedMessages {
+        messages,
+        cert,
+        tree,
     })
 }
 
 /// Checks if the caller of the method is the same as the one that was registered during the initialization of the CDK
-fn check_caller_is_registered_gateway() -> Result<(), String> {
+fn check_is_registered_gateway(input_principal: Principal) -> Result<(), String> {
     let gateway_principal = get_gateway_principal();
     // check if the caller is the same as the one that was registered during the initialization of the CDK
-    if gateway_principal != caller() {
+    if gateway_principal != input_principal {
         return Err(String::from(
             "caller is not the gateway that has been registered during CDK initialization",
         ));
@@ -357,8 +384,6 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
         (data_certificate().unwrap(), data)
     })
 }
-
-// type ApplicationMessage<T: Deserialize + Serialize> = T;
 
 /// handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
 /// is established
@@ -412,7 +437,7 @@ pub fn init(
 pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
     // TODO: check who is the caller, which can be a client or the anonymous principal
     // associate the identity of the client to its public key received as input
-    put_client_caller(args.client_key);
+    put_client_caller(args.client_key, caller());
     Ok(())
 }
 
@@ -423,7 +448,7 @@ pub fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResul
 /// beforehand by calling ws_register()
 pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     // the caller must be the gateway that was registered during CDK initialization
-    check_caller_is_registered_gateway()?;
+    check_is_registered_gateway(caller())?;
     // decode the first message sent by the client
     let CanisterFirstMessageContent {
         client_key,
@@ -459,7 +484,7 @@ pub fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
 /// Handles the WS connection close event received from the WS Gateway
 pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     // the caller must be the gateway that was registered during CDK initialization
-    check_caller_is_registered_gateway()?;
+    check_is_registered_gateway(caller())?;
 
     remove_client(args.client_key.clone());
 
@@ -520,7 +545,7 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
 
             // check if the incoming message has the expected sequence number
             if sequence_num == get_expected_incoming_message_from_client_num(&client_key)? {
-                // increse the expected sequence number by 1
+                // increase the expected sequence number by 1
                 increment_expected_incoming_message_from_client_num(&client_key)?;
                 // call the on_message handler initialized in init()
                 let handler_result = HANDLERS.with(|h| {
@@ -564,9 +589,10 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
 /// Returns messages to the WS Gateway in response of a polling iteration.
 pub fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
     // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
-    check_caller_is_registered_gateway()?;
+    let gateway_principal = caller();
+    check_is_registered_gateway(gateway_principal)?;
 
-    get_cert_messages(args.nonce)
+    get_cert_messages(gateway_principal, args.nonce)
 }
 
 /// Sends a message to the client.
@@ -581,19 +607,24 @@ pub fn ws_send<T: Serialize>(client_key: ClientPublicKey, msg: T) -> CanisterWsS
     msg.serialize(&mut serializer).map_err(|e| e.to_string())?;
 
     // get the principal of the gateway that is polling the canister
-    let gateway = get_gateway_principal();
+    let gateway_principal = get_gateway_principal();
 
     let time = time();
 
-    // the nonce in key is used by the WS Gateway to determine the message to start from in the next polling iteration
+    // the nonce in key is used by the WS Gateway to determine the message to start in the polling iteration
     // the key is also passed to the client in order to validate the body of the certified message
-    let key = gateway.clone().to_string()
-        + "_"
-        + &format!("{:0>20}", next_outgoing_message_nonce().to_string());
+    let outgoing_message_nonce = get_outgoing_message_nonce();
+    let key = get_message_for_gateway_key(gateway_principal, outgoing_message_nonce);
+
+    // increment the nonce for the next message
+    increment_outgoing_message_nonce();
+
+    // increment the sequence number for the next message to the client
+    increment_outgoing_message_to_client_num(&client_key)?;
 
     let input = WebsocketMessage {
         client_key: client_key.clone(),
-        sequence_num: next_outgoing_message_to_client_num(&client_key)?,
+        sequence_num: get_outgoing_message_to_client_num(&client_key)?,
         timestamp: time,
         message: msg_cbor,
     };
@@ -620,4 +651,379 @@ pub fn ws_send<T: Serialize>(client_key: ClientPublicKey, msg: T) -> CanisterWsS
         });
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use proptest::prelude::*;
+
+    mod test_utils {
+        use candid::Principal;
+        use ic_agent::{identity::BasicIdentity, Identity};
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+
+        use crate::sock::{
+            get_message_for_gateway_key, CanisterOutputMessage, ClientPublicKey,
+            MESSAGES_FOR_GATEWAY,
+        };
+
+        fn load_key_pair() -> Ed25519KeyPair {
+            let rng = ring::rand::SystemRandom::new();
+            let key_pair =
+                Ed25519KeyPair::generate_pkcs8(&rng).expect("Could not generate a key pair.");
+            Ed25519KeyPair::from_pkcs8(key_pair.as_ref()).expect("Could not read the key pair.")
+        }
+
+        pub fn generate_random_principal() -> candid::Principal {
+            let key_pair = load_key_pair();
+            let identity = BasicIdentity::from_key_pair(key_pair);
+
+            // workaround to keep the principal in the version of candid used by the canister
+            candid::Principal::from_text(identity.sender().unwrap().to_text()).unwrap()
+        }
+
+        pub fn generate_random_public_key() -> Vec<u8> {
+            let key_pair = load_key_pair();
+
+            key_pair.public_key().as_ref().to_vec()
+        }
+
+        pub fn get_static_principal() -> Principal {
+            Principal::from_text("wnkwv-wdqb5-7wlzr-azfpw-5e5n5-dyxrf-uug7x-qxb55-mkmpa-5jqik-tqe")
+                .unwrap() // a random valid but static principal
+        }
+
+        pub fn add_messages_for_gateway(
+            client_key: ClientPublicKey,
+            gateway_principal: Principal,
+            count: u64,
+        ) {
+            MESSAGES_FOR_GATEWAY.with(|m| {
+                for i in 0..count {
+                    m.borrow_mut().push_back(CanisterOutputMessage {
+                        client_key: client_key.clone(),
+                        key: get_message_for_gateway_key(gateway_principal.clone(), i),
+                        val: vec![],
+                    });
+                }
+            });
+        }
+
+        pub fn clean_messages_for_gateway() {
+            MESSAGES_FOR_GATEWAY.with(|m| m.borrow_mut().clear());
+        }
+    }
+
+    // we don't need to proptest get_gateway_principal if principal is not set, as it just panics
+    #[test]
+    #[should_panic = "gateway principal should be initialized"]
+    fn test_get_gateway_principal_not_set() {
+        get_gateway_principal();
+    }
+
+    proptest! {
+        #[test]
+        fn test_init(test_gateway_principal in any::<u8>().prop_map(|_| test_utils::generate_random_principal())) {
+            let on_open = |_| {};
+            let on_message = |_| {};
+            let on_close = |_| {};
+
+            init(on_open, on_message, on_close, &test_gateway_principal.to_string());
+
+            HANDLERS.with(|h| {
+                let h = h.borrow();
+                assert!(h.on_open.is_ok());
+                assert!(h.on_message.is_ok());
+                assert!(h.on_close.is_ok());
+            });
+
+            GATEWAY_PRINCIPAL.with(|p| {
+                let p = p.borrow();
+                assert!(p.is_some());
+                assert_eq!(
+                    p.as_ref().unwrap().to_string(),
+                    test_gateway_principal.to_string()
+                );
+            });
+        }
+
+        #[test]
+        fn test_get_outgoing_message_nonce(test_nonce in any::<u64>()) {
+            // Set up
+            OUTGOING_MESSAGE_NONCE.with(|n| *n.borrow_mut() = test_nonce);
+
+            let actual_nonce = get_outgoing_message_nonce();
+            prop_assert_eq!(actual_nonce, test_nonce);
+        }
+
+        #[test]
+        fn test_increment_outgoing_message_nonce(test_nonce in any::<u64>()) {
+            // Set up
+            OUTGOING_MESSAGE_NONCE.with(|n| *n.borrow_mut() = test_nonce);
+
+            increment_outgoing_message_nonce();
+            prop_assert_eq!(get_outgoing_message_nonce(), test_nonce + 1);
+        }
+
+        #[test]
+        fn test_get_client_caller(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            // Set up
+            let caller_principal = test_utils::generate_random_principal();
+            CLIENT_CALLER_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), caller_principal);
+            });
+
+            let actual_client_caller = CLIENT_CALLER_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_client_caller, caller_principal);
+        }
+
+        #[test]
+        fn test_put_client_caller(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            // Set up
+            let caller_principal = test_utils::generate_random_principal();
+
+            put_client_caller(test_client_key.clone(), caller_principal);
+
+            let actual_client_caller = CLIENT_CALLER_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_client_caller, caller_principal);
+        }
+
+        #[test]
+        fn test_get_gateway_principal(test_gateway_principal in any::<u8>().prop_map(|_| test_utils::generate_random_principal())) {
+            // Set up
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(test_gateway_principal.clone()));
+
+            let actual_gateway_principal = get_gateway_principal();
+            prop_assert_eq!(actual_gateway_principal, test_gateway_principal);
+        }
+
+        #[test]
+        fn test_check_registered_client_key_not_set(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            let actual_result = check_registered_client_key(&test_client_key);
+            prop_assert_eq!(actual_result.err(), Some(String::from("client's public key has not been previously registered by client")));
+        }
+
+        #[test]
+        fn test_check_registered_client_key(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            // Set up
+            CLIENT_CALLER_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_utils::generate_random_principal());
+            });
+
+            let actual_result = check_registered_client_key(&test_client_key);
+            prop_assert!(actual_result.is_ok());
+        }
+
+        #[test]
+        fn test_init_outgoing_message_to_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            init_outgoing_message_to_client_num(test_client_key.clone());
+
+            let actual_result = OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, 0);
+        }
+
+        #[test]
+        fn test_increment_outgoing_message_to_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key()), test_num in any::<u64>()) {
+            // Set up
+            OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_num);
+            });
+
+            let increment_result = increment_outgoing_message_to_client_num(&test_client_key);
+            prop_assert!(increment_result.is_ok());
+
+            let actual_result = OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, test_num + 1);
+        }
+
+        #[test]
+        fn test_get_outgoing_message_to_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key()), test_num in any::<u64>()) {
+            // Set up
+            OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_num);
+            });
+
+            let actual_result = get_outgoing_message_to_client_num(&test_client_key);
+            prop_assert!(actual_result.is_ok());
+            prop_assert_eq!(actual_result.unwrap(), test_num);
+        }
+
+        #[test]
+        fn test_init_expected_incoming_message_from_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            init_expected_incoming_message_from_client_num(test_client_key.clone());
+
+            let actual_result = INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, 0);
+        }
+
+        #[test]
+        fn test_get_expected_incoming_message_from_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key()), test_num in any::<u64>()) {
+            // Set up
+            INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_num);
+            });
+
+            let actual_result = get_expected_incoming_message_from_client_num(&test_client_key);
+            prop_assert!(actual_result.is_ok());
+            prop_assert_eq!(actual_result.unwrap(), test_num);
+        }
+
+        #[test]
+        fn test_increment_expected_incoming_message_from_client_num(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key()), test_num in any::<u64>()) {
+            // Set up
+            INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_num);
+            });
+
+            let increment_result = increment_expected_incoming_message_from_client_num(&test_client_key);
+            prop_assert!(increment_result.is_ok());
+
+            let actual_result = INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, test_num + 1);
+        }
+
+        #[test]
+        fn test_add_client(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            add_client(test_client_key.clone());
+
+            let actual_result = INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, 0);
+
+            let actual_result = OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).unwrap().clone());
+            prop_assert_eq!(actual_result, 0);
+        }
+
+        #[test]
+        fn test_remove_client(test_client_key in any::<u8>().prop_map(|_| test_utils::generate_random_public_key())) {
+            // Set up
+            CLIENT_CALLER_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), test_utils::generate_random_principal());
+            });
+            INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), 0);
+            });
+            OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| {
+                map.borrow_mut().insert(test_client_key.clone(), 0);
+            });
+
+            remove_client(test_client_key.clone());
+
+            let is_none = CLIENT_CALLER_MAP.with(|map| map.borrow().get(&test_client_key).is_none());
+            prop_assert!(is_none);
+
+            let is_none = INCOMING_MESSAGE_FROM_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).is_none());
+            prop_assert!(is_none);
+
+            let is_none = OUTGOING_MESSAGE_TO_CLIENT_NUM_MAP.with(|map| map.borrow().get(&test_client_key).is_none());
+            prop_assert!(is_none);
+        }
+
+        #[test]
+        fn test_get_message_for_gateway_key(test_gateway_principal in any::<u8>().prop_map(|_| test_utils::generate_random_principal()), test_nonce in any::<u64>()) {
+            let actual_result = get_message_for_gateway_key(test_gateway_principal.clone(), test_nonce);
+            prop_assert_eq!(actual_result, test_gateway_principal.to_string() + "_" + &format!("{:0>20}", test_nonce.to_string()));
+        }
+
+        #[test]
+        fn test_get_messages_for_gateway_range_empty(messages_count in any::<u64>().prop_map(|c| c % 1000)) {
+            // Set up
+            let gateway_principal = test_utils::generate_random_principal();
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(gateway_principal.clone()));
+
+            // Test
+            // we ask for a random range of messages to check if it always returns the same range for empty messages
+            for i in 0..messages_count {
+                let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, i);
+                prop_assert_eq!(start_index, 0);
+                prop_assert_eq!(end_index, 0);
+            }
+        }
+
+        #[test]
+        fn test_get_messages_for_gateway_range_smaller_than_max(gateway_principal in any::<u8>().prop_map(|_| test_utils::get_static_principal())) {
+            // Set up
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(gateway_principal.clone()));
+
+            let messages_count = 4;
+            let test_client_key = test_utils::generate_random_public_key();
+            test_utils::add_messages_for_gateway(test_client_key.clone(), gateway_principal, messages_count);
+
+            // Test
+            // messages are just 4, so we don't exceed the max number of returned messages
+            // add one to test the out of range index
+            for i in 0..messages_count + 1 {
+                let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, i);
+                prop_assert_eq!(start_index, i as usize);
+                prop_assert_eq!(end_index, messages_count as usize);
+            }
+
+            // Clean up
+            test_utils::clean_messages_for_gateway();
+        }
+
+        #[test]
+        fn test_get_messages_for_gateway_range_larger_than_max(gateway_principal in any::<u8>().prop_map(|_| test_utils::get_static_principal())) {
+            // Set up
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(gateway_principal.clone()));
+
+            let messages_count: u64 = (2 * MAX_NUMBER_OF_RETURNED_MESSAGES).try_into().unwrap();
+            let test_client_key = test_utils::generate_random_public_key();
+            test_utils::add_messages_for_gateway(test_client_key.clone(), gateway_principal, messages_count);
+
+            // Test
+            // messages are now MAX_NUMBER_OF_RETURNED_MESSAGES
+            for i in 0..messages_count + 1 {
+                let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, i);
+                let expected_end_index = if (i as usize) + MAX_NUMBER_OF_RETURNED_MESSAGES > messages_count as usize {
+                    messages_count as usize
+                } else {
+                    (i as usize) + MAX_NUMBER_OF_RETURNED_MESSAGES
+                };
+                prop_assert_eq!(start_index, i as usize);
+                prop_assert_eq!(end_index, expected_end_index);
+            }
+
+            // Clean up
+            test_utils::clean_messages_for_gateway();
+        }
+
+        #[test]
+        fn test_get_messages_for_gateway(gateway_principal in any::<u8>().prop_map(|_| test_utils::get_static_principal()), messages_count in any::<u64>().prop_map(|c| c % 100)) {
+            // Set up
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(gateway_principal.clone()));
+
+            let test_client_key = test_utils::generate_random_public_key();
+            test_utils::add_messages_for_gateway(test_client_key.clone(), gateway_principal, messages_count);
+
+            // Test
+            // add one to test the out of range index
+            for i in 0..messages_count + 1 {
+                let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, i);
+                let messages = get_messages_for_gateway(start_index, end_index);
+
+                // check if the messages returned are the ones we expect
+                for (j, message) in messages.iter().enumerate() {
+                    let expected_key = get_message_for_gateway_key(gateway_principal.clone(), (start_index + j) as u64);
+                    prop_assert_eq!(&message.key, &expected_key);
+                }
+            }
+
+            // Clean up
+            test_utils::clean_messages_for_gateway();
+        }
+
+        #[test]
+        fn test_check_is_registered_gateway(test_gateway_principal in any::<u8>().prop_map(|_| test_utils::generate_random_principal())) {
+            // Set up
+            GATEWAY_PRINCIPAL.with(|p| *p.borrow_mut() = Some(test_gateway_principal.clone()));
+
+            let actual_result = check_is_registered_gateway(test_gateway_principal);
+            prop_assert!(actual_result.is_ok());
+
+            let other_principal = test_utils::generate_random_principal();
+            let actual_result = check_is_registered_gateway(other_principal);
+            prop_assert_eq!(actual_result.err(), Some(String::from("caller is not the gateway that has been registered during CDK initialization")));
+        }
+    }
 }

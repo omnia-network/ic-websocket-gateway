@@ -18,3 +18,8 @@ sha2 = "0.10.6"
 serde_cbor = "0.11.2"
 serde_bytes = "0.11"
 ed25519-compact = { version = "2", default-features = false }
+
+[dev-dependencies]
+ic-agent = "0.25.0"
+proptest = "1.2.0"
+ring = "0.16.20"
