@@ -798,4 +798,51 @@ mod tests {
         }
         panic!("ws_connection_state does not have the expected type");
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn public_key_should_be_registered_in_canister() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // but the client did not register its public key in the canister (by calling the ws_register method)
+        let valid_content = vec![
+            217, 217, 247, 162, 107, 99, 97, 110, 105, 115, 116, 101, 114, 95, 105, 100, 74, 128,
+            0, 0, 0, 0, 16, 0, 1, 1, 1, 106, 99, 108, 105, 101, 110, 116, 95, 107, 101, 121, 88,
+            32, 229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43,
+            50, 45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
+        ];
+
+        let valid_signature = vec![
+            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
+            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
+            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
+            220, 6, 56, 9, 157, 126, 4,
+        ];
+
+        let message = RelayedClientMessage {
+            content: valid_content,
+            sig: valid_signature,
+        };
+        let mut serialized_message = vec![];
+        let mut serializer = Serializer::new(&mut serialized_message);
+        serializer.self_describe().unwrap();
+        message.serialize(&mut serializer).unwrap();
+
+        client
+            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("client's public key has not been previously registered by client")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
 }
