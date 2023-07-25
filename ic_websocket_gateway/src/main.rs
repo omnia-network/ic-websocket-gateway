@@ -512,3 +512,43 @@ async fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::start_accepting_incoming_connections;
+    use crate::start_ws_gateway;
+
+    use super::load_key_pair;
+    use super::BasicIdentity;
+    use websocket::ClientBuilder;
+
+    fn mock_websocket_client(addr: &str) {
+        let mut client = ClientBuilder::new(&format!("ws://{}", addr))
+            .unwrap()
+            .connect_insecure()
+            .expect("Error connecting to WebSocket server.");
+
+        // Send a message to the server after connecting
+        client
+            .send_message(&websocket::OwnedMessage::Text(String::from("diocane")))
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_works() {
+        let addr = "127.0.0.1:8080";
+        let key_pair = load_key_pair();
+        let identity = BasicIdentity::from_key_pair(key_pair);
+
+        let gateway_server = start_ws_gateway(addr, identity).await;
+
+        start_accepting_incoming_connections(&gateway_server);
+
+        mock_websocket_client(addr);
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(4, 4);
+    }
+}
