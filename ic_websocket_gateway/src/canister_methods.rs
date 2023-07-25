@@ -142,9 +142,9 @@ pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) 
 pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
     if let Message::Binary(bytes) = message {
         let m = from_slice::<RelayedClientMessage>(&bytes)
-            .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
+            .map_err(|_| String::from("first message is not of type RelayedClientMessage"))?;
         let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
-            String::from("content of first message is not of type ClientCanisterId")
+            String::from("content of first message is not of type CanisterFirstMessageContent")
         })?;
         let sig = Signature::from_slice(&m.sig)
             .map_err(|_| String::from("first message does not contain a valid signature"))?;

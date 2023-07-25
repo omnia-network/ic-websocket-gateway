@@ -538,10 +538,13 @@ async fn main() {
 // !!! tests have to be run using "cargo test -- --test-threads=1" !!!
 // running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
+    use serde::Serialize;
+    use serde_cbor::Serializer;
     use std::net::TcpStream;
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
+    use crate::canister_methods::RelayedClientMessage;
     use crate::load_key_pair;
     use crate::start_accepting_incoming_connections;
     use crate::start_ws_gateway;
@@ -597,7 +600,7 @@ mod tests {
     async fn client_should_send_binary_first_message_of_correct_type() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting but serialized from a type which is not MessageFromClient
+        // client sends the first message as binary to the server right after connecting but serialized from a type which is not RelayedClientMessage
         client
             .send_message(&websocket::OwnedMessage::Binary(Vec::<u8>::new()))
             .unwrap();
@@ -611,6 +614,39 @@ mod tests {
             return assert_eq!(
                 e,
                 String::from("first message is not of type RelayedClientMessage")
+            );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn first_message_content_should_be_of_right_type() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // but with content not of type CanisterFirstMessageContent
+        let message = RelayedClientMessage {
+            content: vec![],
+            sig: vec![],
+        };
+        let mut serialized_message = vec![];
+        let mut serializer = Serializer::new(&mut serialized_message);
+        serializer.self_describe().unwrap();
+        message.serialize(&mut serializer).unwrap();
+
+        client
+            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+            .unwrap();
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
+            ws_connection_state
+        {
+            return assert_eq!(
+                e,
+                String::from("content of first message is not of type CanisterFirstMessageContent")
             );
         }
         panic!("ws_connection_state does not have the expected type");
