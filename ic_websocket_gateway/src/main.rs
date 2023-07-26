@@ -605,6 +605,47 @@ mod tests {
             .expect("Error connecting to WebSocket server.")
     }
 
+    fn serialize<T: Serialize>(text: T) -> Vec<u8> {
+        let mut bytes = vec![];
+        let mut serializer = Serializer::new(&mut bytes);
+        serializer.self_describe().unwrap();
+        text.serialize(&mut serializer).unwrap();
+        bytes
+    }
+
+    fn get_valid_signature() -> Vec<u8> {
+        vec![
+            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
+            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
+            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
+            220, 6, 56, 9, 157, 126, 4,
+        ]
+    }
+
+    fn get_valid_client_key() -> Vec<u8> {
+        vec![
+            229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
+            45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
+        ]
+    }
+
+    fn get_valid_serialized_canister_first_message_content() -> Vec<u8> {
+        vec![
+            217, 217, 247, 162, 107, 99, 97, 110, 105, 115, 116, 101, 114, 95, 105, 100, 74, 128,
+            0, 0, 0, 0, 16, 0, 1, 1, 1, 106, 99, 108, 105, 101, 110, 116, 95, 107, 101, 121, 88,
+            32, 229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43,
+            50, 45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
+        ]
+    }
+
+    fn get_valid_serialized_relayed_client_message() -> Vec<u8> {
+        let message = RelayedClientMessage {
+            content: get_valid_serialized_canister_first_message_content(),
+            sig: get_valid_signature(),
+        };
+        serialize(message)
+    }
+
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
         let addr = "127.0.0.1:8080";
         let key_pair = load_key_pair();
@@ -674,10 +715,7 @@ mod tests {
             content: vec![],
             sig: vec![],
         };
-        let mut serialized_message = vec![];
-        let mut serializer = Serializer::new(&mut serialized_message);
-        serializer.self_describe().unwrap();
-        message.serialize(&mut serializer).unwrap();
+        let serialized_message = serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -707,19 +745,13 @@ mod tests {
             client_key: vec![],
             canister_id: Principal::anonymous(),
         };
-        let mut serialized_content = vec![];
-        let mut serializer = Serializer::new(&mut serialized_content);
-        serializer.self_describe().unwrap();
-        content.serialize(&mut serializer).unwrap();
+        let serialized_content = serialize(content);
 
         let message = RelayedClientMessage {
             content: serialized_content,
             sig: vec![],
         };
-        let mut serialized_message = vec![];
-        let mut serializer = Serializer::new(&mut serialized_message);
-        serializer.self_describe().unwrap();
-        message.serialize(&mut serializer).unwrap();
+        let serialized_message = serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -749,26 +781,15 @@ mod tests {
             client_key: vec![],
             canister_id: Principal::anonymous(),
         };
-        let mut serialized_content = vec![];
-        let mut serializer = Serializer::new(&mut serialized_content);
-        serializer.self_describe().unwrap();
-        content.serialize(&mut serializer).unwrap();
+        let serialized_content = serialize(content);
 
-        let valid_signature = vec![
-            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
-            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
-            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
-            220, 6, 56, 9, 157, 126, 4,
-        ];
+        let valid_signature = get_valid_signature();
 
         let message = RelayedClientMessage {
             content: serialized_content,
             sig: valid_signature,
         };
-        let mut serialized_message = vec![];
-        let mut serializer = Serializer::new(&mut serialized_message);
-        serializer.self_describe().unwrap();
-        message.serialize(&mut serializer).unwrap();
+        let serialized_message = serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -794,35 +815,20 @@ mod tests {
 
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but the client's signature does not verify the message against the public key
-        let valid_client_key = vec![
-            229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
-            45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
-        ];
-
+        let valid_client_key = get_valid_client_key();
         let content = CanisterFirstMessageContent {
             client_key: valid_client_key,
             canister_id: Principal::anonymous(),
         };
-        let mut serialized_content = vec![];
-        let mut serializer = Serializer::new(&mut serialized_content);
-        serializer.self_describe().unwrap();
-        content.serialize(&mut serializer).unwrap();
+        let serialized_content = serialize(content);
 
-        let valid_signature = vec![
-            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
-            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
-            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
-            220, 6, 56, 9, 157, 126, 4,
-        ];
+        let valid_signature = get_valid_signature();
 
         let message = RelayedClientMessage {
             content: serialized_content,
             sig: valid_signature,
         };
-        let mut serialized_message = vec![];
-        let mut serializer = Serializer::new(&mut serialized_message);
-        serializer.self_describe().unwrap();
-        message.serialize(&mut serializer).unwrap();
+        let serialized_message = serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -848,31 +854,10 @@ mod tests {
 
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but the client did not register its public key in the canister (by calling the ws_register method)
-        let valid_content = vec![
-            217, 217, 247, 162, 107, 99, 97, 110, 105, 115, 116, 101, 114, 95, 105, 100, 74, 128,
-            0, 0, 0, 0, 16, 0, 1, 1, 1, 106, 99, 108, 105, 101, 110, 116, 95, 107, 101, 121, 88,
-            32, 229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43,
-            50, 45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
-        ];
-
-        let valid_signature = vec![
-            182, 213, 168, 36, 71, 219, 76, 54, 18, 192, 209, 98, 164, 87, 237, 175, 233, 118, 47,
-            39, 10, 188, 252, 3, 110, 212, 121, 163, 112, 222, 186, 190, 185, 51, 85, 78, 148, 17,
-            12, 229, 11, 181, 84, 117, 168, 61, 57, 122, 70, 5, 39, 109, 171, 153, 194, 146, 215,
-            220, 6, 56, 9, 157, 126, 4,
-        ];
-
-        let message = RelayedClientMessage {
-            content: valid_content,
-            sig: valid_signature,
-        };
-        let mut serialized_message = vec![];
-        let mut serializer = Serializer::new(&mut serialized_message);
-        serializer.self_describe().unwrap();
-        message.serialize(&mut serializer).unwrap();
+        let valid_serialized_message = get_valid_serialized_relayed_client_message();
 
         client
-            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+            .send_message(&websocket::OwnedMessage::Binary(valid_serialized_message))
             .unwrap();
 
         let res = server.client_connection_handler_rx.recv().await;
@@ -880,10 +865,7 @@ mod tests {
         let ws_connection_state = res.expect("should not be None");
 
         let expected_client_id = 0 as u64;
-        let expected_client_key = vec![
-            229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
-            45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
-        ];
+        let expected_client_key = get_valid_client_key();
         let expected_canister_id =
             Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").expect("not a valid principal");
         let expected_nonce = 0 as u64;
