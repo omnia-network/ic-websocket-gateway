@@ -145,11 +145,12 @@ async fn handle_client_connection(
                                 // break from the loop so that the connection handler task can terminate
                                 break;
                             },
-                            Err(e) => {
-                                // TODO: the gateway session might have been already created on the gateway and has to be cleaned up !!!
-                                client_connection_handler_tx
-                                    .send(WsConnectionState::ConnectionError(IcWsError::WsError(e.to_string())))
-                                    .expect("channel should be open on the main thread");
+                            // the client's still needs to be cleaned up so it is necessary to return the client id
+                            Err(_) => {
+                                // let the main task know that it should remove the client's session from the WS Gateway state
+                                client_connection_handler_tx.send(
+                                    WsConnectionState::ConnectionClosed(client_id)
+                                ).expect("channel should be open on the main thread");
                                 // break from the loop so that the connection handler task can terminate
                                 break;
                             }
@@ -852,8 +853,7 @@ mod tests {
     async fn gets_gateway_session() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but the client did not register its public key in the canister (by calling the ws_register method)
+        // client follows the IC WS connection establishment correctly
         let valid_serialized_message = get_valid_serialized_relayed_client_message();
 
         client
@@ -862,14 +862,13 @@ mod tests {
 
         let res = server.client_connection_handler_rx.recv().await;
 
-        let ws_connection_state = res.expect("should not be None");
-
         let expected_client_id = 0 as u64;
         let expected_client_key = get_valid_client_key();
         let expected_canister_id =
             Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").expect("not a valid principal");
         let expected_nonce = 0 as u64;
 
+        let ws_connection_state = res.expect("should not be None");
         if let WsConnectionState::ConnectionEstablished(GatewaySession {
             client_id,
             client_key,
@@ -885,6 +884,33 @@ mod tests {
                     && nonce == expected_nonce,
                 true
             );
+        }
+        panic!("ws_connection_state does not have the expected type");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn detects_closed_connection_after_session_established() {
+        let (mut client, mut server) = start_client_server().await;
+
+        // client follows the IC WS connection establishment correctly and then disconnects
+        let valid_serialized_message = get_valid_serialized_relayed_client_message();
+
+        client
+            .send_message(&websocket::OwnedMessage::Binary(valid_serialized_message))
+            .unwrap();
+
+        let _res = server.client_connection_handler_rx.recv().await; // ignore gateway session returned after first message
+
+        // close client connection
+        client.shutdown().expect("client should have been running");
+
+        let res = server.client_connection_handler_rx.recv().await;
+
+        let expected_client_id = 0;
+
+        let ws_connection_state = res.expect("should not be None");
+        if let WsConnectionState::ConnectionClosed(client_id) = ws_connection_state {
+            return assert_eq!(client_id, expected_client_id);
         }
         panic!("ws_connection_state does not have the expected type");
     }
