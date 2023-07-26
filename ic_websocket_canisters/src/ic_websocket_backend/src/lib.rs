@@ -1,24 +1,44 @@
 use ic_cdk_macros::*;
 
-use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
+use canister::{on_close, on_message, on_open, AppMessage, GATEWAY_PRINCIPAL};
 use sock::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
     CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsRegisterArguments,
-    CanisterWsRegisterResult,
+    CanisterWsRegisterResult, CanisterWsSendResult, ClientPublicKey, WsHandlers,
 };
 
 mod canister;
 mod sock;
 
 #[init]
-fn init() {
-    sock::init(on_open, on_message, on_close, GATEWAY_PRINCIPAL)
+fn init(gateway_principal: Option<String>) {
+    let handlers = WsHandlers {
+        on_open: Some(on_open),
+        on_message: Some(on_message),
+        on_close: Some(on_close),
+    };
+
+    if let Some(gateway_principal) = gateway_principal {
+        sock::init(handlers, &gateway_principal)
+    } else {
+        sock::init(handlers, GATEWAY_PRINCIPAL)
+    }
 }
 
 #[post_upgrade]
-fn post_upgrade() {
-    sock::init(on_open, on_message, on_close, GATEWAY_PRINCIPAL)
+fn post_upgrade(gateway_principal: Option<String>) {
+    let handlers = WsHandlers {
+        on_open: Some(on_open),
+        on_message: Some(on_message),
+        on_close: Some(on_close),
+    };
+
+    if let Some(gateway_principal) = gateway_principal {
+        sock::init(handlers, &gateway_principal)
+    } else {
+        sock::init(handlers, GATEWAY_PRINCIPAL)
+    }
 }
 
 // method called by the client SDK when instantiating a new IcWebSocket
@@ -51,8 +71,15 @@ fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessage
     sock::ws_get_messages(args)
 }
 
-// debug method used to wipe all data in the canister
+//// Debug/tests methods
+// wipe all websocket data in the canister
 #[update]
 fn ws_wipe() {
     sock::wipe();
+}
+
+// send a message to the client, usually called by the canister itself
+#[update]
+fn ws_send(client_key: ClientPublicKey, msg: AppMessage) -> CanisterWsSendResult {
+    sock::ws_send(client_key, msg)
 }

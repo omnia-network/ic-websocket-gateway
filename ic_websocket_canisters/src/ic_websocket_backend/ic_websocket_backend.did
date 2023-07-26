@@ -80,7 +80,12 @@ type CanisterWsGetMessagesResult = variant {
   Err : text;
 };
 
-service : {
+type CanisterWsSendResult = variant {
+  Ok : null;
+  Err : text;
+};
+
+service : (opt text) -> {
   "ws_register" : (CanisterWsRegisterArguments) -> (CanisterWsRegisterResult);
   "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
   "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
@@ -88,4 +93,5 @@ service : {
   "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
 
   "ws_wipe" : () -> ();
+  "ws_send" : (ClientPublicKey, record { text : text }) -> (CanisterWsSendResult);
 };

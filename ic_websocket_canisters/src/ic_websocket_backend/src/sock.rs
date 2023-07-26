@@ -182,9 +182,6 @@ pub fn wipe() {
     CERT_TREE.with(|t| {
         t.replace(RbTree::new());
     });
-    GATEWAY_PRINCIPAL.with(|p| {
-        *p.borrow_mut() = None;
-    });
     MESSAGES_FOR_GATEWAY.with(|m| *m.borrow_mut() = VecDeque::new());
     OUTGOING_MESSAGE_NONCE.with(|next_id| next_id.replace(0u64));
 }
@@ -385,43 +382,71 @@ fn get_cert_for_range(first: &String, last: &String) -> (Vec<u8>, Vec<u8>) {
     })
 }
 
-/// handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
+/// Arguments passed to the `on_open` handler
+pub struct OnOpenCallbackArgs {
+    pub client_key: ClientPublicKey,
+}
+/// Handler initialized by the canister and triggered by the CDK once the IC WebSocket connection
 /// is established
-type OnOpenCallback = fn(ClientPublicKey);
-/// handler initialized by the canister and triggered by the CDK once a message is received by
-/// the CDk (either directly from the client or relayed by the WS Gateway)
-type OnMessageCallback = fn(DirectClientMessage);
-/// handler initialized by the canister and triggered by the CDK once the WS Gateway closes the
-/// IC WebSocket connection
-type OnCloseCallback = fn(ClientPublicKey);
+type OnOpenCallback = fn(OnOpenCallbackArgs);
 
-struct WsHandlers {
-    on_open: Result<OnOpenCallback, String>,
-    on_message: Result<OnMessageCallback, String>,
-    on_close: Result<OnCloseCallback, String>,
+/// Arguments passed to the `on_message handler
+pub struct OnMessageCallbackArgs {
+    pub client_key: ClientPublicKey,
+    pub message: Vec<u8>,
+}
+/// Handler initialized by the canister and triggered by the CDK once a message is received by
+/// the CDK
+type OnMessageCallback = fn(OnMessageCallbackArgs);
+
+/// Arguments passed to the `on_close` handler
+pub struct OnCloseCallbackArgs {
+    pub client_key: ClientPublicKey,
+}
+/// Handler initialized by the canister and triggered by the CDK once the WS Gateway closes the
+/// IC WebSocket connection
+type OnCloseCallback = fn(OnCloseCallbackArgs);
+
+pub struct WsHandlers {
+    pub on_open: Option<OnOpenCallback>,
+    pub on_message: Option<OnMessageCallback>,
+    pub on_close: Option<OnCloseCallback>,
+}
+
+impl WsHandlers {
+    fn call_on_open(&self, args: OnOpenCallbackArgs) {
+        if let Some(on_open) = self.on_open {
+            on_open(args);
+        }
+    }
+
+    fn call_on_message(&self, args: OnMessageCallbackArgs) {
+        if let Some(on_message) = self.on_message {
+            on_message(args);
+        }
+    }
+
+    fn call_on_close(&self, args: OnCloseCallbackArgs) {
+        if let Some(on_close) = self.on_close {
+            on_close(args);
+        }
+    }
 }
 
 thread_local! {
     /* flexible */ static HANDLERS: RefCell<WsHandlers> = RefCell::new(WsHandlers {
-        on_open: Err(String::from("on_open handler not initialized")),
-        on_message: Err(String::from("on_message handler not initialized")),
-        on_close: Err(String::from("on_close handler not initialized")),
+        on_open: None,
+        on_message: None,
+        on_close: None,
     });
 }
 
 // init CDK
-pub fn init(
-    on_open: OnOpenCallback,
-    on_message: OnMessageCallback,
-    on_close: OnCloseCallback,
-    gateway_principal: &str,
-) {
+pub fn init(handlers: WsHandlers, gateway_principal: &str) {
     // set the handlers specified by the canister that the CDK uses to manage the IC WebSocket connection
     HANDLERS.with(|h| {
         let mut h = h.borrow_mut();
-        h.on_open = Ok(on_open);
-        h.on_message = Ok(on_message);
-        h.on_close = Ok(on_close);
+        *h = handlers;
     });
     // set the principal of the (only) WS Gateway that will be polling the canister
     GATEWAY_PRINCIPAL.with(|p| {
@@ -486,61 +511,68 @@ pub fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
     // the caller must be the gateway that was registered during CDK initialization
     check_is_registered_gateway(caller())?;
 
+    // check if client registered its public key by calling ws_register
+    check_registered_client_key(&args.client_key)?;
+
     remove_client(args.client_key.clone());
 
     HANDLERS.with(|h| {
-        let on_close_handler = h.borrow().on_close.to_owned()?;
-        on_close_handler(args.client_key);
-        Ok(())
-    })
+        h.borrow().call_on_close(OnCloseCallbackArgs {
+            client_key: args.client_key,
+        });
+    });
+
+    Ok(())
 }
 
 /// Handles the WS messages received  either directly from the client or relayed by the WS Gateway
 pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
-    // TODO: check the caller, which can be either the WS Gateway or the client, but not another canister or the anonymous principal
     match args.msg {
         // message sent directly from client
-        CanisterIncomingMessage::DirectlyFromClient(canister_message) => {
+        CanisterIncomingMessage::DirectlyFromClient(received_message) => {
             // check if the identity of the caller corresponds to the one registered for the given public key
-            if caller()
-                != get_client_caller(&canister_message.client_key).ok_or(String::from(
+            let expected_caller =
+                get_client_caller(&received_message.client_key).ok_or(String::from(
                     "client was was not authenticated with II when it registered its public key",
-                ))?
-            {
+                ))?;
+            if caller() != expected_caller {
                 return Err(String::from(
-                    "caller is not the same as the one which registered the public key",
+                    "caller is not the same that registered the public key",
                 ));
             }
             // call the on_message handler initialized in init()
-            let handler_result = HANDLERS.with(|h| {
-                // check if on_message method has been initialized during init()
-                let on_message_handler = h.borrow().on_message.to_owned()?;
+            HANDLERS.with(|h| {
                 // trigger the on_message handler initialized by canister
-                on_message_handler(canister_message);
-                Ok(())
+                h.borrow().call_on_message(OnMessageCallbackArgs {
+                    client_key: received_message.client_key,
+                    message: received_message.message,
+                });
             });
-            return handler_result;
+            Ok(())
         },
         // WS Gateway relays a message from the client
-        CanisterIncomingMessage::RelayedByGateway(client_msg) => {
+        CanisterIncomingMessage::RelayedByGateway(received_message) => {
+            // this message can come only from the registered gateway
+            check_is_registered_gateway(caller())?;
+
             let WebsocketMessage {
                 client_key,
                 sequence_num,
                 timestamp: _timestamp,
                 message,
-            } = from_slice(&client_msg.content).map_err(|e| e.to_string())?;
-
-            // check if the signature is a Ed25519 signature
-            let sig = Signature::from_slice(&client_msg.sig).map_err(|e| e.to_string())?;
-            // check if client_key is a Ed25519 public key
-            let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
+            } = from_slice(&received_message.content).map_err(|e| e.to_string())?;
 
             // check if client registered its public key by calling ws_register
             check_registered_client_key(&client_key)?;
+
+            // check if the signature is a Ed25519 signature
+            let sig = Signature::from_slice(&received_message.sig).map_err(|e| e.to_string())?;
+            // check if client_key is a Ed25519 public key
+            let public_key = PublicKey::from_slice(&client_key).map_err(|e| e.to_string())?;
             // check if the signature on the content of the client message verifies against the public key of the registered client
             // if so, the message came from the same client that registered its public key using ws_register
             public_key
-                .verify(&client_msg.content, &sig)
+                .verify(&received_message.content, &sig)
                 .map_err(|e| e.to_string())?;
 
             // check if the incoming message has the expected sequence number
@@ -548,19 +580,15 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
                 // increase the expected sequence number by 1
                 increment_expected_incoming_message_from_client_num(&client_key)?;
                 // call the on_message handler initialized in init()
-                let handler_result = HANDLERS.with(|h| {
-                    // check if on_message method has been initialized during init()
-                    let on_message_handler = h.borrow().on_message.to_owned()?;
-                    // create messaeg to send to client
-                    let canister_message = DirectClientMessage {
-                        message,
-                        client_key,
-                    };
+                HANDLERS.with(|h| {
                     // trigger the on_message handler initialized by canister
-                    on_message_handler(canister_message);
-                    Ok(())
+                    // create message to send to client
+                    h.borrow().call_on_message(OnMessageCallbackArgs {
+                        client_key,
+                        message,
+                    });
                 });
-                return handler_result;
+                return Ok(());
             }
             Err(String::from(
                 "incoming client's message relayed from WS Gateway does not have the expected sequence number",
@@ -568,19 +596,22 @@ pub fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
         },
         // WS Gateway notifies the canister of the established IC WebSocket connection
         CanisterIncomingMessage::IcWebSocketEstablished(client_key) => {
+            // this message can come only from the registered gateway
+            check_is_registered_gateway(caller())?;
+
+            // check if client registered its public key by calling ws_register
+            check_registered_client_key(&client_key)?;
+
             print(format!(
                 "Can start notifying client with key: {:?}",
                 client_key
             ));
-            // call the on_open handler initialized in init()
-            let handler_result = HANDLERS.with(|h| {
-                // check if on_open method has been initialized during init()
-                let on_open_handler = h.borrow().on_open.to_owned()?;
+            // call the on_open handler
+            HANDLERS.with(|h| {
                 // trigger the on_open handler initialized by canister
-                on_open_handler(client_key);
-                Ok(())
+                h.borrow().call_on_open(OnOpenCallbackArgs { client_key });
             });
-            handler_result
+            Ok(())
         },
         // TODO: remove registered client when connection is closed
     }
@@ -729,13 +760,19 @@ mod test {
             let on_message = |_| {};
             let on_close = |_| {};
 
-            init(on_open, on_message, on_close, &test_gateway_principal.to_string());
+            let handlers = WsHandlers {
+                on_open: Some(on_open),
+                on_message: Some(on_message),
+                on_close: Some(on_close),
+            };
+
+            init(handlers, &test_gateway_principal.to_string());
 
             HANDLERS.with(|h| {
                 let h = h.borrow();
-                assert!(h.on_open.is_ok());
-                assert!(h.on_message.is_ok());
-                assert!(h.on_close.is_ok());
+                assert!(h.on_open.is_some());
+                assert!(h.on_message.is_some());
+                assert!(h.on_close.is_some());
             });
 
             GATEWAY_PRINCIPAL.with(|p| {
