@@ -364,7 +364,7 @@ impl GatewayServer {
             match connection_state {
                 WsConnectionState::ConnectionEstablished(gateway_session) => {
                     // add client's session state to the WS Gateway state
-                    self.add_client_to_server(gateway_session.clone());
+                    self.add_client(gateway_session.clone());
 
                     // check if client is connecting to a canister that is not yet being polled
                     // if so, create new poller task
@@ -443,13 +443,12 @@ impl GatewayServer {
                     {
                         println!("Calling ws_message on canister failed: {}", e);
 
-                        self.remove_client_from_server(gateway_session.client_id)
-                            .await
+                        self.remove_client(gateway_session.client_id).await
                     }
                 },
                 WsConnectionState::ConnectionClosed(client_id) => {
                     // cleanup client's session from WS Gateway state
-                    self.remove_client_from_server(client_id).await
+                    self.remove_client(client_id).await
                 },
                 WsConnectionState::ConnectionError(e) => {
                     println!("Connection handler terminated with an error: {:?}", e);
@@ -460,7 +459,7 @@ impl GatewayServer {
         }
     }
 
-    fn add_client_to_server(&mut self, gateway_session: GatewaySession) {
+    fn add_client(&mut self, gateway_session: GatewaySession) {
         let client_key = gateway_session.client_key.clone();
         let client_id = gateway_session.client_id.clone();
 
@@ -472,7 +471,7 @@ impl GatewayServer {
             .insert(client_key, gateway_session);
     }
 
-    async fn remove_client_from_server(&mut self, client_id: u64) {
+    async fn remove_client(&mut self, client_id: u64) {
         match self.state.client_key_map.remove(&client_id) {
             Some(client_key) => {
                 let gateway_session = self
@@ -595,6 +594,7 @@ mod tests {
     use crate::load_key_pair;
     use crate::BasicIdentity;
     use crate::GatewayServer;
+    use crate::GatewaySession;
     use crate::IcWsError;
     use crate::WsConnectionState;
 
@@ -843,7 +843,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn public_key_should_be_registered_in_canister() {
+    async fn gets_gateway_session() {
         let (mut client, mut server) = start_client_server().await;
 
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
@@ -878,12 +878,30 @@ mod tests {
         let res = server.client_connection_handler_rx.recv().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
+
+        let expected_client_id = 0 as u64;
+        let expected_client_key = vec![
+            229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
+            45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
+        ];
+        let expected_canister_id =
+            Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").expect("not a valid principal");
+        let expected_nonce = 0 as u64;
+
+        if let WsConnectionState::ConnectionEstablished(GatewaySession {
+            client_id,
+            client_key,
+            canister_id,
+            nonce,
+            ..  // ignore message_for_client_tx as it does does not implement Eq
+        }) = ws_connection_state
         {
             return assert_eq!(
-                e,
-                String::from("client's public key has not been previously registered by client")
+                client_id == expected_client_id
+                    && client_key == expected_client_key
+                    && canister_id == expected_canister_id
+                    && nonce == expected_nonce,
+                true
             );
         }
         panic!("ws_connection_state does not have the expected type");
