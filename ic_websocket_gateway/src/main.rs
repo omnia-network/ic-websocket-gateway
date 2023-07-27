@@ -477,6 +477,8 @@ impl GatewayServer {
 
                     println!("{} clients registered", self.state.client_session_map.len());
                 }
+                // TODO: give each poller a tx which is used to let the gateway know when the poller is finished
+                //       so that the cleanup can happen immediately
                 _ = periodic_tick(1) => self.cleanup_poller_tasks_data_from_state().await
             }
         }
