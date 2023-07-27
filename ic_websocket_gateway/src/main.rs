@@ -194,7 +194,7 @@ struct CanisterPoller {
 impl CanisterPoller {
     async fn run_polling(
         &self,
-        mut poller_channel_rx: UnboundedReceiver<ClientPollerChannelData>,
+        mut poller_channel_rx: UnboundedReceiver<PollerToClientChannelData>,
         mut nonce: u64,
     ) {
         // channels used to communicate with client's WebSocket task
@@ -209,11 +209,11 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channel_rx.recv() => {
                     match channel_data {
-                        ClientPollerChannelData::NewClientChannel(client_key, client_channel) => {
+                        PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
                             println!("Adding new client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
                             client_channels.insert(client_key, client_channel);
                         },
-                        ClientPollerChannelData::ClientDisconnected(client_key) => {
+                        PollerToClientChannelData::ClientDisconnected(client_key) => {
                             println!("Removing client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
                             client_channels.remove(&client_key);
                             // exit task if last client disconnected
@@ -298,7 +298,7 @@ fn load_key_pair() -> ring::signature::Ed25519KeyPair {
 }
 
 #[derive(Debug, Clone)]
-enum ClientPollerChannelData {
+enum PollerToClientChannelData {
     NewClientChannel(ClientPublicKey, UnboundedSender<CertifiedMessage>),
     ClientDisconnected(ClientPublicKey),
 }
@@ -367,28 +367,35 @@ impl GatewayServer {
                     // add client's session state to the WS Gateway state
                     self.add_client(gateway_session.clone());
 
-                    // check if client is connecting to a canister that is not yet being polled
-                    // if so, create new poller task
-                    let client_poller_channel_data = ClientPollerChannelData::NewClientChannel(
+                    // contains the sending side of the channel created by the client's connection handler which needs to be sent
+                    // to the canister poller in order for it to be able to send messages directly to the client task
+                    let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
                         gateway_session.client_key.clone(),
                         gateway_session.message_for_client_tx.clone(),
                     );
+                    // check if client is connecting to a canister that is not yet being polled
+                    // if so, create new poller task
                     let client_channel_tx = self
                         .state
                         .connected_canisters
-                        .get_mut(&gateway_session.canister_id.clone());
+                        .get_mut(&gateway_session.canister_id);
                     let needs_new_poller = match client_channel_tx {
                         Some(client_channel_tx) => {
+                            // try to send channel data to poller
                             if client_channel_tx
-                                .send(client_poller_channel_data.clone())
+                                .send(poller_to_client_channel_data.clone())
                                 .is_err()
                             {
+                                // TODO: remove terminated poller from the map when it terminates
+                                //       if no client connects after the poller has terminated, it
+                                //       will never be removed
                                 // poller task has terminated, remove it from the map
                                 self.state
                                     .connected_canisters
                                     .remove(&gateway_session.canister_id.clone());
                                 true
                             } else {
+                                // if poller task is still runnning, do not create a new one
                                 false
                             }
                         },
@@ -429,7 +436,9 @@ impl GatewayServer {
                             }
                         });
 
-                        poller_channel_tx.send(client_poller_channel_data).unwrap();
+                        poller_channel_tx
+                            .send(poller_to_client_channel_data)
+                            .unwrap();
                     }
 
                     // notify canister that it can now send messages for the client corresponding to client_key
@@ -452,6 +461,7 @@ impl GatewayServer {
                     self.remove_client(client_id).await
                 },
                 WsConnectionState::ConnectionError(e) => {
+                    // TODO: make sure that cleaning up is not needed
                     println!("Connection handler terminated with an error: {:?}", e);
                 },
             }
@@ -499,7 +509,7 @@ impl GatewayServer {
                 {
                     Some(canister_channel) => {
                         canister_channel
-                            .send(ClientPollerChannelData::ClientDisconnected(
+                            .send(PollerToClientChannelData::ClientDisconnected(
                                 client_key.clone(),
                             ))
                             .unwrap();
@@ -519,8 +529,8 @@ impl GatewayServer {
 /// - sessions with the clients connected to it via WebSocket
 /// - id of each client
 struct GatewayState {
-    /// maps the principal of the canister to the sender side of the channel used to communicate with the poller task
-    connected_canisters: HashMap<Principal, UnboundedSender<ClientPollerChannelData>>,
+    /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
+    connected_canisters: HashMap<Principal, UnboundedSender<PollerToClientChannelData>>,
     /// maps the client's public key to the state of the client's session
     client_session_map: HashMap<ClientPublicKey, GatewaySession>,
     /// maps the client id to its public key
