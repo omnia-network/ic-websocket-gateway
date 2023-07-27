@@ -2,7 +2,7 @@ use ic_cdk::{export::candid::CandidType, print};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 
-use crate::sock::{
+use ic_websocket_cdk::{
     ws_send, ClientPublicKey, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
 

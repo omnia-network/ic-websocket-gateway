@@ -21,10 +21,7 @@
   "devDependencies": {
     "@babel/preset-env": "^7.22.9",
     "@babel/preset-typescript": "^7.22.5",
-    "@dfinity/agent": "^0.18.1",
-    "@dfinity/candid": "^0.18.1",
     "@dfinity/identity-secp256k1": "^0.18.1",
-    "@dfinity/principal": "^0.18.1",
     "@noble/ed25519": "^2.0.0",
     "@types/hdkey": "^2.0.1",
     "@types/jest": "^29.5.3",
@@ -55,5 +52,11 @@
     "last 2 firefox version",
     "last 2 safari version",
     "last 2 edge version"
-  ]
+  ],
+  "dependencies": {
+    "@dfinity/agent": "^0.18.1",
+    "@dfinity/candid": "^0.18.1",
+    "@dfinity/principal": "^0.18.1",
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#62dcec3437afe35efd7a08ec8d132e544891e2e1"
+  }
 }
