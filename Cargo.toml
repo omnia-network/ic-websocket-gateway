@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "src/ic-websocket-gateway",
+]
+default-members = [
+    "src/ic-websocket-gateway",
+]

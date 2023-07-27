@@ -7,14 +7,9 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-candid = "0.8"
-ic-cdk = "0.6.6"
-ic-cdk-macros = "0.6.6"
-flate2 = "1.0"
-ic-certified-map = "0.3"
-base64 = "0.13.1"
-serde = "1.0.147"
-sha2 = "0.10.6"
+candid = "0.8.4"
+ic-cdk = "0.9.2"
+ic-cdk-macros = "0.7.0"
+serde = "1.0.176"
 serde_cbor = "0.11.2"
-serde_bytes = "0.11"
-ed25519-compact = { version = "2", default-features = false }
+ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "989f74b6f871c113628cd20697e42b85d503e37d" }

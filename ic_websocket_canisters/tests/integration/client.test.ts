@@ -1,5 +1,5 @@
 import { ic_websocket_backend } from "../../src/declarations/ic_websocket_backend";
-import IcWebSocket from "../../src/ic_websocket_frontend/src/ic-websocket/icWebsocket";
+import IcWebSocket from "ic-websocket-js";
 import type { _SERVICE } from "../../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
 
 /// IcWebsocket parameters

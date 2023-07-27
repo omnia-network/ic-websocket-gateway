@@ -26,7 +26,7 @@ This repository accepts external contributions if you accept the Contributor Lin
 
 # Overview
 
-![](/images/image2.png)
+![](./docs/images/image2.png)
 
 In order to enable WebSockets for a dapp running on the IC, we use an intermediary, which we call gateway, that provides a WebSocket endpoint for the frontend of the dapp, running in the userâ€™s browser and interfaces with the canister backend.
 
@@ -80,7 +80,7 @@ We could encrypt the messages between the client and the canister (so that theyâ
 
 # Message flow
 
-![](/images/image1.png)
+![](./docs/images/image1.png)
 
 1. Client generates an ed25519 key pair and makes an update call to the canister to register the public key. Canister remembers the caller associated with this key. The call returns client_id.
 2. Client opens a websocket with the gateway.

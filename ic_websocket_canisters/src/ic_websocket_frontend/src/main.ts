@@ -1,4 +1,4 @@
-import IcWebSocket from "./ic-websocket/icWebsocket";
+import IcWebSocket from "ic-websocket-js";
 import addNotification from "./utils/addNotification";
 import { ic_websocket_backend } from "../../declarations/ic_websocket_backend";
 
