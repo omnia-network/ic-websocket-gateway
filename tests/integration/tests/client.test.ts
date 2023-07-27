@@ -1,9 +1,8 @@
-import { ic_websocket_backend } from "../../src/declarations/ic_websocket_backend";
+import { canisterId, test_canister } from "../src/declarations/test_canister";
 import IcWebSocket from "ic-websocket-js";
-import type { _SERVICE } from "../../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
+import type { _SERVICE } from "../src/declarations/test_canister/test_canister.did";
 
 /// IcWebsocket parameters
-const backendCanisterId = process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND || "";
 const gatewayAddress = "ws://127.0.0.1:8080";
 const url = "http://127.0.0.1:4943";
 const localTest = true;
@@ -53,8 +52,8 @@ const reconstructWsMessage = (index: number) => {
 describe("WS client", () => {
   it("should open a connection", async () => {
     ws = new IcWebSocket(gatewayAddress, undefined, {
-      canisterActor: ic_websocket_backend,
-      canisterId: backendCanisterId,
+      canisterActor: test_canister,
+      canisterId: canisterId,
       networkUrl: url,
       localTest,
       persistKey,

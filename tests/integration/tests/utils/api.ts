@@ -1,7 +1,7 @@
 // helpers for functions that are called frequently in tests
 
 import { ActorSubclass, Cbor, Certificate, HashTree, HttpAgent, compare, lookup_path, reconstruct } from "@dfinity/agent";
-import { CanisterIncomingMessage, ClientPublicKey, _SERVICE } from "../../../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
+import { CanisterIncomingMessage, ClientPublicKey, _SERVICE } from "../../src/declarations/test_canister/test_canister.did";
 import { getSignedMessage } from "./crypto";
 import { Secp256k1KeyIdentity } from "@dfinity/identity-secp256k1";
 import { Principal } from "@dfinity/principal";

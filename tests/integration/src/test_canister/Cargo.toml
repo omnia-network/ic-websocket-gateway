@@ -1,5 +1,5 @@
 [package]
-name = "ic_websocket_backend"
+name = "test_canister"
 version = "0.1.0"
 edition = "2021"
 

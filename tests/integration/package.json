@@ -1,7 +1,7 @@
 {
-  "name": "ic_websocket",
+  "name": "ic_websocket_gateway_tests",
   "version": "0.1.0",
-  "description": "IC WebSocket on the IC",
+  "description": "IC WebSocket on the IC (tests)",
   "keywords": [
     "Internet Computer",
     "Rust",
@@ -9,14 +9,8 @@
     "Canister"
   ],
   "scripts": {
-    "build": "cd src/ic_websocket_frontend && npm run build",
-    "prebuild": "npm run generate",
-    "start": "cd src/ic_websocket_frontend && npm run dev",
-    "prestart": "npm run generate",
-    "generate": "dfx generate ic_websocket_backend",
-    "deploy:tests": "dfx deploy ic_websocket_backend --no-wallet --argument '(opt \"i3gux-m3hwt-5mh2w-t7wwm-fwx5j-6z6ht-hxguo-t4rfw-qp24z-g5ivt-2qe\")'",
-    "test:unit": "jest unit",
-    "test:integration": "jest integration"
+    "generate": "dfx generate test_canister",
+    "test": "jest"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.22.9",

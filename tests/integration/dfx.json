@@ -1,0 +1,18 @@
+{
+  "canisters": {
+    "test_canister": {
+      "candid": "src/test_canister/test_canister.did",
+      "package": "test_canister",
+      "type": "rust"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1,
+  "dfx": "0.14.1"
+}

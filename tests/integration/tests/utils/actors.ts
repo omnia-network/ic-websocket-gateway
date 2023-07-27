@@ -1,7 +1,8 @@
 import { Actor, ActorConfig, HttpAgent, HttpAgentOptions } from "@dfinity/agent";
 import { identityFromSeed } from "./identity";
 // @ts-ignore
-import { _SERVICE, idlFactory } from "../../../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
+import { _SERVICE, idlFactory } from "../../src/declarations/test_canister/test_canister.did";
+import { canisterId } from "../../src/declarations/test_canister";
 
 export const localReplicaHost = "http://127.0.0.1:4943";
 
@@ -11,10 +12,6 @@ const commonAgentOptions: HttpAgentOptions = {
 
 // needed in the certificates validation
 export const commonAgent = new HttpAgent(commonAgentOptions);
-
-export const canisterId =
-  process.env.CANISTER_ID_IC_WEBSOCKET_BACKEND ||
-  process.env.IC_WEBSOCKET_BACKEND_CANISTER_ID;
 
 export const createActor = (canisterId: string, options: { agentOptions?: HttpAgentOptions; actorOptions?: ActorConfig } = {}) => {
   const agent = new HttpAgent({
