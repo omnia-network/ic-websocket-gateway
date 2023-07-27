@@ -753,6 +753,93 @@ mod test {
         get_gateway_principal();
     }
 
+    #[test]
+    fn test_ws_handlers_are_called() {
+        struct CustomState {
+            is_on_open_called: bool,
+            is_on_message_called: bool,
+            is_on_close_called: bool,
+        }
+
+        impl CustomState {
+            fn new() -> Self {
+                Self {
+                    is_on_open_called: false,
+                    is_on_message_called: false,
+                    is_on_close_called: false,
+                }
+            }
+        }
+
+        thread_local! {
+            static CUSTOM_STATE : RefCell<CustomState> = RefCell::new(CustomState::new());
+        }
+
+        let mut handlers = WsHandlers {
+            on_open: None,
+            on_message: None,
+            on_close: None,
+        };
+
+        handlers.call_on_open(OnOpenCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+        });
+        handlers.call_on_message(OnMessageCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+            message: vec![],
+        });
+        handlers.call_on_close(OnCloseCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+        });
+
+        // test that the handlers are not called if they are not initialized
+        assert!(!CUSTOM_STATE.with(|h| h.borrow().is_on_open_called));
+        assert!(!CUSTOM_STATE.with(|h| h.borrow().is_on_message_called));
+        assert!(!CUSTOM_STATE.with(|h| h.borrow().is_on_close_called));
+
+        // initialize handlers
+        let on_open = |_| {
+            CUSTOM_STATE.with(|h| {
+                let mut h = h.borrow_mut();
+                h.is_on_open_called = true;
+            });
+        };
+        let on_message = |_| {
+            CUSTOM_STATE.with(|h| {
+                let mut h = h.borrow_mut();
+                h.is_on_message_called = true;
+            });
+        };
+        let on_close = |_| {
+            CUSTOM_STATE.with(|h| {
+                let mut h = h.borrow_mut();
+                h.is_on_close_called = true;
+            });
+        };
+
+        handlers = WsHandlers {
+            on_open: Some(on_open),
+            on_message: Some(on_message),
+            on_close: Some(on_close),
+        };
+
+        handlers.call_on_open(OnOpenCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+        });
+        handlers.call_on_message(OnMessageCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+            message: vec![],
+        });
+        handlers.call_on_close(OnCloseCallbackArgs {
+            client_key: test_utils::generate_random_public_key(),
+        });
+
+        // test that the handlers are called if they are initialized
+        assert!(CUSTOM_STATE.with(|h| h.borrow().is_on_open_called));
+        assert!(CUSTOM_STATE.with(|h| h.borrow().is_on_message_called));
+        assert!(CUSTOM_STATE.with(|h| h.borrow().is_on_close_called));
+    }
+
     proptest! {
         #[test]
         fn test_init(test_gateway_principal in any::<u8>().prop_map(|_| test_utils::generate_random_principal())) {
