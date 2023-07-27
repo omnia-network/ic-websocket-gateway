@@ -1,5 +1,5 @@
 {
-  "name": "ic_websocket_gateway_tests",
+  "name": "ic_websocket_gateway_integration_tests",
   "version": "0.1.0",
   "description": "IC WebSocket on the IC (tests)",
   "keywords": [
