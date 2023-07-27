@@ -408,18 +408,23 @@ impl GatewayServer {
                     println!("Calling ws_close on canister failed: {}", e);
                 }
 
-                // remove client's channel from poller, if it exists
+                // remove client's channel from poller, if it exists and is not finished
                 match self
                     .state
                     .connected_canisters
-                    .get_mut(&gateway_session.canister_id.clone())
+                    .get_mut(&gateway_session.canister_id)
                 {
                     Some(poller_channel_for_client_channel_sender_tx) => {
-                        poller_channel_for_client_channel_sender_tx
+                        // try sending message to poller task
+                        if poller_channel_for_client_channel_sender_tx
                             .send(PollerToClientChannelData::ClientDisconnected(
                                 client_key.clone(),
                             ))
-                            .unwrap();
+                            .is_err()
+                        {
+                            // if poller task is finished, remove its data from WS Gateway state
+                            self.remove_poller_data(&gateway_session.canister_id)
+                        }
                     },
                     None => (),
                 }
