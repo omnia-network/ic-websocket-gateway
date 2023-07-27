@@ -9,6 +9,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
 };
 use tokio_tungstenite::{
     accept_async,
@@ -357,116 +358,127 @@ impl GatewayServer {
     }
 
     async fn handle_clients_connections_states(&mut self) {
-        // connection state can contain either:
-        // - the GatewaySession if the connection was successful
-        // - the client_id if the connection was closed before the client was registered
-        // - a connection error
-        while let Some(connection_state) = self.client_connection_handler_rx.recv().await {
-            match connection_state {
-                WsConnectionState::ConnectionEstablished(gateway_session) => {
-                    // add client's session state to the WS Gateway state
-                    self.add_client(gateway_session.clone());
+        loop {
+            select! {
+                // check if a client's connection state changed
+                Some(connection_state) = self.client_connection_handler_rx.recv() => {
+                    // connection state can contain either:
+                    // - the GatewaySession if the connection was successful
+                    // - the client_id if the connection was closed before the client was registered
+                    // - a connection error
+                    match connection_state {
+                        WsConnectionState::ConnectionEstablished(gateway_session) => {
+                            // add client's session state to the WS Gateway state
+                            self.add_client(gateway_session.clone());
 
-                    // contains the sending side of the channel created by the client's connection handler which needs to be sent
-                    // to the canister poller in order for it to be able to send messages directly to the client task
-                    let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
-                        gateway_session.client_key.clone(),
-                        gateway_session.message_for_client_tx.clone(),
-                    );
-                    // check if client is connecting to a canister that is not yet being polled
-                    // if so, create new poller task
-                    let client_channel_tx = self
-                        .state
-                        .connected_canisters
-                        .get_mut(&gateway_session.canister_id);
-                    let needs_new_poller = match client_channel_tx {
-                        Some(client_channel_tx) => {
-                            // try to send channel data to poller
-                            if client_channel_tx
-                                .send(poller_to_client_channel_data.clone())
-                                .is_err()
+                            // contains the sending side of the channel created by the client's connection handler which needs to be sent
+                            // to the canister poller in order for it to be able to send messages directly to the client task
+                            let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
+                                gateway_session.client_key.clone(),
+                                gateway_session.message_for_client_tx.clone(),
+                            );
+                            // check if client is connecting to a canister that is not yet being polled
+                            // if so, create new poller task
+                            let client_channel_tx_opt = self
+                                .state
+                                .connected_canisters
+                                .get_mut(&gateway_session.canister_id);
+                            let needs_new_poller = match client_channel_tx_opt {
+                                // !!! having data of the poller task in the WS Gateway state does not imply that the poller is still running !!!
+                                // the data of the poller task on the WS Gateway is cleaned up periodically while the poller task might finish any time the last client disconnects
+                                Some(client_channel_tx) => {
+                                    // try to send channel data to poller
+                                    // we need to check this here because data of finished poller tasks is periodically remove from WS Gateway state
+                                    // however, if a poller task is terminated up the last client disconnecting and a new client connects before the data is removed from the state,
+                                    // the Gateway state would say that there is a poller task already running even if the poller task has actually finished
+                                    if client_channel_tx
+                                        .send(poller_to_client_channel_data.clone())
+                                        .is_err()
+                                    {
+                                        // poller task has terminated even if its data was still in the WS Gateway state, remove data from the map
+                                        // and start a new poller
+                                        self.remove_poller_data(&gateway_session.canister_id);
+                                        true
+                                    } else {
+                                        // poller task is still runnning, do not start a new one
+                                        false
+                                    }
+                                },
+                                // no data of poller task in WS Gateway state, start a new poller
+                                None => true,
+                            };
+
+                            if needs_new_poller {
+                                // [main task]              [poller task]
+                                // poller_channel_tx -----> poller_channel_rx
+
+                                // channel used to communicate with the poller task
+                                // the channel is used to send to the poller the sender side of a new client's channel
+                                // so that the poller can send canister messages directly to the client's task
+                                let (poller_channel_tx, poller_channel_rx) = mpsc::unbounded_channel();
+
+                                // register new poller and the channel used to send client's channels to it
+                                self.state.connected_canisters.insert(
+                                    gateway_session.canister_id.clone(),
+                                    poller_channel_tx.clone(),
+                                );
+                                let agent = Arc::clone(&self.agent);
+
+                                // spawn new canister poller task
+                                let poller_task_handle = tokio::spawn({
+                                    async move {
+                                        let poller = CanisterPoller {
+                                            canister_id: gateway_session.canister_id.clone(),
+                                            agent,
+                                        };
+                                        println!("Created new poller: canister: {}", poller.canister_id);
+                                        // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
+                                        // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
+                                        // the new poller thread should not get those same messages again
+                                        poller
+                                            .run_polling(poller_channel_rx, gateway_session.nonce)
+                                            .await;
+                                        // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
+                                        poller.canister_id
+                                    }
+                                });
+                                self.state.active_poller_tasks.push(poller_task_handle);
+
+                                // send channel data to poller
+                                poller_channel_tx
+                                    .send(poller_to_client_channel_data)
+                                    .expect("poller channel should be open");
+                            }
+
+                            // notify canister that it can now send messages for the client corresponding to client_key
+                            let gateway_message =
+                                CanisterIncomingMessage::IcWebSocketEstablished(gateway_session.client_key);
+                            if let Err(e) = canister_methods::ws_message(
+                                &*self.agent,
+                                &gateway_session.canister_id,
+                                gateway_message,
+                            )
+                            .await
                             {
-                                // TODO: remove terminated poller from the map when it terminates
-                                //       if no client connects after the poller has terminated, it
-                                //       will never be removed
-                                // poller task has terminated, remove it from the map
-                                self.state
-                                    .connected_canisters
-                                    .remove(&gateway_session.canister_id.clone());
-                                true
-                            } else {
-                                // if poller task is still runnning, do not create a new one
-                                false
+                                println!("Calling ws_message on canister failed: {}", e);
+
+                                self.remove_client(gateway_session.client_id).await
                             }
                         },
-                        None => true,
-                    };
-
-                    if needs_new_poller {
-                        // [main task]              [poller task]
-                        // poller_channel_tx -----> poller_channel_rx
-
-                        // channel used to communicate with the poller task
-                        // the channel is used to send to the poller the sender side of a new client's channel
-                        // so that the poller can send canister messages directly to the client's task
-                        let (poller_channel_tx, poller_channel_rx) = mpsc::unbounded_channel();
-
-                        // register new poller and the channel used to send client's channels to it
-                        self.state.connected_canisters.insert(
-                            gateway_session.canister_id.clone(),
-                            poller_channel_tx.clone(),
-                        );
-                        let agent = Arc::clone(&self.agent);
-
-                        // spawn new canister poller task
-                        tokio::spawn({
-                            async move {
-                                let poller = CanisterPoller {
-                                    canister_id: gateway_session.canister_id.clone(),
-                                    agent,
-                                };
-                                println!("Created new poller: canister: {}", poller.canister_id);
-                                // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
-                                // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
-                                // the new poller thread should not get those same messages again
-                                poller
-                                    .run_polling(poller_channel_rx, gateway_session.nonce)
-                                    .await;
-                                println!("Poller task terminated: canister {}", poller.canister_id);
-                            }
-                        });
-
-                        poller_channel_tx
-                            .send(poller_to_client_channel_data)
-                            .unwrap();
+                        WsConnectionState::ConnectionClosed(client_id) => {
+                            // cleanup client's session from WS Gateway state
+                            self.remove_client(client_id).await
+                        },
+                        WsConnectionState::ConnectionError(e) => {
+                            // TODO: make sure that cleaning up is not needed
+                            println!("Connection handler terminated with an error: {:?}", e);
+                        },
                     }
 
-                    // notify canister that it can now send messages for the client corresponding to client_key
-                    let gateway_message =
-                        CanisterIncomingMessage::IcWebSocketEstablished(gateway_session.client_key);
-                    if let Err(e) = canister_methods::ws_message(
-                        &*self.agent,
-                        &gateway_session.canister_id,
-                        gateway_message,
-                    )
-                    .await
-                    {
-                        println!("Calling ws_message on canister failed: {}", e);
-
-                        self.remove_client(gateway_session.client_id).await
-                    }
-                },
-                WsConnectionState::ConnectionClosed(client_id) => {
-                    // cleanup client's session from WS Gateway state
-                    self.remove_client(client_id).await
-                },
-                WsConnectionState::ConnectionError(e) => {
-                    // TODO: make sure that cleaning up is not needed
-                    println!("Connection handler terminated with an error: {:?}", e);
-                },
+                    println!("{} clients registered", self.state.client_session_map.len());
+                }
+                _ = periodic_tick(1) => self.cleanup_poller_tasks_data_from_state().await
             }
-
-            println!("{} clients registered", self.state.client_session_map.len());
         }
     }
 
@@ -522,6 +534,33 @@ impl GatewayServer {
             },
         }
     }
+
+    async fn cleanup_poller_tasks_data_from_state(&mut self) {
+        // check for finished poller tasks and collect their indices
+        let mut finished_tasks_indices = Vec::new();
+        for (i, handle) in self.state.active_poller_tasks.iter().enumerate() {
+            if handle.is_finished() {
+                finished_tasks_indices.push(i);
+            }
+        }
+
+        // handle finished poller tasks
+        for i in finished_tasks_indices {
+            let handle = self.state.active_poller_tasks.remove(i);
+            let canister_id = handle.await.expect("should return canister id");
+            // removed data of finished poller tasks from WS Gateway state
+            self.remove_poller_data(&canister_id);
+        }
+    }
+
+    fn remove_poller_data(&mut self, canister_id: &Principal) {
+        println!(
+            "Removed poller data from WS Gateway: canister {:?}",
+            canister_id.to_string()
+        );
+        // poller task has terminated, remove it from the map
+        self.state.connected_canisters.remove(canister_id);
+    }
 }
 
 /// state of the WS Gateway containing:
@@ -531,6 +570,7 @@ impl GatewayServer {
 struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
     connected_canisters: HashMap<Principal, UnboundedSender<PollerToClientChannelData>>,
+    active_poller_tasks: Vec<JoinHandle<Principal>>,
     /// maps the client's public key to the state of the client's session
     client_session_map: HashMap<ClientPublicKey, GatewaySession>,
     /// maps the client id to its public key
@@ -543,6 +583,7 @@ impl GatewayState {
     fn default() -> Self {
         Self {
             connected_canisters: HashMap::default(),
+            active_poller_tasks: Vec::new(),
             client_session_map: HashMap::default(),
             client_key_map: HashMap::default(),
         }
@@ -572,6 +613,10 @@ async fn handle_incoming_requests(
         });
         next_client_id += 1;
     }
+}
+
+async fn periodic_tick(seconds: u64) {
+    tokio::time::sleep(Duration::from_secs(seconds)).await
 }
 
 #[tokio::main]
@@ -617,7 +662,7 @@ mod tests {
     }
 
     fn serialize<T: Serialize>(text: T) -> Vec<u8> {
-        let mut bytes = vec![];
+        let mut bytes = Vec::new();
         let mut serializer = Serializer::new(&mut bytes);
         serializer.self_describe().unwrap();
         text.serialize(&mut serializer).unwrap();
@@ -723,8 +768,8 @@ mod tests {
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but with content not of type CanisterFirstMessageContent
         let message = RelayedClientMessage {
-            content: vec![],
-            sig: vec![],
+            content: Vec::new(),
+            sig: Vec::new(),
         };
         let serialized_message = serialize(message);
 
@@ -753,14 +798,14 @@ mod tests {
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but with an invalid signature
         let content = CanisterFirstMessageContent {
-            client_key: vec![],
+            client_key: Vec::new(),
             canister_id: Principal::anonymous(),
         };
         let serialized_content = serialize(content);
 
         let message = RelayedClientMessage {
             content: serialized_content,
-            sig: vec![],
+            sig: Vec::new(),
         };
         let serialized_message = serialize(message);
 
@@ -789,7 +834,7 @@ mod tests {
         // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but with an invalid public key (client_key)
         let content = CanisterFirstMessageContent {
-            client_key: vec![],
+            client_key: Vec::new(),
             canister_id: Principal::anonymous(),
         };
         let serialized_content = serialize(content);
