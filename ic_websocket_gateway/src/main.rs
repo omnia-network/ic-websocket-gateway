@@ -379,19 +379,19 @@ impl GatewayServer {
                             );
                             // check if client is connecting to a canister that is not yet being polled
                             // if so, create new poller task
-                            let client_channel_tx_opt = self
+                            let poller_channel_tx = self
                                 .state
                                 .connected_canisters
                                 .get_mut(&gateway_session.canister_id);
-                            let needs_new_poller = match client_channel_tx_opt {
+                            let needs_new_poller = match poller_channel_tx {
                                 // !!! having data of the poller task in the WS Gateway state does not imply that the poller is still running !!!
                                 // the data of the poller task on the WS Gateway is cleaned up periodically while the poller task might finish any time the last client disconnects
-                                Some(client_channel_tx) => {
+                                Some(poller_channel_tx) => {
                                     // try to send channel data to poller
                                     // we need to check this here because data of finished poller tasks is periodically remove from WS Gateway state
                                     // however, if a poller task is terminated up the last client disconnecting and a new client connects before the data is removed from the state,
                                     // the Gateway state would say that there is a poller task already running even if the poller task has actually finished
-                                    if client_channel_tx
+                                    if poller_channel_tx
                                         .send(poller_to_client_channel_data.clone())
                                         .is_err()
                                     {
