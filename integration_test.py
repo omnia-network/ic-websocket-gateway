@@ -1,3 +1,4 @@
+import random
 import subprocess
 import asyncio
 import os
@@ -16,12 +17,18 @@ async def run_integration_test(task_id):
 # Number of tasks to spawn
 N = 10
 
-async def main():
+async def run_tasks_with_random_interval():
     # move to ic_websocket_canisters folder
     os.chdir("ic_websocket_canisters")
 
-    tasks = [run_integration_test(i) for i in range(N)]
+    tasks = []
+    for i in range(N):
+        delay = random.uniform(0, 1)
+        await asyncio.sleep(delay)
+        task = asyncio.create_task(run_integration_test(i))
+        tasks.append(task)
+
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_tasks_with_random_interval())
