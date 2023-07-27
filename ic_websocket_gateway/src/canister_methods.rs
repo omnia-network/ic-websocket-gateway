@@ -139,20 +139,29 @@ pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) 
     agent
 }
 
+fn validate_first_message(
+    bytes: Vec<u8>,
+) -> Result<(RelayedClientMessage, CanisterFirstMessageContent), String> {
+    let m = from_slice::<RelayedClientMessage>(&bytes)
+        .map_err(|_| String::from("first message is not of type RelayedClientMessage"))?;
+    let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
+        String::from("content of first message is not of type CanisterFirstMessageContent")
+    })?;
+    let sig = Signature::from_slice(&m.sig)
+        .map_err(|_| String::from("first message does not contain a valid signature"))?;
+    let public_key = PublicKey::from_slice(&content.client_key)
+        .map_err(|_| String::from("first message does not contain a valid public key"))?;
+    public_key
+        .verify(&m.content, &sig)
+        .map_err(|_| String::from("client's signature does not verify against public key"))?;
+    Ok((m, content))
+}
+
+#[cfg(not(test))] // only compile and run the following block when not running tests
 pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
     if let Message::Binary(bytes) = message {
-        let m = from_slice::<RelayedClientMessage>(&bytes)
-            .map_err(|_| String::from("first message is not of type MessageFromClient"))?;
-        let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
-            String::from("content of first message is not of type ClientCanisterId")
-        })?;
-        let sig = Signature::from_slice(&m.sig)
-            .map_err(|_| String::from("first message does not contain a valid signature"))?;
-        let public_key = PublicKey::from_slice(&content.client_key)
-            .map_err(|_| String::from("first message does not contain a valid public key"))?;
-        public_key
-            .verify(&m.content, &sig)
-            .map_err(|_| String::from("client's signature does not verify against public key"))?;
+        let (m, content) = validate_first_message(bytes)?;
+        // if all checks pass, call the ws_open method of the canister which the WS Gateway has to poll from
         ws_open(agent, &content.canister_id, m.content, m.sig).await
     } else {
         Err(String::from(
@@ -161,6 +170,30 @@ pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsO
     }
 }
 
+#[cfg(test)] // only compile and run the following block during tests
+pub async fn check_canister_init(_agent: &Agent, message: Message) -> CanisterWsOpenResult {
+    if let Message::Binary(bytes) = message {
+        let (_m, _content) = validate_first_message(bytes)?;
+
+        // mock the result returned by a call to ws_open after the client registered its public key
+        let valid_client_key = vec![
+            229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
+            45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
+        ];
+        Ok(CanisterWsOpenResultValue {
+            client_key: valid_client_key,
+            canister_id: Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai")
+                .expect("not a valid principal"),
+            nonce: 0,
+        })
+    } else {
+        Err(String::from(
+            "first message from client should be binary encoded",
+        ))
+    }
+}
+
+#[cfg(not(test))] // only compile and run the following block during tests
 pub async fn ws_open(
     agent: &Agent,
     canister_id: &Principal,
