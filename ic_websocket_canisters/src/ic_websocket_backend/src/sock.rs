@@ -299,10 +299,7 @@ fn get_messages_for_gateway_range(gateway_principal: Principal, nonce: u64) -> (
         // smallest key used to determine the first message from the queue which has to be returned to the WS Gateway
         let smallest_key = get_message_for_gateway_key(gateway_principal, nonce);
         // partition the queue at the message which has the key with the nonce specified as argument to get_cert_messages
-        let start_index = m.borrow().partition_point(|x| {
-            let is_lower = x.key < smallest_key;
-            is_lower
-        });
+        let start_index = m.borrow().partition_point(|x| x.key < smallest_key);
         // message at index corresponding to end index is excluded
         let mut end_index = m.borrow().len();
         if end_index - start_index > MAX_NUMBER_OF_RETURNED_MESSAGES {

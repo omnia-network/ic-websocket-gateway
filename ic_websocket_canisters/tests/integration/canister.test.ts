@@ -38,8 +38,10 @@ import {
 } from "../../src/declarations/ic_websocket_backend/ic_websocket_backend.did";
 // import { TestContext } from "lightic";
 
+const MAX_NUMBER_OF_RETURNED_MESSAGES = 10; // set in the CDK
+const SEND_MESSAGES_COUNT = MAX_NUMBER_OF_RETURNED_MESSAGES + 2; // test with more messages to check the indexes and limits
+
 // const context = new TestContext();
-let actor: Actor;
 let client1KeyPair: { publicKey: Uint8Array; secretKey: Uint8Array | string; };
 let client2KeyPair: { publicKey: Uint8Array; secretKey: Uint8Array | string; };
 
@@ -465,7 +467,7 @@ describe("Canister - ws_message", () => {
   });
 });
 
-describe("Canister - ws_get_messages", () => {
+describe("Canister - ws_get_messages (failures,empty)", () => {
   beforeAll(async () => {
     await assignKeyPairsToClients();
 
@@ -499,7 +501,7 @@ describe("Canister - ws_get_messages", () => {
   });
 
   it("registered gateway should receive empty messages if no messages are available", async () => {
-    const res = await gateway1.ws_get_messages({
+    let res = await gateway1.ws_get_messages({
       nonce: BigInt(0),
     });
 
@@ -510,61 +512,158 @@ describe("Canister - ws_get_messages", () => {
         tree: new Uint8Array(),
       },
     });
-  });
 
-  it("registered gateway can receive certified messages", async () => {
-    const appMessage = { text: "test" };
-    await wsSend({
-      clientPublicKey: client1KeyPair.publicKey,
-      actor: client1,
-      message: appMessage,
-    }, true);
-
-    const res = await gateway1.ws_get_messages({
-      nonce: BigInt(0),
+    res = await gateway1.ws_get_messages({
+      nonce: BigInt(100), // high nonce to make sure the indexes are calculated correctly in the canister
     });
 
     expect(res).toMatchObject<CanisterWsGetMessagesResult>({
       Ok: {
-        messages: [
-          {
-            client_key: client1KeyPair.publicKey,
-            key: await getCertifiedMessageKey(gateway1Data.identity, 0),
-            val: expect.any(Uint8Array),
-          },
-        ],
+        messages: [],
+        cert: new Uint8Array(),
+        tree: new Uint8Array(),
+      },
+    });
+  });
+});
+
+describe("Canister - ws_get_messages (receive)", () => {
+  beforeAll(async () => {
+    await assignKeyPairsToClients();
+
+    await wsRegister({
+      clientActor: client1,
+      clientKey: client1KeyPair.publicKey,
+    }, true);
+
+    await wsOpen({
+      clientPublicKey: client1KeyPair.publicKey,
+      clientSecretKey: client1KeyPair.secretKey,
+      canisterId,
+      gatewayActor: gateway1,
+    }, true);
+
+    // prepare the messages
+    for (let i = 0; i < SEND_MESSAGES_COUNT; i++) {
+      const appMessage = { text: `test${i}` };
+      await wsSend({
+        clientPublicKey: client1KeyPair.publicKey,
+        actor: client1,
+        message: appMessage,
+      }, true);
+    }
+
+    await commonAgent.fetchRootKey();
+  });
+
+  afterAll(async () => {
+    await wsWipe(gateway1);
+  });
+
+  it("registered gateway can receive correct amount of messages", async () => {
+    for (let i = 0; i < SEND_MESSAGES_COUNT; i++) {
+      const res = await gateway1.ws_get_messages({
+        nonce: BigInt(i),
+      });
+
+      expect(res).toMatchObject<CanisterWsGetMessagesResult>({
+        Ok: {
+          messages: expect.any(Array),
+          cert: expect.any(Uint8Array),
+          tree: expect.any(Uint8Array),
+        },
+      });
+
+      const messagesResult = (res as { Ok: CanisterOutputCertifiedMessages }).Ok;
+      expect(messagesResult.messages.length).toBe(
+        SEND_MESSAGES_COUNT - i > MAX_NUMBER_OF_RETURNED_MESSAGES
+          ? MAX_NUMBER_OF_RETURNED_MESSAGES
+          : SEND_MESSAGES_COUNT - i
+      );
+    }
+
+    // try to get more messages than available
+    const res = await gateway1.ws_get_messages({
+      nonce: BigInt(SEND_MESSAGES_COUNT),
+    });
+
+    expect(res).toMatchObject<CanisterWsGetMessagesResult>({
+      Ok: {
+        messages: [],
         cert: expect.any(Uint8Array),
         tree: expect.any(Uint8Array),
       },
     });
+  });
 
-    // check the message content
-    const messagesResult = (res as { Ok: CanisterOutputCertifiedMessages }).Ok;
-    const message = messagesResult.messages[0];
-    const decodedVal = Cbor.decode<WebsocketMessage>(new Uint8Array(message.val));
-    expect(decodedVal).toMatchObject<WebsocketMessage>({
-      client_key: client1KeyPair.publicKey,
-      message: Cbor.encode(appMessage),
-      sequence_num: 1,
-      timestamp: expect.any(Object), // weird deserialization of timestamp
+  it("registered gateway can receive certified messages", async () => {
+    // first batch of messages
+    const firstBatchRes = await gateway1.ws_get_messages({
+      nonce: BigInt(0),
     });
 
-    // check the certification
-    await expect(
-      isValidCertificate(
-        canisterId,
-        messagesResult.cert as Uint8Array,
-        messagesResult.tree as Uint8Array,
-        commonAgent
-      )
-    ).resolves.toBe(true);
-    await expect(
-      isMessageBodyValid(
-        message.key,
-        message.val as Uint8Array,
-        messagesResult.tree as Uint8Array,
-      )
-    ).resolves.toBe(true);
+    const firstBatchMessagesResult = (firstBatchRes as { Ok: CanisterOutputCertifiedMessages }).Ok;
+    for (let i = 0; i < firstBatchMessagesResult.messages.length; i++) {
+      const message = firstBatchMessagesResult.messages[i];
+      const decodedVal = Cbor.decode<WebsocketMessage>(new Uint8Array(message.val));
+      expect(decodedVal).toMatchObject<WebsocketMessage>({
+        client_key: client1KeyPair.publicKey,
+        message: Cbor.encode({ text: `test${i}` }),
+        sequence_num: i + 1,
+        timestamp: expect.any(Object), // weird deserialization of timestamp
+      });
+
+      // check the certification
+      await expect(
+        isValidCertificate(
+          canisterId,
+          firstBatchMessagesResult.cert as Uint8Array,
+          firstBatchMessagesResult.tree as Uint8Array,
+          commonAgent
+        )
+      ).resolves.toBe(true);
+      await expect(
+        isMessageBodyValid(
+          message.key,
+          message.val as Uint8Array,
+          firstBatchMessagesResult.tree as Uint8Array,
+        )
+      ).resolves.toBe(true);
+    }
+
+    // second batch of messages, starting from the last nonce of the first batch
+    const secondBatchRes = await gateway1.ws_get_messages({
+      nonce: BigInt(MAX_NUMBER_OF_RETURNED_MESSAGES),
+    });
+
+    const secondBatchMessagesResult = (secondBatchRes as { Ok: CanisterOutputCertifiedMessages }).Ok;
+    for (let i = 0; i < secondBatchMessagesResult.messages.length; i++) {
+      const message = secondBatchMessagesResult.messages[i];
+      const decodedVal = Cbor.decode<WebsocketMessage>(new Uint8Array(message.val));
+      expect(decodedVal).toMatchObject<WebsocketMessage>({
+        client_key: client1KeyPair.publicKey,
+        message: Cbor.encode({ text: `test${i + MAX_NUMBER_OF_RETURNED_MESSAGES}` }),
+        sequence_num: i + MAX_NUMBER_OF_RETURNED_MESSAGES + 1,
+        timestamp: expect.any(Object), // weird deserialization of timestamp
+      });
+
+      // check the certification
+      await expect(
+        isValidCertificate(
+          canisterId,
+          secondBatchMessagesResult.cert as Uint8Array,
+          secondBatchMessagesResult.tree as Uint8Array,
+          commonAgent
+        )
+      ).resolves.toBe(true);
+      await expect(
+        isMessageBodyValid(
+          message.key,
+          message.val as Uint8Array,
+          secondBatchMessagesResult.tree as Uint8Array,
+        )
+      ).resolves.toBe(true);
+    }
   });
 });
 
