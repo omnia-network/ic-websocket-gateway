@@ -22,7 +22,7 @@ mod canister_methods;
 
 // url for local testing
 // for local testing also the agent needs to fetch the root key
-const URL: &str = "http://127.0.0.1:4943";
+const URL: &str = "http://host.docker.internal:4943";
 const FETCH_KEY: bool = true;
 
 /// possible states of the WebSocket connection:
@@ -624,7 +624,7 @@ async fn handle_incoming_requests(
 
 #[tokio::main]
 async fn main() {
-    let addr = "127.0.0.1:8080";
+    let addr = "0.0.0.0:8080";
     let key_pair = load_key_pair();
     let identity = BasicIdentity::from_key_pair(key_pair);
 

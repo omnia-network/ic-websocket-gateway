@@ -1,0 +1,8 @@
+tests/
+.vscode/
+docs/
+.editorconfig
+integration_test.py
+LICENSE
+README.md
+Dockerfile
