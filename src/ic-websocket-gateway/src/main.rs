@@ -62,6 +62,6 @@ async fn main() {
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     gateway_server
-        .handle_state(deployment_info.polling_interval)
+        .manage_state(deployment_info.polling_interval)
         .await;
 }

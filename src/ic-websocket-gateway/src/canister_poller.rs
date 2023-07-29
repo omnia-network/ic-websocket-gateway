@@ -41,6 +41,9 @@ impl PollerChannelsPollerEnds {
     }
 }
 
+/// contains the information that the main sends to the poller task
+/// - NewClientChannel: sending side of the channel use by the poller to send messages to the client
+/// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
     NewClientChannel(ClientPublicKey, UnboundedSender<CertifiedMessage>),
@@ -55,10 +58,6 @@ pub struct CanisterPoller {
 impl CanisterPoller {
     pub fn new(canister_id: Principal, agent: Arc<Agent>) -> Self {
         Self { canister_id, agent }
-    }
-
-    pub fn get_canister_id(&self) -> Principal {
-        self.canister_id.clone()
     }
 
     pub async fn run_polling(
