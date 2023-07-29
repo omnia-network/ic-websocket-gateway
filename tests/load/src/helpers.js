@@ -1,5 +1,5 @@
 const { Actor, HttpAgent } = require('@dfinity/agent');
-const { idlFactory } = require('../../integration/src/declarations/test_canister/test_canister.did.js');
+const { idlFactory } = require('../../test_canister/src/declarations/test_canister/test_canister.did.js');
 
 const createActor = (canisterId, options = {}) => {
   const agent = options.agent || new HttpAgent({ ...options.agentOptions });

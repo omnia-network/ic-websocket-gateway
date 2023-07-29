@@ -1,6 +1,7 @@
 require('./prepare-environment.js');
 
 const IcWebsocket = require('ic-websocket-js/lib/cjs/index.js').default;
+const { createActor } = require('./helpers.js');
 
 const {
   WS_GATEWAY_URL,
@@ -65,9 +66,12 @@ async function sendMessages(userContext, events, next) {
           return resolve();
         }
 
+        events.emit('histogram', 'receive_message_latency_s', (Date.now() * (10 ** 6) - event.data.timestamp) / (10 ** 9));
+
         try {
           await ws.send({
             text: event.data.text + "-pong",
+            timestamp: Date.now(),
           });
 
           events.emit('counter', 'send_message_success', 1);
