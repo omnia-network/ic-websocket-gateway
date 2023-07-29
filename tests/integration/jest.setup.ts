@@ -1,6 +1,6 @@
 import "isomorphic-fetch";
 import crypto from "isomorphic-webcrypto";
-import util from 'util';
+import util from "util";
 
 // @ts-ignore
 global?.TextEncoder = util.TextEncoder;

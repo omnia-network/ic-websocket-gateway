@@ -1,13 +1,14 @@
 import { Actor, ActorConfig, HttpAgent, HttpAgentOptions } from "@dfinity/agent";
 import { identityFromSeed } from "./identity";
+import environment from "./environment";
 // @ts-ignore
-import { _SERVICE, idlFactory } from "../../src/declarations/test_canister/test_canister.did";
-import { canisterId } from "../../src/declarations/test_canister";
+import { idlFactory } from "../../../test_canister/src/declarations/test_canister/test_canister.did";
+import type { _SERVICE } from "../../../test_canister/src/declarations/test_canister/test_canister.did";
 
-export const localReplicaHost = "http://127.0.0.1:4943";
+const canisterId = environment.TEST_CANISTER_ID;
 
 const commonAgentOptions: HttpAgentOptions = {
-  host: localReplicaHost,
+  host: environment.IC_URL,
 };
 
 // needed in the certificates validation
@@ -38,7 +39,7 @@ export const createActor = (canisterId: string, options: { agentOptions?: HttpAg
 };
 
 // Principal: "i3gux-m3hwt-5mh2w-t7wwm-fwx5j-6z6ht-hxguo-t4rfw-qp24z-g5ivt-2qe"
-// this is the gateway registered in the local replica when deploying the canister with npm run deploy:tests
+// this is the gateway registered in the local replica when deploying the canister with `npm run deploy:tests`
 const gateway1Seed = "harsh shy amazing enroll reject shy smooth abandon fat start mixture capable";
 export const gateway1Data = {
   identity: identityFromSeed(gateway1Seed),

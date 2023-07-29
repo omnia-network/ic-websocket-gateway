@@ -6,6 +6,6 @@
     "moduleResolution": "node",
   },
   "include": [
-    "tests/**/*.ts",
+    "src/**/*.ts",
   ],
 }
