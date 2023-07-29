@@ -4,7 +4,6 @@ use tokio::{
     net::TcpListener,
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    task::JoinHandle,
 };
 
 use crate::{
@@ -136,8 +135,9 @@ impl GatewayServer {
                     // - the GatewaySession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
-                    self.state.handle_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, &self.agent).await;
+                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, &self.agent).await;
                 }
+                // check if a poller task has terminated
                 Some(canister_id) = poller_channel_for_completion_rx.recv() => {
                     println!("Received cleanup command from poller task: canister {:?}", canister_id.to_string());
                     self.state.remove_poller_data(&canister_id);
@@ -158,7 +158,6 @@ impl GatewayServer {
 struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
     connected_canisters: HashMap<Principal, UnboundedSender<PollerToClientChannelData>>,
-    active_poller_tasks: Vec<JoinHandle<Principal>>,
     /// maps the client's public key to the state of the client's session
     client_session_map: HashMap<ClientPublicKey, GatewaySession>,
     /// maps the client id to its public key
@@ -171,7 +170,6 @@ impl GatewayState {
     fn default() -> Self {
         Self {
             connected_canisters: HashMap::default(),
-            active_poller_tasks: Vec::new(),
             client_session_map: HashMap::default(),
             client_key_map: HashMap::default(),
         }
@@ -229,7 +227,7 @@ impl GatewayState {
         }
     }
 
-    async fn handle_clients_connections(
+    async fn manage_clients_connections(
         &mut self,
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: UnboundedSender<Principal>,
@@ -295,7 +293,7 @@ impl GatewayState {
                     let agent = Arc::clone(agent);
 
                     // spawn new canister poller task
-                    let poller_task_handle = tokio::spawn({
+                    tokio::spawn({
                         async move {
                             let poller =
                                 CanisterPoller::new(gateway_session.canister_id.clone(), agent);
@@ -315,7 +313,6 @@ impl GatewayState {
                             canister_id
                         }
                     });
-                    self.active_poller_tasks.push(poller_task_handle);
 
                     // send channel data to poller
                     poller_channel_for_client_channel_sender_tx
