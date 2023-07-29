@@ -9,11 +9,3 @@ global?.TextDecoder = util.TextDecoder;
 
 // @ts-ignore
 global?.crypto?.subtle = crypto.subtle;
-
-// for nodejs environment
-Object.defineProperty(globalThis, 'crypto', {
-  value: {
-    getRandomValues: crypto.getRandomValues,
-    subtle: crypto.subtle,
-  }
-});
