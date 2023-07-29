@@ -1,4 +1,4 @@
-use ic_cdk::{export::candid::CandidType, print};
+use ic_cdk::{export::candid::CandidType, print, api::time};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 
@@ -13,11 +13,14 @@ pub const GATEWAY_PRINCIPAL: &str =
 #[candid_path("ic_cdk::export::candid")]
 pub struct AppMessage {
     pub text: String,
+    /// Used in load tests to measure latency from canister to client.
+    pub timestamp: u64,
 }
 
 pub fn on_open(args: OnOpenCallbackArgs) {
     let msg = AppMessage {
         text: String::from("ping"),
+        timestamp: time(),
     };
     send_app_message(args.client_key, msg);
 }
@@ -26,6 +29,7 @@ pub fn on_message(args: OnMessageCallbackArgs) {
     let app_msg: AppMessage = from_slice(&args.message).unwrap();
     let new_msg = AppMessage {
         text: app_msg.clone().text + " ping",
+        timestamp: time(),
     };
     print(format!("Received message: {:?}", app_msg));
     send_app_message(args.client_key, new_msg)

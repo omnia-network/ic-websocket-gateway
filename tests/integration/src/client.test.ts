@@ -1,11 +1,18 @@
-import { canisterId, test_canister } from "../src/declarations/test_canister";
 import IcWebSocket from "ic-websocket-js";
-import type { _SERVICE } from "../src/declarations/test_canister/test_canister.did";
+import environment from "./utils/environment";
+import { createActor } from "./utils/actors";
+import type { _SERVICE } from "../../test_canister/src/declarations/test_canister/test_canister.did";
 
 /// IcWebsocket parameters
-const gatewayAddress = "ws://127.0.0.1:8080";
-const url = "http://127.0.0.1:4943";
-const localTest = true;
+const gatewayAddress = environment.WS_GATEWAY_URL;
+const icUrl = environment.IC_URL;
+const canisterId = environment.TEST_CANISTER_ID;
+const canisterActor = createActor(canisterId, {
+  agentOptions: {
+    host: icUrl,
+  },
+});
+const localTest = environment.FETCH_IC_ROOT_KEY;
 const persistKey = false;
 
 /// test constants & variables
@@ -52,9 +59,9 @@ const reconstructWsMessage = (index: number) => {
 describe("WS client", () => {
   it("should open a connection", async () => {
     ws = new IcWebSocket(gatewayAddress, undefined, {
-      canisterActor: test_canister,
-      canisterId: canisterId,
-      networkUrl: url,
+      canisterActor,
+      canisterId,
+      networkUrl: icUrl,
       localTest,
       persistKey,
     });
@@ -79,7 +86,7 @@ describe("WS client", () => {
         reject(event.error);
       };
 
-      ws.onmessage = async (event: MessageEvent<{ text: string; }>) => {
+      ws.onmessage = async (event: MessageEvent<{ text: string; timestamp: bigint; }>) => {
         if (!(event.data.text === reconstructWsMessage(messageCounter))) {
           return reject("Received message does not match expected message");
         }
@@ -94,6 +101,7 @@ describe("WS client", () => {
 
         await ws.send({
           text: event.data.text + "-pong",
+          timestamp: Date.now(),
         });
       };
     });

@@ -4,4 +4,6 @@
 
 target/
 data/
+
+node_modules/
 scripts/gateway_test.log

@@ -1,0 +1,29 @@
+{
+  "name": "ic_websocket_gateway_load_tests",
+  "version": "0.1.0",
+  "scripts": {
+    "bundle": "webpack",
+    "test": "./scripts/run_load_tests.sh"
+  },
+  "dependencies": {
+    "bufferutil": "^4.0.7",
+    "dotenv": "^16.3.1",
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#62dcec3437afe35efd7a08ec8d132e544891e2e1",
+    "isomorphic-webcrypto": "^2.3.8",
+    "utf-8-validate": "^5.0.10",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.9",
+    "@babel/preset-env": "^7.22.9",
+    "artillery": "^2.0.0-35",
+    "babel-loader": "^9.1.3",
+    "core-js": "^3.32.0",
+    "typescript": "^5.1.6",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4"
+  },
+  "engines": {
+    "node": "^18"
+  }
+}
