@@ -18,8 +18,6 @@ async def run_integration_test(task_id):
 N = 10
 
 async def run_tasks_with_random_interval():
-    # move to ic_websocket_canisters folder
-    os.chdir("tests/integration")
 
     tasks = []
     for i in range(N):

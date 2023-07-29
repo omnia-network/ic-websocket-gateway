@@ -5,6 +5,7 @@ use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use serde_cbor::to_vec;
 use std::{collections::HashMap, fs, path::Path, sync::Arc, time::Duration};
+use structopt::StructOpt;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -19,11 +20,6 @@ use tokio_tungstenite::{
 use crate::canister_methods::{CanisterIncomingMessage, CanisterWsOpenResultValue};
 
 mod canister_methods;
-
-// url for local testing
-// for local testing also the agent needs to fetch the root key
-const URL: &str = "http://127.0.0.1:4943";
-const FETCH_KEY: bool = true;
 
 /// possible states of the WebSocket connection:
 /// - established
@@ -193,7 +189,12 @@ struct CanisterPoller {
 }
 
 impl CanisterPoller {
-    async fn run_polling(&self, mut poller_chnanels: PollerChannelsPollerEnds, mut nonce: u64) {
+    async fn run_polling(
+        &self,
+        mut poller_chnanels: PollerChannelsPollerEnds,
+        mut nonce: u64,
+        polling_interval: u64,
+    ) {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
             HashMap::new();
@@ -223,7 +224,7 @@ impl CanisterPoller {
                     }
                 }
                 // poll canister for updates
-                msgs = get_canister_updates(&self.agent, self.canister_id, nonce) => {
+                msgs = get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval) => {
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -262,8 +263,10 @@ async fn get_canister_updates(
     agent: &Agent,
     canister_id: Principal,
     nonce: u64,
+    polling_interval: u64,
 ) -> CanisterOutputCertifiedMessages {
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(polling_interval)).await;
+
     canister_methods::ws_get_messages(agent, &canister_id, nonce)
         .await
         .unwrap()
@@ -310,11 +313,19 @@ struct GatewayServer {
 }
 
 impl GatewayServer {
-    async fn new(addr: &str, identity: BasicIdentity) -> Self {
-        let listener = Arc::new(TcpListener::bind(&addr).await.expect("Can't listen"));
-        println!("Listening on: {}", addr);
+    async fn new(gateway_address: &str, subnet_address: &str, identity: BasicIdentity) -> Self {
+        let listener = Arc::new(
+            TcpListener::bind(&gateway_address)
+                .await
+                .expect("Can't listen"),
+        );
+        println!("Listening on: {}", gateway_address);
 
-        let agent = Arc::new(canister_methods::get_new_agent(URL, identity, FETCH_KEY).await);
+        let fetch_ic_root_key = subnet_address != "icp0.io";
+
+        let agent = Arc::new(
+            canister_methods::get_new_agent(subnet_address, identity, fetch_ic_root_key).await,
+        );
 
         println!(
             "Gateway Agent principal: {}",
@@ -348,7 +359,7 @@ impl GatewayServer {
         });
     }
 
-    async fn handle_state(&mut self) {
+    async fn handle_state(&mut self, polling_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -367,7 +378,7 @@ impl GatewayServer {
                     // - the GatewaySession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
-                    self.handle_clients_connections_states(connection_state, poller_channel_for_completion_tx.clone()).await;
+                    self.handle_clients_connections_states(connection_state, poller_channel_for_completion_tx.clone(), polling_interval).await;
                 }
                 Some(canister_id) = poller_channel_for_completion_rx.recv() => {
                     println!("Received cleanup command from poller task: canister {:?}", canister_id.to_string());
@@ -439,6 +450,7 @@ impl GatewayServer {
         &mut self,
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: UnboundedSender<Principal>,
+        polling_interval: u64,
     ) {
         match connection_state {
             WsConnectionState::ConnectionEstablished(gateway_session) => {
@@ -511,7 +523,11 @@ impl GatewayServer {
                             // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                             // the new poller thread should not get those same messages again
                             poller
-                                .run_polling(poller_channels_poller_ends, gateway_session.nonce)
+                                .run_polling(
+                                    poller_channels_poller_ends,
+                                    gateway_session.nonce,
+                                    polling_interval,
+                                )
                                 .await;
                             // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                             poller.canister_id
@@ -622,19 +638,40 @@ async fn handle_incoming_requests(
     }
 }
 
+#[derive(Debug, StructOpt)]
+#[structopt(name = "Gateway", about = "IC WS Gateway")]
+struct DeploymentInfo {
+    #[structopt(short, long, default_value = "http://127.0.0.1:4943")]
+    subnet_address: String,
+
+    #[structopt(short, long, default_value = "0.0.0.0:8080")]
+    gateway_address: String,
+
+    #[structopt(short, long, default_value = "200")]
+    polling_interval: u64,
+}
+
 #[tokio::main]
 async fn main() {
-    let addr = "127.0.0.1:8080";
+    let deployment_info = DeploymentInfo::from_args();
+
     let key_pair = load_key_pair();
     let identity = BasicIdentity::from_key_pair(key_pair);
 
-    let mut gateway_server = GatewayServer::new(addr, identity).await;
+    let mut gateway_server = GatewayServer::new(
+        &deployment_info.gateway_address,
+        &deployment_info.subnet_address,
+        identity,
+    )
+    .await;
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
     gateway_server.start_accepting_incoming_connections();
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
-    gateway_server.handle_state().await;
+    gateway_server
+        .handle_state(deployment_info.polling_interval)
+        .await;
 }
 
 #[cfg(test)]
@@ -706,13 +743,14 @@ mod tests {
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
-        let addr = "127.0.0.1:8080";
+        let gateway_addr = "127.0.0.1:8080";
+        let subnet_addr = "http://127.0.0.1:4943";
         let key_pair = load_key_pair();
         let identity = BasicIdentity::from_key_pair(key_pair);
 
-        let gateway_server = GatewayServer::new(addr, identity).await;
+        let gateway_server = GatewayServer::new(gateway_addr, subnet_addr, identity).await;
         gateway_server.start_accepting_incoming_connections();
-        let client = get_mock_websocket_client(addr);
+        let client = get_mock_websocket_client(gateway_addr);
         (client, gateway_server)
     }
 
