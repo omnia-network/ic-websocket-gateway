@@ -5,7 +5,7 @@ import os
 
 # run 'npm run test:integration'
 async def run_integration_test(task_id):    
-    cmd = ['npm', 'run', 'test:integration']
+    cmd = ['npm', 'run', 'test']
     process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = await process.communicate()
@@ -19,7 +19,7 @@ N = 10
 
 async def run_tasks_with_random_interval():
     # move to ic_websocket_canisters folder
-    os.chdir("ic_websocket_canisters")
+    os.chdir("tests/integration")
 
     tasks = []
     for i in range(N):
