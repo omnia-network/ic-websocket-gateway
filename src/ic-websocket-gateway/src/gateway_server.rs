@@ -183,23 +183,28 @@ impl GatewayState {
         self.client_session_map.insert(client_key, gateway_session);
     }
 
-    async fn remove_client(&mut self, client_id: u64, agent: &Agent) {
+    fn remove_client(&mut self, client_id: u64, agent: &Agent) {
         match self.client_key_map.remove(&client_id) {
             Some(client_key) => {
                 let gateway_session = self
                     .client_session_map
                     .remove(&client_key.clone())
                     .expect("gateway session should be registered");
+
+                let agent_cl = agent.clone();
+                let canister_id_cl = gateway_session.canister_id.clone();
+                let client_key_cl = client_key.clone();
                 // close client connection on canister
-                if let Err(e) = canister_methods::ws_close(
-                    agent,
-                    &gateway_session.canister_id,
-                    client_key.clone(),
-                )
-                .await
-                {
-                    println!("Calling ws_close on canister failed: {}", e);
-                }
+                // sending the request to the canister takes a few seconds
+                // therefore this is done in a separate task
+                // in order to not slow down the main task
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
+                    {
+                        println!("Calling ws_close on canister failed: {}", e);
+                    }
+                });
 
                 // remove client's channel from poller, if it exists and is not finished
                 match self
@@ -293,25 +298,23 @@ impl GatewayState {
                     let agent = Arc::clone(agent);
 
                     // spawn new canister poller task
-                    tokio::spawn({
-                        async move {
-                            let poller =
-                                CanisterPoller::new(gateway_session.canister_id.clone(), agent);
-                            let canister_id = poller.get_canister_id();
-                            println!("Created new poller: canister: {}", canister_id);
-                            // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
-                            // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
-                            // the new poller thread should not get those same messages again
-                            poller
-                                .run_polling(
-                                    poller_channels_poller_ends,
-                                    gateway_session.nonce,
-                                    polling_interval,
-                                )
-                                .await;
-                            // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
-                            canister_id
-                        }
+                    tokio::spawn(async move {
+                        let poller =
+                            CanisterPoller::new(gateway_session.canister_id.clone(), agent);
+                        let canister_id = poller.get_canister_id();
+                        println!("Created new poller: canister: {}", canister_id);
+                        // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
+                        // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
+                        // the new poller thread should not get those same messages again
+                        poller
+                            .run_polling(
+                                poller_channels_poller_ends,
+                                gateway_session.nonce,
+                                polling_interval,
+                            )
+                            .await;
+                        // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
+                        canister_id
                     });
 
                     // send channel data to poller
@@ -332,12 +335,12 @@ impl GatewayState {
                 {
                     println!("Calling ws_message on canister failed: {}", e);
 
-                    self.remove_client(gateway_session.client_id, &agent).await
+                    self.remove_client(gateway_session.client_id, &agent)
                 }
             },
             WsConnectionState::ConnectionClosed(client_id) => {
                 // cleanup client's session from WS Gateway state
-                self.remove_client(client_id, &agent).await
+                self.remove_client(client_id, &agent)
             },
             WsConnectionState::ConnectionError(e) => {
                 // TODO: make sure that cleaning up is not needed
