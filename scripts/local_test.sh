@@ -9,9 +9,10 @@ cargo run > scripts/gateway_test.log &
 pid=$!
 
 echo "Deploying test canister"
-cd tests/integration
+cd tests/test_canister
 dfx deploy
 
+cd ../integration
 echo "Running integration test"
 python3 run_n_clients.py
 
