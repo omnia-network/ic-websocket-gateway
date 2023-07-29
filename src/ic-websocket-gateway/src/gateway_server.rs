@@ -103,6 +103,7 @@ impl GatewayServer {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        // spawn a task which keeps listening for incoming client connections
         tokio::spawn(async move {
             let mut ws_connections_hanlders =
                 WsConnectionsHandler::new(&gateway_address, agent, client_connection_handler_tx)
@@ -167,61 +168,6 @@ impl GatewayState {
             connected_canisters: HashMap::default(),
             client_session_map: HashMap::default(),
             client_key_map: HashMap::default(),
-        }
-    }
-
-    fn add_client(&mut self, gateway_session: GatewaySession) {
-        let client_key = gateway_session.client_key.clone();
-        let client_id = gateway_session.client_id.clone();
-
-        self.client_key_map.insert(client_id, client_key.clone());
-        self.client_session_map.insert(client_key, gateway_session);
-    }
-
-    fn remove_client(&mut self, client_id: u64, agent: &Agent) {
-        match self.client_key_map.remove(&client_id) {
-            Some(client_key) => {
-                let gateway_session = self
-                    .client_session_map
-                    .remove(&client_key.clone())
-                    .expect("gateway session should be registered");
-
-                let agent_cl = agent.clone();
-                let canister_id_cl = gateway_session.canister_id.clone();
-                let client_key_cl = client_key.clone();
-                // close client connection on canister
-                // sending the request to the canister takes a few seconds
-                // therefore this is done in a separate task
-                // in order to not slow down the main task
-                tokio::spawn(async move {
-                    if let Err(e) =
-                        canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
-                    {
-                        println!("Calling ws_close on canister failed: {}", e);
-                    }
-                });
-
-                // remove client's channel from poller, if it exists and is not finished
-                match self
-                    .connected_canisters
-                    .get_mut(&gateway_session.canister_id)
-                {
-                    Some(poller_channel_for_client_channel_sender_tx) => {
-                        // try sending message to poller task
-                        if poller_channel_for_client_channel_sender_tx
-                            .send(PollerToClientChannelData::ClientDisconnected(client_key))
-                            .is_err()
-                        {
-                            // if poller task is finished, remove its data from WS Gateway state
-                            self.remove_poller_data(&gateway_session.canister_id)
-                        }
-                    },
-                    None => (),
-                }
-            },
-            None => {
-                println!("Client closed connection before being registered");
-            },
         }
     }
 
@@ -338,6 +284,61 @@ impl GatewayState {
         }
 
         println!("{} clients registered", self.client_session_map.len());
+    }
+
+    fn add_client(&mut self, gateway_session: GatewaySession) {
+        let client_key = gateway_session.client_key.clone();
+        let client_id = gateway_session.client_id.clone();
+
+        self.client_key_map.insert(client_id, client_key.clone());
+        self.client_session_map.insert(client_key, gateway_session);
+    }
+
+    fn remove_client(&mut self, client_id: u64, agent: &Agent) {
+        match self.client_key_map.remove(&client_id) {
+            Some(client_key) => {
+                let gateway_session = self
+                    .client_session_map
+                    .remove(&client_key.clone())
+                    .expect("gateway session should be registered");
+
+                let agent_cl = agent.clone();
+                let canister_id_cl = gateway_session.canister_id.clone();
+                let client_key_cl = client_key.clone();
+                // close client connection on canister
+                // sending the request to the canister takes a few seconds
+                // therefore this is done in a separate task
+                // in order to not slow down the main task
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
+                    {
+                        println!("Calling ws_close on canister failed: {}", e);
+                    }
+                });
+
+                // remove client's channel from poller, if it exists and is not finished
+                match self
+                    .connected_canisters
+                    .get_mut(&gateway_session.canister_id)
+                {
+                    Some(poller_channel_for_client_channel_sender_tx) => {
+                        // try sending message to poller task
+                        if poller_channel_for_client_channel_sender_tx
+                            .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                            .is_err()
+                        {
+                            // if poller task is finished, remove its data from WS Gateway state
+                            self.remove_poller_data(&gateway_session.canister_id)
+                        }
+                    },
+                    None => (),
+                }
+            },
+            None => {
+                println!("Client closed connection before being registered");
+            },
+        }
     }
 
     fn remove_poller_data(&mut self, canister_id: &Principal) {

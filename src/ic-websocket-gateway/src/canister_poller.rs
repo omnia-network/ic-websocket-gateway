@@ -79,11 +79,11 @@ impl CanisterPoller {
                 Some(channel_data) = poller_chnanels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
-                            println!("Adding new client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
+                            // println!("Adding new client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
                             client_channels.insert(client_key, client_channel);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            println!("Removing client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
+                            // println!("Removing client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
                             client_channels.remove(&client_key);
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
