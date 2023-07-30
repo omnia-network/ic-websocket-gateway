@@ -1,8 +1,13 @@
 use gateway_server::GatewayServer;
 use ic_agent::identity::BasicIdentity;
 use tracing::info;
+use tracing_subscriber::{filter, prelude::*};
 
-use std::{fs, path::Path};
+use std::{
+    fs::{self, File},
+    path::Path,
+    sync::Arc,
+};
 use structopt::StructOpt;
 
 mod canister_methods;
@@ -25,10 +30,6 @@ struct DeploymentInfo {
 }
 
 fn load_key_pair() -> ring::signature::Ed25519KeyPair {
-    if !Path::new("./data").is_dir() {
-        fs::create_dir("./data").unwrap();
-    }
-
     if !Path::new("./data/key_pair").is_file() {
         let rng = ring::rand::SystemRandom::new();
         let key_pair = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
@@ -44,9 +45,27 @@ fn load_key_pair() -> ring::signature::Ed25519KeyPair {
     }
 }
 
+fn init_tracing() {
+    if !Path::new("./data/traces").is_dir() {
+        fs::create_dir("./data/traces").unwrap();
+    }
+    let file = File::create("./data/traces/gateway_debug.log").expect("could not create file");
+    let debug_log = tracing_subscriber::fmt::layer().with_writer(Arc::new(file));
+    tracing_subscriber::registry()
+        .with(debug_log.with_filter(filter::LevelFilter::INFO))
+        .init();
+}
+
+fn create_data_dir() {
+    if !Path::new("./data").is_dir() {
+        fs::create_dir("./data").unwrap();
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().json().init();
+    create_data_dir();
+    init_tracing();
 
     let deployment_info = DeploymentInfo::from_args();
     info!("Deployment info: {:?}", deployment_info);

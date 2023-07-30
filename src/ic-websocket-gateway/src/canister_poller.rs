@@ -106,6 +106,7 @@ impl CanisterPoller {
 
                         match client_channels.get(&client_key) {
                             Some(client_channel_rx) => {
+                                info!("Sending message with key: {:?} to client handler task", m.key);
                                 if let Err(e) = client_channel_rx.send(m) {
                                     error!("Client's thread terminated: {}", e);
                                 }
