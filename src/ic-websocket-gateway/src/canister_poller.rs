@@ -1,6 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -69,10 +70,7 @@ impl CanisterPoller {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
             HashMap::new();
-        println!(
-            "Started poller: canister: {}, nonce: {}",
-            self.canister_id, nonce
-        );
+        info!("Poller started from nonce: {}", nonce);
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task

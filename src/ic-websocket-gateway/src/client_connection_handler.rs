@@ -61,7 +61,6 @@ impl WsConnectionsHandler {
         let listener = TcpListener::bind(&gateway_address)
             .await
             .expect("Can't listen");
-        println!("Listening on: {}", gateway_address);
         Self {
             listener,
             agent,
@@ -151,7 +150,7 @@ impl ClientConnectionHandler {
                                                 // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                                                 nonce,
                                             }) => {
-                                                info!("Client initialized IC WebSocket connection: {:?}", message);
+                                                info!("Client initialized IC WebSocket connection");
                                                 // let the client know that the IC WS connection is setup correctly
                                                 ws_write.send(Message::Text("1".to_string())).await.expect("WS connection should be open");
 
