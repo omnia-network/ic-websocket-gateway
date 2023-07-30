@@ -1,12 +1,13 @@
 use gateway_server::GatewayServer;
 use ic_agent::identity::BasicIdentity;
 use tracing::info;
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter, prelude::*};
 
 use std::{
     fs::{self, File},
     path::Path,
-    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use structopt::StructOpt;
 
@@ -45,15 +46,27 @@ fn load_key_pair() -> ring::signature::Ed25519KeyPair {
     }
 }
 
-fn init_tracing() {
+fn init_tracing() -> (WorkerGuard, WorkerGuard) {
     if !Path::new("./data/traces").is_dir() {
         fs::create_dir("./data/traces").unwrap();
     }
-    let file = File::create("./data/traces/gateway_debug.log").expect("could not create file");
-    let debug_log = tracing_subscriber::fmt::layer().with_writer(Arc::new(file));
+
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let filename = format!("./data/traces/gateway_{:?}.log", timestamp.as_millis());
+
+    println!("Tracing to file: {}", filename);
+
+    let log_file = File::create(filename).expect("could not create file");
+    let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
+    let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
+    let debug_log_file = tracing_subscriber::fmt::layer().with_writer(non_blocking_file);
+    let debug_log_stdout = tracing_subscriber::fmt::layer().with_writer(non_blocking_stdout);
     tracing_subscriber::registry()
-        .with(debug_log.with_filter(filter::LevelFilter::INFO))
+        .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
+        .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO))
         .init();
+
+    (guard_file, guard_stdout)
 }
 
 fn create_data_dir() {
@@ -65,7 +78,7 @@ fn create_data_dir() {
 #[tokio::main]
 async fn main() {
     create_data_dir();
-    init_tracing();
+    let _guards = init_tracing();
 
     let deployment_info = DeploymentInfo::from_args();
     info!("Deployment info: {:?}", deployment_info);
