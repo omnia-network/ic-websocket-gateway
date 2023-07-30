@@ -23,7 +23,7 @@ services:
       - DOMAIN_NAME=${DOMAIN_NAME}
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
-      - ./volumes/nginx/certs/live:/etc/nginx/certs/live
+      - ./volumes/nginx/certs:/etc/letsencrypt
     depends_on:
       - ic_websocket_gateway
     networks:
