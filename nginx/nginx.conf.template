@@ -21,15 +21,14 @@ server {
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
-    # the following parameters are from https://github.com/certbot/certbot/blob/5c111d0bd1206d864d7cb93754e101f6073bc669/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf
-    ssl_session_cache shared:le_nginx_SSL:10m;
-    ssl_session_timeout 1440m;
+    # the following parameters are set
+    # according to https://ssl-config.mozilla.org/#server=nginx&version=1.25&config=modern&openssl=3&hsts=false&ocsp=false&guideline=5.7
+    ssl_session_cache shared:icws_nginx_SSL:10m;
+    ssl_session_timeout 1440m; # about 40000 sessions
     ssl_session_tickets off;
 
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_protocols TLSv1.3;
     ssl_prefer_server_ciphers off;
-
-    ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
 
     location / {
         proxy_pass          http://websocket;
