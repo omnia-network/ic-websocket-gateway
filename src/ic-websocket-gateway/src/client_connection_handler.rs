@@ -222,7 +222,7 @@ impl ClientConnectionHandler {
                         }
                     }
                 }
-                info!("Terminating client connection handler");
+                info!("Terminating client connection handler task");
             },
             // no cleanup needed on the WS Gateway has the client's session has never been created
             Err(e) => {
