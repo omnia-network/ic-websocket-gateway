@@ -341,7 +341,7 @@ impl GatewayState {
                     if let Err(e) =
                         canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
                     {
-                        println!("Calling ws_close on canister failed: {}", e);
+                        error!("Calling ws_close on canister failed: {}", e);
                     }
                 });
 
