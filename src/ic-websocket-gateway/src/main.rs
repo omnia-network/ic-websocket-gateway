@@ -1,5 +1,6 @@
 use gateway_server::GatewayServer;
 use ic_agent::identity::BasicIdentity;
+use tracing::info;
 
 use std::{fs, path::Path};
 use structopt::StructOpt;
@@ -45,7 +46,10 @@ fn load_key_pair() -> ring::signature::Ed25519KeyPair {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt().json().init();
+
     let deployment_info = DeploymentInfo::from_args();
+    info!("Deployment info: {:?}", deployment_info);
 
     let key_pair = load_key_pair();
     let identity = BasicIdentity::from_key_pair(key_pair);

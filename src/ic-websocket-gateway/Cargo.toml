@@ -18,6 +18,8 @@ tokio-tungstenite = "0.20.0"
 ed25519-compact = "2.0.4"
 futures-util = "0.3.28"
 structopt = "0.3.21"
+tracing = "0.1"
+tracing-subscriber = "0.2"
 
 [dev-dependencies]
 websocket = "0.26.5"

@@ -4,6 +4,7 @@ use tokio::{
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
+use tracing::info;
 
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
@@ -100,10 +101,11 @@ impl GatewayServer {
     }
 
     pub fn start_accepting_incoming_connections(&self) {
+        // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        // spawn a task which keeps listening for incoming client connections
+        info!("Start accepting incoming connections");
         tokio::spawn(async move {
             let mut ws_connections_hanlders =
                 WsConnectionsHandler::new(&gateway_address, agent, client_connection_handler_tx)

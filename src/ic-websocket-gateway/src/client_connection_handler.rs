@@ -12,6 +12,7 @@ use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Message},
 };
+use tracing::{info, span, Instrument, Level};
 
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
@@ -70,20 +71,31 @@ impl WsConnectionsHandler {
     }
 
     pub async fn listen_for_incoming_requests(&mut self) {
-        while let Ok((stream, _client_addr)) = self.listener.accept().await {
+        while let Ok((stream, client_addr)) = self.listener.accept().await {
+            let span = span!(
+                Level::INFO,
+                "accepted_incoming_connection",
+                client_addr = client_addr.to_string()
+            );
             let agent_cl = Arc::clone(&self.agent);
             let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
             // spawn a connection handler task for each incoming client connection
             let current_client_id = self.next_client_id;
-            tokio::spawn(async move {
-                println!("\nNew client id: {}", current_client_id);
-                let client_connection_handler = ClientConnectionHandler::new(
-                    current_client_id,
-                    agent_cl,
-                    client_connection_handler_tx_cl,
-                );
-                client_connection_handler.handle_stream(stream).await;
-            });
+            tokio::spawn(
+                async move {
+                    let client_connection_handler = ClientConnectionHandler::new(
+                        current_client_id,
+                        agent_cl,
+                        client_connection_handler_tx_cl,
+                    );
+                    info!(
+                        "Spawned new connection handler for client with id: {}",
+                        current_client_id
+                    );
+                    client_connection_handler.handle_stream(stream).await;
+                }
+                .instrument(span),
+            );
             self.next_client_id += 1;
         }
     }
