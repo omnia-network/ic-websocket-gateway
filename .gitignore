@@ -4,6 +4,9 @@
 
 target/
 data/
+volumes/
 
 node_modules/
 scripts/gateway_test.log
+
+.env

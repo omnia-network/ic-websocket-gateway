@@ -1,14 +1,30 @@
-# build: 'docker build . -t gateway:v0'
-# run: 'docker run --rm -p 8080:8080 -v /Users/massimoalbarello/Documents/Omnia/ic-websocket/data:/gateway/data gateway:v0'
+### install packages
+FROM rust:1.69-slim-bullseye AS deps
+WORKDIR /ic-ws-gateway
+# this takes a while due to crates index update, so we do it first
+RUN cargo install cargo-chef
 
-FROM rust:latest
-
-WORKDIR /gateway
-
+### prepare the build
+FROM deps AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN cargo build
+### build the IC WS Gateway
+FROM deps AS builder 
+COPY --from=planner /ic-ws-gateway/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY . .
+RUN cargo build --release
+
+### run the IC WS Gateway (we don't need the rust toolchain to run the binary)
+FROM debian:bullseye-slim AS runtime
+WORKDIR /ic-ws-gateway
+# copy the compiled binary
+COPY --from=builder /ic-ws-gateway/target/release/ic_websocket_gateway .
 
 EXPOSE 8080
 
-CMD ["./target/debug/ic_websocket_gateway"]
+# run the Gateway
+ENTRYPOINT ["/ic-ws-gateway/ic_websocket_gateway"]

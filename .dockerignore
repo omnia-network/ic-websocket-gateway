@@ -1,8 +1,14 @@
 tests/
 .vscode/
 docs/
+data/
+volumes/
+scripts/
+target/
+nginx/
 .editorconfig
 integration_test.py
 LICENSE
 README.md
 Dockerfile
+docker-compose.yaml

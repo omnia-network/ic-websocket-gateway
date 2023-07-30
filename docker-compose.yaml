@@ -1,0 +1,35 @@
+services:
+  ic_websocket_gateway:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    image: ic-websocket-gateway
+    container_name: ic-websocket-gateway
+    restart: unless-stopped
+    command: ["--gateway-address", "0.0.0.0:8080", "--subnet-address", "${IC_URL}", "--polling-interval", "${POLLING_INTERVAL}"]
+    volumes:
+      - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
+    networks:
+      - ic-ws-gateway-network
+
+  nginx_reverse_proxy:
+    image: nginx:latest
+    container_name: nginx-reverse-proxy
+    restart: always
+    ports:
+      - ${LISTEN_PORT}:443
+    environment:
+      - LISTEN_PORT=${LISTEN_PORT}
+      - GATEWAY_ADDRESS=ic-websocket-gateway:8080
+      - DOMAIN_NAME=${DOMAIN_NAME}
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
+      - ./volumes/nginx/certs/live:/etc/nginx/certs/live
+    depends_on:
+      - ic_websocket_gateway
+    networks:
+      - ic-ws-gateway-network
+
+networks:
+  ic-ws-gateway-network:
+    name: ic-ws-gateway-network
