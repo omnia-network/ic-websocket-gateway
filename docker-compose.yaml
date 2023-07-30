@@ -19,7 +19,6 @@ services:
     ports:
       - ${LISTEN_PORT}:443
     environment:
-      - LISTEN_PORT=${LISTEN_PORT}
       - GATEWAY_ADDRESS=ic-websocket-gateway:8080
       - DOMAIN_NAME=${DOMAIN_NAME}
     volumes:
