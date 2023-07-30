@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::canister_methods::{self, CanisterOutputCertifiedMessages, ClientPublicKey};
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CertifiedMessage {
     pub key: String,
     #[serde(with = "serde_bytes")]
