@@ -18,8 +18,8 @@ server {
     listen [::]:443 ssl;
     server_name ${DOMAIN_NAME};
 
-    ssl_certificate /etc/nginx/certs/live/${DOMAIN_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/live/${DOMAIN_NAME}/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
     # the following parameters are from https://github.com/certbot/certbot/blob/5c111d0bd1206d864d7cb93754e101f6073bc669/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf
     ssl_session_cache shared:le_nginx_SSL:10m;
