@@ -1,6 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -10,7 +11,7 @@ use tokio::{
 
 use crate::canister_methods::{self, CanisterOutputCertifiedMessages, ClientPublicKey};
 
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CertifiedMessage {
     pub key: String,
     #[serde(with = "serde_bytes")]
@@ -69,26 +70,24 @@ impl CanisterPoller {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
             HashMap::new();
-        println!(
-            "Started poller: canister: {}, nonce: {}",
-            self.canister_id, nonce
-        );
+        info!("Poller started from nonce: {}", nonce);
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_chnanels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
-                            // println!("Adding new client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
+                            info!("Added new channel to poller for client: {:?}", client_key);
                             client_channels.insert(client_key, client_channel);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            // println!("Removing client poller channel: canister: {}, client {:?}", self.canister_id, client_key);
+                            info!("Removed client channel from poller for client {:?}", client_key);
                             client_channels.remove(&client_key);
+                            info!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
-                                println!("Last client disconnected, terminating poller task: canister {}", self.canister_id);
                                 poller_chnanels.poller_to_main.send(self.canister_id).expect("channel with main should be open");
+                                info!("Terminating poller task");
                                 break;
                             }
                         }
@@ -107,11 +106,12 @@ impl CanisterPoller {
 
                         match client_channels.get(&client_key) {
                             Some(client_channel_rx) => {
+                                info!("Sending message with key: {:?} to client handler task", m.key);
                                 if let Err(e) = client_channel_rx.send(m) {
-                                    println!("Client's thread terminated: {}", e);
+                                    error!("Client's thread terminated: {}", e);
                                 }
                             },
-                            None => println!("Connection with client closed before message could be delivered")
+                            None => error!("Connection with client with key {:?} closed before message could be delivered", client_key)
                         }
 
                         nonce = encoded_message
