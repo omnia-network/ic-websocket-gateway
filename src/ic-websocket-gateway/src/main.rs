@@ -21,7 +21,7 @@ mod unit_tests;
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
     #[structopt(short, long, default_value = "http://127.0.0.1:4943")]
-    subnet_address: String,
+    subnet_url: String,
 
     #[structopt(short, long, default_value = "0.0.0.0:8080")]
     gateway_address: String,
@@ -88,7 +88,7 @@ async fn main() {
 
     let mut gateway_server = GatewayServer::new(
         &deployment_info.gateway_address,
-        &deployment_info.subnet_address,
+        &deployment_info.subnet_url,
         identity,
     )
     .await;

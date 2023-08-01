@@ -70,11 +70,11 @@ pub struct GatewayServer {
 }
 
 impl GatewayServer {
-    pub async fn new(gateway_address: &str, subnet_address: &str, identity: BasicIdentity) -> Self {
-        let fetch_ic_root_key = subnet_address != "icp0.io";
+    pub async fn new(gateway_address: &str, subnet_url: &str, identity: BasicIdentity) -> Self {
+        let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
         let agent = Arc::new(
-            canister_methods::get_new_agent(subnet_address, identity, fetch_ic_root_key).await,
+            canister_methods::get_new_agent(subnet_url, identity, fetch_ic_root_key).await,
         );
 
         info!(
