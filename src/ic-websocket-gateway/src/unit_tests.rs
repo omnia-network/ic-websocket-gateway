@@ -3,6 +3,7 @@
 // running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
     use candid::Principal;
+    use ic_identity::{get_identity_from_key_pair, load_key_pair};
     use serde::Serialize;
     use serde_cbor::Serializer;
     use std::net::TcpStream;
@@ -16,8 +17,6 @@ mod tests {
     use crate::client_connection_handler::WsConnectionState;
     use crate::create_data_dir;
     use crate::gateway_server::GatewaySession;
-    use crate::load_key_pair;
-    use crate::BasicIdentity;
     use crate::GatewayServer;
 
     fn get_mock_websocket_client(addr: &str) -> Client<TcpStream> {
@@ -73,8 +72,8 @@ mod tests {
 
         let gateway_addr = "127.0.0.1:8080";
         let subnet_addr = "http://127.0.0.1:4943";
-        let key_pair = load_key_pair();
-        let identity = BasicIdentity::from_key_pair(key_pair);
+        let key_pair = load_key_pair("./data/key_pair");
+        let identity = get_identity_from_key_pair(key_pair);
 
         let gateway_server = GatewayServer::new(gateway_addr, subnet_addr, identity).await;
         gateway_server.start_accepting_incoming_connections();

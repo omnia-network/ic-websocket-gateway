@@ -113,7 +113,7 @@ After installing Node.js and dfx, you can run the integration tests as follows:
     ```
 5. Move to the directory `tests/test_canister` and deploy a test canister using the IC WebSocket CDK:
     ```
-    dfx deploy --argument '(opt "<gateway-principal-obtained-in-step-3>")'
+    dfx deploy test_canister --argument '(opt "<gateway-principal-obtained-in-step-3>")'
     ```
 6. Move to the directory `tests/integration` and set the environment variables:
     ```

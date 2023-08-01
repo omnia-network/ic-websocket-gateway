@@ -1,7 +1,12 @@
 [workspace]
 members = [
     "src/ic-websocket-gateway",
+    "src/ic-identity",
+    "src/scripts",
 ]
 default-members = [
     "src/ic-websocket-gateway",
 ]
+
+[workspace.dependencies]
+ic-agent = "0.24.1"

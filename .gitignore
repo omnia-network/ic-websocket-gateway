@@ -4,6 +4,7 @@
 
 target/
 data/
+!src/ic-identity/tests/data
 volumes/
 
 node_modules/
