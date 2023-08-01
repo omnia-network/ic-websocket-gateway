@@ -26,7 +26,8 @@ struct DeploymentInfo {
     #[structopt(short, long, default_value = "0.0.0.0:8080")]
     gateway_address: String,
 
-    #[structopt(short, long, default_value = "200")]
+    #[structopt(short, long, default_value = "100")]
+    /// implies a maximum client connection frequency of 1/polling_interval (without message starvation)
     polling_interval: u64,
 }
 

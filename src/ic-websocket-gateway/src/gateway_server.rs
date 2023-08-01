@@ -2,7 +2,7 @@ use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     select,
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tracing::{error, info, span, Instrument, Level};
 
@@ -21,7 +21,7 @@ pub struct GatewaySession {
     client_id: u64,
     client_key: ClientPublicKey,
     canister_id: Principal,
-    message_for_client_tx: UnboundedSender<CertifiedMessage>,
+    message_for_client_tx: Sender<CertifiedMessage>,
     nonce: u64,
 }
 
@@ -33,7 +33,7 @@ pub struct GatewaySession {
     pub client_id: u64,
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
-    pub message_for_client_tx: UnboundedSender<CertifiedMessage>,
+    pub message_for_client_tx: Sender<CertifiedMessage>,
     pub nonce: u64,
 }
 
@@ -42,7 +42,7 @@ impl GatewaySession {
         client_id: u64,
         client_key: Vec<u8>,
         canister_id: Principal,
-        message_for_client_tx: UnboundedSender<CertifiedMessage>,
+        message_for_client_tx: Sender<CertifiedMessage>,
         nonce: u64,
     ) -> Self {
         Self {
@@ -62,9 +62,9 @@ pub struct GatewayServer {
     // gateway address:
     address: String,
     // sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
-    client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+    client_connection_handler_tx: Sender<WsConnectionState>,
     // receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
-    client_connection_handler_rx: UnboundedReceiver<WsConnectionState>,
+    client_connection_handler_rx: Receiver<WsConnectionState>,
     // state of the WS Gateway
     state: GatewayState,
 }
@@ -88,8 +88,7 @@ impl GatewayServer {
         // channel used to send the state of the client connection
         // the client connection handler task sends the session information when the WebSocket connection is established and
         // the id the of the client when the connection is closed
-        let (client_connection_handler_tx, client_connection_handler_rx) =
-            mpsc::unbounded_channel();
+        let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
 
         Self {
             agent,
@@ -121,9 +120,9 @@ impl GatewayServer {
         // channel used by the poller task to let the main task know that the last client disconnected
         // and so the WS Gateway can cleanup the poller task data from its state
         let (poller_channel_for_completion_tx, mut poller_channel_for_completion_rx): (
-            UnboundedSender<Principal>,
-            UnboundedReceiver<Principal>,
-        ) = mpsc::unbounded_channel();
+            Sender<Principal>,
+            Receiver<Principal>,
+        ) = mpsc::channel(100);
 
         let span = span!(Level::INFO, "manage_gateway_state",);
 
@@ -136,7 +135,7 @@ impl GatewayServer {
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
                     let _enter = span.enter();
-                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, &self.agent);
+                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, &self.agent).await;
 
                 }
                 // check if a poller task has terminated
@@ -159,7 +158,7 @@ impl GatewayServer {
 /// - id of each client
 struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
-    connected_canisters: HashMap<Principal, UnboundedSender<PollerToClientChannelData>>,
+    connected_canisters: HashMap<Principal, Sender<PollerToClientChannelData>>,
     /// maps the client's public key to the state of the client's session
     client_session_map: HashMap<ClientPublicKey, GatewaySession>,
     /// maps the client id to its public key
@@ -177,10 +176,10 @@ impl GatewayState {
         }
     }
 
-    fn manage_clients_connections(
+    async fn manage_clients_connections(
         &mut self,
         connection_state: WsConnectionState,
-        poller_channel_for_completion_tx: UnboundedSender<Principal>,
+        poller_channel_for_completion_tx: Sender<Principal>,
         polling_interval: u64,
         agent: &Arc<Agent>,
     ) {
@@ -217,6 +216,7 @@ impl GatewayState {
                         // try to send channel data to poller
                         connected_canister
                             .send(poller_to_client_channel_data.clone())
+                            .await
                             .is_err()
                     },
                     None => true,
@@ -232,7 +232,7 @@ impl GatewayState {
                     let (
                         poller_channel_for_client_channel_sender_tx,
                         poller_channel_for_client_channel_sender_rx,
-                    ) = mpsc::unbounded_channel();
+                    ) = mpsc::channel(100);
 
                     // TODO: main task keeps track of the clients connected to each poller, terminates poller and
                     //       cleans up its state once the last client of a poller disconnects
@@ -281,6 +281,7 @@ impl GatewayState {
                     // send channel data to poller
                     poller_channel_for_client_channel_sender_tx
                         .send(poller_to_client_channel_data)
+                        .await
                         .expect("poller channel should be open");
                 }
 
@@ -300,7 +301,7 @@ impl GatewayState {
             WsConnectionState::ConnectionClosed(client_id) => {
                 let _entered = span!(Level::INFO, "ws_connection_closed", client_id).entered();
                 // cleanup client's session from WS Gateway state
-                self.remove_client(client_id, &agent);
+                self.remove_client(client_id, &agent).await;
             },
             WsConnectionState::ConnectionError(e) => {
                 let _entered = span!(Level::INFO, "ws_connection_error").entered();
@@ -321,7 +322,7 @@ impl GatewayState {
         info!("Client added to gateway state");
     }
 
-    fn remove_client(&mut self, client_id: u64, agent: &Agent) {
+    async fn remove_client(&mut self, client_id: u64, agent: &Agent) {
         match self.client_key_map.remove(&client_id) {
             Some(client_key) => {
                 let gateway_session = self
@@ -354,6 +355,7 @@ impl GatewayState {
                         // try sending message to poller task
                         if poller_channel_for_client_channel_sender_tx
                             .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                            .await
                             .is_err()
                         {
                             // if poller task is finished, remove its data from WS Gateway state

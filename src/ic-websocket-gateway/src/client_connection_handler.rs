@@ -6,7 +6,7 @@ use serde_cbor::to_vec;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, UnboundedSender},
+    sync::mpsc::{self, Sender},
 };
 use tokio_tungstenite::{
     accept_async,
@@ -47,7 +47,7 @@ pub struct WsConnectionsHandler {
     // listener of incoming TCP connections
     listener: TcpListener,
     agent: Arc<Agent>,
-    client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+    client_connection_handler_tx: Sender<WsConnectionState>,
     // needed to know which gateway_session to delete in case of error or WS closed
     next_client_id: u64,
 }
@@ -56,7 +56,7 @@ impl WsConnectionsHandler {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+        client_connection_handler_tx: Sender<WsConnectionState>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
             .await
@@ -101,13 +101,13 @@ impl WsConnectionsHandler {
 struct ClientConnectionHandler {
     id: u64,
     agent: Arc<Agent>,
-    client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+    client_connection_handler_tx: Sender<WsConnectionState>,
 }
 impl ClientConnectionHandler {
     pub fn new(
         id: u64,
         agent: Arc<Agent>,
-        client_connection_handler_tx: UnboundedSender<WsConnectionState>,
+        client_connection_handler_tx: Sender<WsConnectionState>,
     ) -> Self {
         Self {
             id,
@@ -122,7 +122,7 @@ impl ClientConnectionHandler {
                 let (mut ws_write, mut ws_read) = ws_stream.split();
                 let mut is_first_message = true;
                 // create channel which will be used to send messages from the canister poller directly to this client
-                let (message_for_client_tx, mut message_for_client_rx) = mpsc::unbounded_channel();
+                let (message_for_client_tx, mut message_for_client_rx) = mpsc::channel(100);
                 loop {
                     select! {
                         // wait for incoming message from client
@@ -134,7 +134,8 @@ impl ClientConnectionHandler {
                                         // let the main task know that it should remove the client's session from the WS Gateway state
                                         self.client_connection_handler_tx.send(
                                             WsConnectionState::ConnectionClosed(self.id)
-                                        ).expect("channel should be open on the main thread");
+                                        ).await
+                                        .expect("channel should be open on the main thread");
                                         info!("Client closed the Websocket connection: {:?}", message);
                                         // break from the loop so that the connection handler task can terminate
                                         break;
@@ -168,7 +169,8 @@ impl ClientConnectionHandler {
                                                             nonce,
                                                         ),
                                                     )
-                                                ).expect("channel should be open on the main thread");
+                                                ).await
+                                                .expect("channel should be open on the main thread");
                                             },
                                             Err(e) => {
                                                 info!("Client did not follow IC WebSocket initialization protocol: {:?}", e);
@@ -178,6 +180,7 @@ impl ClientConnectionHandler {
                                                 // does not contain any session for this client and therefore there is no cleanup needed
                                                 self.client_connection_handler_tx
                                                     .send(WsConnectionState::ConnectionError(IcWsError::InitializationError(e)))
+                                                    .await
                                                     .expect("channel should be open on the main thread");
                                                 // break from the loop so that the connection handler task can terminate
                                                 break;
@@ -197,6 +200,7 @@ impl ClientConnectionHandler {
                                 Ok(None) => {
                                     self.client_connection_handler_tx
                                         .send(WsConnectionState::ConnectionError(IcWsError::WsError(Error::AlreadyClosed.to_string())))
+                                        .await
                                         .expect("channel should be open on the main thread");
                                     warn!("Client WebSocket connection already closed");
                                     // break from the loop so that the connection handler task can terminate
@@ -207,7 +211,9 @@ impl ClientConnectionHandler {
                                     // let the main task know that it should remove the client's session from the WS Gateway state
                                     self.client_connection_handler_tx.send(
                                         WsConnectionState::ConnectionClosed(self.id)
-                                    ).expect("channel should be open on the main thread");
+                                    )
+                                    .await
+                                    .expect("channel should be open on the main thread");
                                     info!("Client WebSocket connection error: {:?}", e);
                                     // break from the loop so that the connection handler task can terminate
                                     break;
@@ -231,6 +237,7 @@ impl ClientConnectionHandler {
                     .send(WsConnectionState::ConnectionError(IcWsError::WsError(
                         e.to_string(),
                     )))
+                    .await
                     .expect("channel should be open on the main thread");
             },
         }
