@@ -25,3 +25,32 @@ pub fn get_principal_from_identity(identity: BasicIdentity) -> Principal {
         .sender()
         .expect("Could not get principal from key pair.")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_identity_from_key_pair() {
+        let key_pair = load_key_pair("./tests/data/test_key_pair");
+        assert!(std::panic::catch_unwind(|| get_identity_from_key_pair(key_pair)).is_ok());
+    }
+
+    #[test]
+    #[should_panic(expected = "Could not read the key pair.: KeyRejected(\"InvalidEncoding\")")]
+    fn test_get_identity_from_wrong_key_pair() {
+        let key_pair = load_key_pair("./tests/data/wrong_key_pair");
+        get_identity_from_key_pair(key_pair);
+    }
+
+    #[test]
+    fn test_get_principal_from_identity() {
+        let key_pair = load_key_pair("./tests/data/test_key_pair");
+        let identity = get_identity_from_key_pair(key_pair);
+        let principal = get_principal_from_identity(identity);
+        assert_eq!(
+            principal.to_string(),
+            String::from("7cio4-7j2lx-6f3tp-mkfw7-t4amd-tjphs-hkits-6qa7x-hmnmx-yvwxk-nqe")
+        );
+    }
+}
