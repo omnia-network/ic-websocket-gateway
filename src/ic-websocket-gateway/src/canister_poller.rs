@@ -71,10 +71,15 @@ impl CanisterPoller {
         let mut client_channels: HashMap<ClientPublicKey, Sender<CertifiedMessage>> =
             HashMap::new();
         info!("Poller started from nonce: {}", nonce);
+
+        let get_messages_operation =
+            get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
+        // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
+        // instead of issuing a new call to get_canister_updates
+        tokio::pin!(get_messages_operation);
+
         loop {
             select! {
-                // TODO: prevent client connection updates from starving get_canister_updates !!!
-
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_chnanels.main_to_poller.recv() => {
                     match channel_data {
@@ -95,8 +100,8 @@ impl CanisterPoller {
                         }
                     }
                 }
-                // poll canister for updates
-                msgs = get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval) => {
+                // poll canister for updates across multiple select! iterations
+                Ok(msgs) = &mut get_messages_operation => {
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -123,10 +128,13 @@ impl CanisterPoller {
                             .unwrap()
                             .parse()
                             .unwrap();
-                        nonce += 1
-                    }
-                }
+                        nonce += 1;
 
+                    }
+
+                    // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
+                    get_messages_operation.set(get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval));
+                }
             }
         }
     }
@@ -137,13 +145,7 @@ async fn get_canister_updates(
     canister_id: Principal,
     nonce: u64,
     polling_interval: u64,
-) -> CanisterOutputCertifiedMessages {
-    // !!! the polling interval implies the maximum frequency of the client connections !!!
-    // if clients connect at a higher freqency than 1/polling_interval, the messages from poller to clients will be starved
-    // by the clients connecting to each poller
+) -> Result<CanisterOutputCertifiedMessages, String> {
     tokio::time::sleep(Duration::from_millis(polling_interval)).await;
-
-    canister_methods::ws_get_messages(agent, &canister_id, nonce)
-        .await
-        .unwrap()
+    canister_methods::ws_get_messages(agent, &canister_id, nonce).await
 }
