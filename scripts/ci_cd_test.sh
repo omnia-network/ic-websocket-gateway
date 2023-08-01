@@ -10,10 +10,12 @@ cargo test --workspace -- --test-threads=1
 
 echo "Starting gateway in the background"
 ls -al
+ls -al src/ic-websocket-gateway/
 cargo run > /dev/null 2>&1 &
 gateway_pid=$!
 
 ls -al
+ls -al src/ic-websocket-gateway/
 
 GATEWAY_PRINCIPAL=$(cargo run -q -p scripts --bin principal_from_key_pair "./data/key_pair")
 
