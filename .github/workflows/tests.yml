@@ -14,12 +14,15 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 16
+          cache: "npm"
+          cache-dependency-path: "tests/integration/package-lock.json"
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: 1.69.0
       - uses: aviate-labs/setup-dfx@v0.2.6
         with:
           dfx-version: 0.14.1
+      - uses: Swatinem/rust-cache@v2
       - name: Install tests dependencies
         run: ./scripts/install_test_dependencies.sh
       - name: Run tests
