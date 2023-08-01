@@ -25,6 +25,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: "true"
+          workspaces: |
+            .
+            tests/test_canister
       - name: Install tests dependencies
         run: ./scripts/install_test_dependencies.sh
       - name: Run tests
