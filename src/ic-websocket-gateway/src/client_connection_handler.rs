@@ -77,7 +77,7 @@ impl WsConnectionsHandler {
             let current_client_id = self.next_client_id;
             let span = span!(
                 Level::INFO,
-                "accepted_incoming_connection",
+                "handle_client_connection",
                 client_addr = ?client_addr,
                 client_id = current_client_id
             );
@@ -151,7 +151,7 @@ impl ClientConnectionHandler {
                                                 // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                                                 nonce,
                                             }) => {
-                                                info!("Client initialized IC WebSocket connection");
+                                                info!("Client established IC WebSocket connection");
                                                 // let the client know that the IC WS connection is setup correctly
                                                 ws_write.send(Message::Text("1".to_string())).await.expect("WS connection should be open");
 
@@ -173,7 +173,7 @@ impl ClientConnectionHandler {
                                                 .expect("channel should be open on the main thread");
                                             },
                                             Err(e) => {
-                                                info!("Client did not follow IC WebSocket initialization protocol: {:?}", e);
+                                                info!("Client did not follow IC WebSocket establishment protocol: {:?}", e);
                                                 // tell the client that the setup of the IC WS connection failed
                                                 ws_write.send(Message::Text("0".to_string())).await.expect("WS connection should be open");
                                                 // if this branch is executed, the Ok branch is never been executed, hence the WS Gateway state
@@ -222,7 +222,7 @@ impl ClientConnectionHandler {
                         }
                         // wait for canister message to send to client
                         Some(canister_message) = message_for_client_rx.recv() => {
-                            info!("Received message from canister {:?}", canister_message.key);
+                            info!("Sending message with key: {:?} to client", canister_message.key);
                             // relay canister message to client, cbor encoded
                             ws_write.send(Message::Binary(to_vec(&canister_message).unwrap())).await.expect("WS connection should be open");
                         }

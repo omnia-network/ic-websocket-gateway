@@ -25,6 +25,7 @@ pub struct CertifiedMessage {
 /// ends of the channels needed by each canister poller tasks:
 /// - main_to_poller: receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
 /// - poller_to_main: sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
+#[derive(Debug)]
 pub struct PollerChannelsPollerEnds {
     main_to_poller: Receiver<PollerToClientChannelData>,
     poller_to_main: Sender<Principal>,
@@ -61,16 +62,24 @@ impl CanisterPoller {
         Self { canister_id, agent }
     }
 
+    #[tracing::instrument(
+        name = "poll_canister",
+        skip_all,
+        fields(
+            canister_id = %self.canister_id
+        )
+    )]
     pub async fn run_polling(
         &self,
         mut poller_chnanels: PollerChannelsPollerEnds,
         mut nonce: u64,
         polling_interval: u64,
     ) {
+        info!("Created new poller task starting from nonce: {}", nonce);
+
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, Sender<CertifiedMessage>> =
             HashMap::new();
-        info!("Poller started from nonce: {}", nonce);
 
         let get_messages_operation =
             get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
@@ -113,12 +122,12 @@ impl CanisterPoller {
 
                         match client_channels.get(&client_key) {
                             Some(client_channel_rx) => {
-                                info!("Sending message with key: {:?} to client handler task", m.key);
+                                info!("Received message with key: {:?} from canister", m.key);
                                 if let Err(e) = client_channel_rx.send(m).await {
                                     error!("Client's thread terminated: {}", e);
                                 }
                             },
-                            None => error!("Connection with client with key {:?} closed before message could be delivered", client_key)
+                            None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
                         }
 
                         nonce = encoded_message
