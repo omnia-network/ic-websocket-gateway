@@ -59,7 +59,9 @@ fn init_tracing() -> (WorkerGuard, WorkerGuard) {
     let log_file = File::create(filename).expect("could not create file");
     let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
-    let debug_log_file = tracing_subscriber::fmt::layer().with_writer(non_blocking_file);
+    let debug_log_file = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking_file)
+        .with_thread_ids(true);
     let debug_log_stdout = tracing_subscriber::fmt::layer().with_writer(non_blocking_stdout);
     tracing_subscriber::registry()
         .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
