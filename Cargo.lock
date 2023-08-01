@@ -1185,6 +1185,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic-identity"
+version = "0.1.0"
+dependencies = [
+ "ic-agent",
+ "ring",
+]
+
+[[package]]
 name = "ic-verify-bls-signature"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1213,7 +1221,7 @@ dependencies = [
  "ic-agent",
  "ic-cdk",
  "ic-cdk-macros 0.7.1",
- "ring",
+ "ic-identity",
  "serde",
  "serde_bytes",
  "serde_cbor",
@@ -2377,6 +2385,13 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scripts"
+version = "0.1.0"
+dependencies = [
+ "ic-identity",
+]
 
 [[package]]
 name = "sct"

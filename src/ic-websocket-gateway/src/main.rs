@@ -1,5 +1,5 @@
 use gateway_server::GatewayServer;
-use ic_agent::identity::BasicIdentity;
+use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter, prelude::*};
@@ -28,22 +28,6 @@ struct DeploymentInfo {
 
     #[structopt(short, long, default_value = "200")]
     polling_interval: u64,
-}
-
-fn load_key_pair() -> ring::signature::Ed25519KeyPair {
-    if !Path::new("./data/key_pair").is_file() {
-        let rng = ring::rand::SystemRandom::new();
-        let key_pair = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
-            .expect("Could not generate a key pair.");
-        // TODO: print out seed phrase
-        fs::write("./data/key_pair", key_pair.as_ref()).unwrap();
-        ring::signature::Ed25519KeyPair::from_pkcs8(key_pair.as_ref())
-            .expect("Could not read the key pair.")
-    } else {
-        let key_pair = fs::read("./data/key_pair").unwrap();
-        ring::signature::Ed25519KeyPair::from_pkcs8(&key_pair)
-            .expect("Could not read the key pair.")
-    }
 }
 
 fn init_tracing() -> (WorkerGuard, WorkerGuard) {
@@ -83,8 +67,8 @@ async fn main() {
     let deployment_info = DeploymentInfo::from_args();
     info!("Deployment info: {:?}", deployment_info);
 
-    let key_pair = load_key_pair();
-    let identity = BasicIdentity::from_key_pair(key_pair);
+    let key_pair = load_key_pair("./data/key_pair");
+    let identity = get_identity_from_key_pair(key_pair);
 
     let mut gateway_server = GatewayServer::new(
         &deployment_info.gateway_address,
