@@ -9,10 +9,15 @@ echo "Running unit tests for gateway"
 cargo test --workspace -- --test-threads=1
 
 echo "Starting gateway in the background"
+ls -al
 cargo run > /dev/null 2>&1 &
 gateway_pid=$!
 
+ls -al
+
 GATEWAY_PRINCIPAL=$(cargo run -q -p scripts --bin principal_from_key_pair "./data/key_pair")
+
+echo "Gateway principal: $GATEWAY_PRINCIPAL"
 
 echo "Deploying test canister"
 cd tests/test_canister
