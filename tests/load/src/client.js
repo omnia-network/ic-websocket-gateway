@@ -18,6 +18,7 @@ const test_canister = createActor(TEST_CANISTER_ID, {
 
 async function connectClient(userContext, events, next) {
   try {
+    const startTimestamp = Date.now();
     const customWs = new IcWebsocket(WS_GATEWAY_URL, undefined, {
       canisterActor: test_canister,
       canisterId: TEST_CANISTER_ID,
@@ -28,6 +29,7 @@ async function connectClient(userContext, events, next) {
 
     await new Promise((resolve, reject) => {
       customWs.onopen = () => {
+        events.emit('histogram', 'open_connection_latency_s', (Date.now() - startTimestamp) / (10 ** 3));
         events.emit('counter', 'connect_client_success', 1);
         resolve();
       };
