@@ -6,7 +6,7 @@ use tracing::{error, info};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{Receiver, Sender},
 };
 
 use crate::canister_methods::{self, CanisterOutputCertifiedMessages, ClientPublicKey};
@@ -26,14 +26,14 @@ pub struct CertifiedMessage {
 /// - main_to_poller: receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
 /// - poller_to_main: sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
 pub struct PollerChannelsPollerEnds {
-    main_to_poller: UnboundedReceiver<PollerToClientChannelData>,
-    poller_to_main: UnboundedSender<Principal>,
+    main_to_poller: Receiver<PollerToClientChannelData>,
+    poller_to_main: Sender<Principal>,
 }
 
 impl PollerChannelsPollerEnds {
     pub fn new(
-        main_to_poller: UnboundedReceiver<PollerToClientChannelData>,
-        poller_to_main: UnboundedSender<Principal>,
+        main_to_poller: Receiver<PollerToClientChannelData>,
+        poller_to_main: Sender<Principal>,
     ) -> Self {
         Self {
             main_to_poller,
@@ -47,7 +47,7 @@ impl PollerChannelsPollerEnds {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(ClientPublicKey, UnboundedSender<CertifiedMessage>),
+    NewClientChannel(ClientPublicKey, Sender<CertifiedMessage>),
     ClientDisconnected(ClientPublicKey),
 }
 
@@ -68,9 +68,16 @@ impl CanisterPoller {
         polling_interval: u64,
     ) {
         // channels used to communicate with client's WebSocket task
-        let mut client_channels: HashMap<ClientPublicKey, UnboundedSender<CertifiedMessage>> =
+        let mut client_channels: HashMap<ClientPublicKey, Sender<CertifiedMessage>> =
             HashMap::new();
         info!("Poller started from nonce: {}", nonce);
+
+        let get_messages_operation =
+            get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
+        // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
+        // instead of issuing a new call to get_canister_updates
+        tokio::pin!(get_messages_operation);
+
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
@@ -86,15 +93,15 @@ impl CanisterPoller {
                             info!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
-                                poller_chnanels.poller_to_main.send(self.canister_id).expect("channel with main should be open");
+                                poller_chnanels.poller_to_main.send(self.canister_id).await.expect("channel with main should be open");
                                 info!("Terminating poller task");
                                 break;
                             }
                         }
                     }
                 }
-                // poll canister for updates
-                msgs = get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval) => {
+                // poll canister for updates across multiple select! iterations
+                Ok(msgs) = &mut get_messages_operation => {
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -107,7 +114,7 @@ impl CanisterPoller {
                         match client_channels.get(&client_key) {
                             Some(client_channel_rx) => {
                                 info!("Sending message with key: {:?} to client handler task", m.key);
-                                if let Err(e) = client_channel_rx.send(m) {
+                                if let Err(e) = client_channel_rx.send(m).await {
                                     error!("Client's thread terminated: {}", e);
                                 }
                             },
@@ -121,10 +128,13 @@ impl CanisterPoller {
                             .unwrap()
                             .parse()
                             .unwrap();
-                        nonce += 1
-                    }
-                }
+                        nonce += 1;
 
+                    }
+
+                    // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
+                    get_messages_operation.set(get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval));
+                }
             }
         }
     }
@@ -135,10 +145,7 @@ async fn get_canister_updates(
     canister_id: Principal,
     nonce: u64,
     polling_interval: u64,
-) -> CanisterOutputCertifiedMessages {
+) -> Result<CanisterOutputCertifiedMessages, String> {
     tokio::time::sleep(Duration::from_millis(polling_interval)).await;
-
-    canister_methods::ws_get_messages(agent, &canister_id, nonce)
-        .await
-        .unwrap()
+    canister_methods::ws_get_messages(agent, &canister_id, nonce).await
 }
