@@ -23,6 +23,8 @@ services:
     nginx_reverse_proxy:
         image: nginx:latest
         container_name: nginx-reverse-proxy
+        profiles:
+            - nginx
         restart: always
         ports:
             - ${LISTEN_PORT}:443

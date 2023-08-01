@@ -11,4 +11,4 @@ integration_test.py
 LICENSE
 README.md
 Dockerfile
-docker-compose.yaml
+docker-compose.yml

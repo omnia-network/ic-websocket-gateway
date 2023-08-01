@@ -1,4 +1,4 @@
-# Introduction
+# IC WebSocket Gateway
 
 WebSockets enable web applications to maintain a full-duplex connection between the backend and the frontend. This allows for many different use-cases, such as notifications, dynamic content updates (e.g., showing new comments/likes on a post), collaborative editing, etc.
 
@@ -6,7 +6,13 @@ At the moment, WebSockets are not supported for dapps on the Internet Computer a
 
 This repository contains the implementation of a WebSocket Gateway enabling clients to establish a full-duplex connection to their backend canister on the Internet Computer via the WebSocket API.
 
-# Running the WS Gateway locally
+# Running the WS Gateway
+
+## Prerequisites
+
+Make sure you have the **Rust toolchain** installed. You can find instructions [here](https://www.rust-lang.org/tools/install).
+
+## Standalone
 
 1. Run the gateway:
     ```
@@ -22,7 +28,73 @@ This repository contains the implementation of a WebSocket Gateway enabling clie
 
 3. Copy the gateway principal as you will need initialize the canister CDK in order for the canister to authenticate the gateway. How to do this is explained [here](https://github.com/omnia-network/ic_websocket_example#running-the-project-locally)
 
-# Running integration tests locally
+## Docker
+
+A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](./docker-compose.yml) file to run the gateway. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+
+1. Set the environment variables:
+
+    ```
+    cp .env.example .env
+    ```
+    You can ignore the `NGINX reverse proxy` variables section for now.
+2. Run the gateway:
+    ```
+    docker compose up
+    ```
+3. The Gateway will print its principal in the container logs, just as explained above.
+4. Whenever you want to rebuild the gateway image, run:
+    ```
+    docker compose up --build
+    ```
+
+### Adding NGINX as a reverse proxy (with TLS)
+
+It's possible to run the gateway behind an [NGINX reverse proxy](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/), which also enables to run the WebSocket server over TLS.
+
+1. Obtain a domain name and point it to the server where you are running the gateway.
+2. Set the environment variables:
+
+    ```
+    cp .env.example .env
+    ```
+    In this case you have to set the `NGINX reverse proxy` variables.
+3. Obtain an SSL certificate for your domain:
+    ```
+    ./scripts/certbot_certonly.sh
+    ```
+    This will guide you in obtaining a certificate using [Certbot](https://certbot.eff.org/) in [Standalone mode](https://eff-certbot.readthedocs.io/en/stable/using.html#standalone).
+    > Make sure you have port `80` open on your server and reachable from the Internet, otherwise certbot will not be able to verify your domain. Port `80` is used only for the certificate generation and can be closed afterwards.
+4. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
+5. Run the gateway:
+    ```
+    docker compose --profile nginx up
+    ```
+
+To renew the SSL certificate, you can run the same command as above:
+```
+./scripts/certbot_certonly.sh
+```
+
+# Development
+
+## Testing
+
+### Unit tests
+
+Some unit tests are provided in the [unit_tests.rs](./src/ic-websocket-gateway/src/unit_tests.rs) file. You can run them with:
+
+```
+cargo test -- --test-threads=1
+```
+
+### Integration tests
+Integration tests require:
+- [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
+- [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/) 
+- a test canister deployed on the local replica
+
+After installing Node.js and dfx, you can run the integration tests as follows:
 
 1. Run a local replica:
 
@@ -52,15 +124,19 @@ This repository contains the implementation of a WebSocket Gateway enabling clie
     npm test
     ```
 
-# Testing your contributions
+### Local test script
 
-To test the development iterations, you can run the unit and integration tests together:
+To make it easier to run both the unit and integration tests, a script is provided that runs the local replica, the gateway and the tests in sequence. You can run it with:
 
 ```
 ./scripts/local_test.sh
 ```
 
-# Overview
+# How it works
+
+TODO: update this section
+
+## Overview
 
 ![](./docs/images/image2.png)
 
@@ -68,7 +144,7 @@ In order to enable WebSockets for a dapp running on the IC, we use an intermedia
 
 The gateway is needed as a WebSocket is a one-to-one connection between client and server, but the Internet Computer does not support that due to its replicated nature. The gateway translates all messages coming in on the WebSocket from the client to API canister calls for the backend and sends all messages coming from the backend on the Internet Computer out on the WebSocket with the corresponding client.
 
-# Features
+## Features
 
 -   General: The WS Gateway can provide WebSockets for many different dapps at the same time. A frontend can connect through any gateway to the backend (e.g., through the geographically closest one to reduce latency).
 -   Trustless: In order to make it impossible for the gateway to tamper with messages:
@@ -81,7 +157,7 @@ The gateway is needed as a WebSocket is a one-to-one connection between client a
     No single replica can be assumed to be trusted, so the canister state cannot be assumed to be kept secret. This means that when exchanging messages with the canister, we have to keep in mind that in principle the messages could be seen by others on the canister side.
     We could encrypt the messages between the client and the canister (so that they’re hidden from the gateway and any other party that cannot see the canister state), but we chose not to do so to make it clear that **in principle the messages could be seen by others on the canister side**.
 
-# Components
+## Components
 
 1. Client:
 
@@ -117,7 +193,7 @@ The gateway is needed as a WebSocket is a one-to-one connection between client a
     - Queues outgoing messages in queues corresponding to the recorded gateways. Puts the associated hashes in ic_certified_map to produce certificates.
     - When ws_close is called by the gateway corresponding to the provided client_id, the client info is deleted.
 
-# Message flow
+## Message flow
 
 ![](./docs/images/image1.png)
 
@@ -130,3 +206,11 @@ The gateway is needed as a WebSocket is a one-to-one connection between client a
     In the other direction, the canister composes a message and places its hash in the certified data structure. The gateway polls for messages and retrieves the message together with the certificate. The gateway passes on the message and the certificate to the client over the WebSocket.
 
 6. Whenever the WebSocket with the client is closed, the gateway calls ws_close. Afterwards no more messages can be sent from the canister to the client.
+
+# License
+
+TODO: add a license
+
+# Contributing
+
+Feel free to open issues and pull requests.
