@@ -47,9 +47,11 @@ fn init_tracing() -> (WorkerGuard, WorkerGuard) {
         .with_writer(non_blocking_file)
         .with_thread_ids(true);
     let debug_log_stdout = tracing_subscriber::fmt::layer().with_writer(non_blocking_stdout);
+    let tokio_console = console_subscriber::spawn();
     tracing_subscriber::registry()
         .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
         .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO))
+        .with(tokio_console)
         .init();
 
     (guard_file, guard_stdout)
