@@ -8,7 +8,7 @@ npm install
 
 # install test_canister dependencies
 cd ../test_canister
-npm install
 
-# generate test_canister declarations
-npm run generate
+rustup target add wasm32-unknown-unknown
+
+npm install

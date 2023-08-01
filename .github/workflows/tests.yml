@@ -19,11 +19,12 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: 1.69.0
-          target: wasm32-unknown-unknown
       - uses: aviate-labs/setup-dfx@v0.2.6
         with:
           dfx-version: 0.14.1
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - name: Install tests dependencies
         run: ./scripts/install_test_dependencies.sh
       - name: Run tests
