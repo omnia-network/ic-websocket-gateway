@@ -6,14 +6,59 @@ At the moment, WebSockets are not supported for dapps on the Internet Computer a
 
 This repository contains the implementation of a WebSocket Gateway enabling clients to establish a full-duplex connection to their backend canister on the Internet Computer via the WebSocket API.
 
-# Running the demo locally
+# Running the WS Gateway locally
 
-1. Run a local replica: `dfx start --clean --background`
-2. Run the gateway: `cargo run` and copy its principal which gets printed on the terminal
-3. Open a new terminal and install test dependencies: `./scripts/install_test_dependencies.sh`
-4. Open the file `tests/test_canister/src/canister.rs` paste the gateway principal as a value of `GATEWAY_PRINCIPAL`
-5. Move to the directory `tests/test_canister` and deploy a test canister using the IC WebSocket CDK: `dfx deploy`
-6. Move to the directory `tests/integration` and set the environment variables: `cp .env.example .env`, then run the test: `npm test`
+1. Run the gateway:
+    ```
+    cargo run
+    ```
+2. After the gateway starts, it prints something like:
+
+    ```
+    2023-08-01T07:55:58.315793Z INFO ic_websocket_gateway::gateway_server: Gateway Agent principal: sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae
+    ```
+
+    This is the principal that the gateway uses to interact with the canister IC WebSocket CDK.
+
+3. Copy the gateway principal as you will need initialize the canister CDK in order for the canister to authenticate the gateway. How to do this is explained [here](https://github.com/omnia-network/ic_websocket_example#running-the-project-locally)
+
+# Running integration tests locally
+
+1. Run a local replica:
+
+    ```
+    dfx start --clean --background
+    ```
+
+2. Run the gateway:
+    ```
+    cargo run
+    ```
+3. Copy the principal printed on the terminal (as explained above)
+4. Open a new terminal and install test dependencies:
+    ```
+    ./scripts/install_test_dependencies.sh
+    ```
+5. Move to the directory `tests/test_canister` and deploy a test canister using the IC WebSocket CDK:
+    ```
+    dfx deploy --argument '(opt "<gateway-principal-obtained-in-step-3>")'
+    ```
+6. Move to the directory `tests/integration` and set the environment variables:
+    ```
+    cp .env.example .env
+    ```
+7. Run the test:
+    ```
+    npm test
+    ```
+
+# Testing your contributions
+
+To test the development iterations, you can run the unit and integration tests together:
+
+```
+./scripts/local_test.sh
+```
 
 # Overview
 
