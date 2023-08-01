@@ -6,6 +6,7 @@ mod tests {
     use serde::Serialize;
     use serde_cbor::Serializer;
     use std::net::TcpStream;
+    use std::time::Duration;
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
@@ -13,6 +14,7 @@ mod tests {
     use crate::canister_methods::RelayedClientMessage;
     use crate::client_connection_handler::IcWsError;
     use crate::client_connection_handler::WsConnectionState;
+    use crate::create_data_dir;
     use crate::gateway_server::GatewaySession;
     use crate::load_key_pair;
     use crate::BasicIdentity;
@@ -67,6 +69,8 @@ mod tests {
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
+        create_data_dir();
+
         let gateway_addr = "127.0.0.1:8080";
         let subnet_addr = "http://127.0.0.1:4943";
         let key_pair = load_key_pair();
@@ -74,6 +78,8 @@ mod tests {
 
         let gateway_server = GatewayServer::new(gateway_addr, subnet_addr, identity).await;
         gateway_server.start_accepting_incoming_connections();
+        // delay the client connection in order to give the server time to start listening for incoming connections
+        tokio::time::sleep(Duration::from_millis(100)).await;
         let client = get_mock_websocket_client(gateway_addr);
         (client, gateway_server)
     }
