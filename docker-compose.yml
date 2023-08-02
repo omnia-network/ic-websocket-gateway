@@ -15,9 +15,9 @@ services:
                 "--polling-interval",
                 "${POLLING_INTERVAL}",
                 "--tls-certificate-pem-path",
-                "/ic-ws-gateway/data/certs/${DOMAIN_NAME}/live/fullchain.pem",
+                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
                 "--tls-certificate-key-pem-path",
-                "/ic-ws-gateway/data/certs/${DOMAIN_NAME}/live/privkey.pem",
+                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
             ]
         volumes:
             - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
