@@ -42,10 +42,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Could not read the key pair.: KeyRejected(\"InvalidEncoding\")")]
     fn test_get_identity_from_wrong_key_pair() {
-        let key_pair = load_key_pair("./tests/data/wrong_key_pair").unwrap();
-        get_identity_from_key_pair(key_pair);
+        let key_pair = load_key_pair("./tests/data/wrong_key_pair");
+        assert_eq!(
+            key_pair.unwrap_err(),
+            String::from("Could not parse the key pair. Error: InvalidEncoding")
+        );
     }
 
     #[test]
