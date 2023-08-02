@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "generate": "dfx generate test_canister",
-    "test": "jest"
+    "test": "LOG_LEVEL=debug jest"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.22.9",
@@ -47,6 +47,6 @@
     "@dfinity/agent": "^0.18.1",
     "@dfinity/candid": "^0.18.1",
     "@dfinity/principal": "^0.18.1",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#62dcec3437afe35efd7a08ec8d132e544891e2e1"
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#835995b61c04f9b54ac691b1c9abb5a745bd35fc"
   }
 }

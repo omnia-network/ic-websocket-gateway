@@ -11,7 +11,7 @@ mkdir -p reports
 
 # Run load tests
 echo "Running load tests..."
-npx artillery run gateway_load_tests.yml --output reports/gateway_load_tests.json
+LOG_LEVEL=debug npx artillery run gateway_load_tests.yml --output reports/gateway_load_tests.json
 
 # Generate HTML report
 echo "Generating HTML report..."

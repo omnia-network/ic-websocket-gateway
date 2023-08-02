@@ -2,7 +2,7 @@ echo "Starting local replica"
 dfx start --clean --background
 
 echo "Running unit tests for gateway"
-cargo test -- --test-threads=1
+cargo test --workspace -- --test-threads=1
 
 echo "Starting gateway in the background"
 cargo run > scripts/gateway_test.log &

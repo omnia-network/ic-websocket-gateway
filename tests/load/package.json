@@ -8,7 +8,7 @@
   "dependencies": {
     "bufferutil": "^4.0.7",
     "dotenv": "^16.3.1",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#62dcec3437afe35efd7a08ec8d132e544891e2e1",
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#835995b61c04f9b54ac691b1c9abb5a745bd35fc",
     "isomorphic-webcrypto": "^2.3.8",
     "utf-8-validate": "^5.0.10",
     "ws": "^8.13.0"

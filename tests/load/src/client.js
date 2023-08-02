@@ -68,7 +68,11 @@ async function sendMessages(userContext, events, next) {
           return resolve();
         }
 
-        events.emit('histogram', 'receive_message_latency_s', (Date.now() * (10 ** 6) - event.data.timestamp) / (10 ** 9));
+        events.emit(
+          'histogram',
+          'receive_message_latency_ms',
+          Number(BigInt(Date.now()) - (BigInt(event.data.timestamp) / BigInt(10 ** 6)))
+        );
 
         try {
           await ws.send({
