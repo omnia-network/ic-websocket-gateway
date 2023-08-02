@@ -11,6 +11,8 @@ use std::{
 };
 use structopt::StructOpt;
 
+use crate::client_connection_handler::TlsConfig;
+
 mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
@@ -28,6 +30,12 @@ struct DeploymentInfo {
 
     #[structopt(short, long, default_value = "100")]
     polling_interval: u64,
+
+    #[structopt(long)]
+    tls_certificate_pem_path: Option<String>,
+
+    #[structopt(long)]
+    tls_certificate_key_pem_path: Option<String>,
 }
 
 fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
@@ -82,8 +90,19 @@ async fn main() -> Result<(), String> {
     )
     .await;
 
+    let tls_config = if deployment_info.tls_certificate_pem_path.is_some()
+        && deployment_info.tls_certificate_key_pem_path.is_some()
+    {
+        Some(TlsConfig {
+            certificate_pem_path: deployment_info.tls_certificate_pem_path.unwrap(),
+            certificate_key_pem_path: deployment_info.tls_certificate_key_pem_path.unwrap(),
+        })
+    } else {
+        None
+    };
+
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    gateway_server.start_accepting_incoming_connections();
+    gateway_server.start_accepting_incoming_connections(tls_config);
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     gateway_server

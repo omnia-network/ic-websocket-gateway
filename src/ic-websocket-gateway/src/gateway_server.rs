@@ -11,7 +11,7 @@ use crate::{
     canister_poller::{
         CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
     },
-    client_connection_handler::{WsConnectionState, WsConnectionsHandler},
+    client_connection_handler::{TlsConfig, WsConnectionState, WsConnectionsHandler},
 };
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -101,16 +101,20 @@ impl GatewayServer {
         panic!("TODO: graceful shutdown");
     }
 
-    pub fn start_accepting_incoming_connections(&self) {
+    pub fn start_accepting_incoming_connections(&self, tls_config: Option<TlsConfig>) {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         info!("Start accepting incoming connections");
         tokio::spawn(async move {
-            let mut ws_connections_hanlders =
-                WsConnectionsHandler::new(&gateway_address, agent, client_connection_handler_tx)
-                    .await;
+            let mut ws_connections_hanlders = WsConnectionsHandler::new(
+                &gateway_address,
+                agent,
+                client_connection_handler_tx,
+                tls_config,
+            )
+            .await;
             ws_connections_hanlders.listen_for_incoming_requests().await;
         });
     }
