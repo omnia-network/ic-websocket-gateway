@@ -73,30 +73,32 @@ impl GatewayServer {
     pub async fn new(gateway_address: &str, subnet_url: &str, identity: BasicIdentity) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
-        let agent = Arc::new(
-            canister_methods::get_new_agent(subnet_url, identity, fetch_ic_root_key).await,
-        );
+        if let Ok(agent) =
+            canister_methods::get_new_agent(subnet_url, identity, fetch_ic_root_key).await
+        {
+            let agent = Arc::new(agent);
+            info!(
+                "Gateway Agent principal: {}",
+                agent.get_principal().expect("Principal should be set")
+            );
 
-        info!(
-            "Gateway Agent principal: {}",
-            agent.get_principal().expect("Principal should be set")
-        );
+            // [main task]                         [client connection handler task]
+            // client_connection_handler_rx <----- client_connection_handler_tx
 
-        // [main task]                         [client connection handler task]
-        // client_connection_handler_rx <----- client_connection_handler_tx
+            // channel used to send the state of the client connection
+            // the client connection handler task sends the session information when the WebSocket connection is established and
+            // the id the of the client when the connection is closed
+            let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
 
-        // channel used to send the state of the client connection
-        // the client connection handler task sends the session information when the WebSocket connection is established and
-        // the id the of the client when the connection is closed
-        let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
-
-        Self {
-            agent,
-            address: String::from(gateway_address),
-            client_connection_handler_tx,
-            client_connection_handler_rx,
-            state: GatewayState::default(),
+            return Self {
+                agent,
+                address: String::from(gateway_address),
+                client_connection_handler_tx,
+                client_connection_handler_rx,
+                state: GatewayState::default(),
+            };
         }
+        panic!("TODO: graceful shutdown");
     }
 
     pub fn start_accepting_incoming_connections(&self) {
@@ -251,10 +253,15 @@ impl GatewayState {
                     });
 
                     // send channel data to poller
-                    poller_channel_for_client_channel_sender_tx
+                    if let Err(e) = poller_channel_for_client_channel_sender_tx
                         .send(poller_to_client_channel_data)
                         .await
-                        .expect("poller channel should be open");
+                    {
+                        error!(
+                            "Receiver has been dropped on the poller task's side. Error: {:?}",
+                            e
+                        )
+                    }
                 }
 
                 // notify canister that it can now send messages for the client corresponding to client_key
@@ -306,7 +313,8 @@ impl GatewayState {
                 let gateway_session = self
                     .client_session_map
                     .remove(&client_key.clone())
-                    .expect("gateway session should be registered");
+                    // TODO: this error should never happen but must still be handled
+                    .expect("gateway session must be registered");
                 info!("Client removed from gateway state");
 
                 let agent_cl = agent.clone();
@@ -389,6 +397,7 @@ impl GatewayState {
     fn remove_poller_data(&mut self, canister_id: &Principal) {
         // poller task has terminated, remove it from the map
         self.connected_canisters.remove(canister_id);
+        // TODO: make sure that all the clients that were connected to the canister are also removed
         info!("Removed poller task data");
     }
 }

@@ -68,11 +68,11 @@ mod tests {
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
-        create_data_dir();
+        create_data_dir().unwrap();
 
         let gateway_addr = "127.0.0.1:8080";
         let subnet_addr = "http://127.0.0.1:4943";
-        let key_pair = load_key_pair("./data/key_pair");
+        let key_pair = load_key_pair("./data/key_pair").unwrap();
         let identity = get_identity_from_key_pair(key_pair);
 
         let gateway_server = GatewayServer::new(gateway_addr, subnet_addr, identity).await;
