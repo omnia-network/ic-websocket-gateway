@@ -48,7 +48,9 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let debug_log_file = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_file)
         .with_thread_ids(true);
-    let debug_log_stdout = tracing_subscriber::fmt::layer().with_writer(non_blocking_stdout);
+    let debug_log_stdout = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking_stdout)
+        .pretty();
     tracing_subscriber::registry()
         .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
         .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO))
