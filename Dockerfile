@@ -10,7 +10,11 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 ### build the IC WS Gateway
-FROM deps AS builder 
+FROM deps AS builder
+
+RUN apt update
+RUN apt install -y pkg-config libssl-dev
+
 COPY --from=planner /ic-ws-gateway/recipe.json recipe.json
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --recipe-path recipe.json
