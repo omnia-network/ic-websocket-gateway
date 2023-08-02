@@ -1,9 +1,10 @@
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    select,
+    select, signal,
     sync::mpsc::{self, Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, span, warn, Level};
 
 use crate::{
@@ -67,6 +68,8 @@ pub struct GatewayServer {
     client_connection_handler_rx: Receiver<WsConnectionState>,
     // state of the WS Gateway
     state: GatewayState,
+    // cancellation token used to signal other tasks when it's time to shut down
+    token: CancellationToken,
 }
 
 impl GatewayServer {
@@ -90,12 +93,15 @@ impl GatewayServer {
             // the id the of the client when the connection is closed
             let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
 
+            let token = CancellationToken::new();
+
             return Self {
                 agent,
                 address: String::from(gateway_address),
                 client_connection_handler_tx,
                 client_connection_handler_rx,
                 state: GatewayState::default(),
+                token,
             };
         }
         panic!("TODO: graceful shutdown");
@@ -106,12 +112,17 @@ impl GatewayServer {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        let cloned_token = self.token.clone();
+
         info!("Start accepting incoming connections");
         tokio::spawn(async move {
             let mut ws_connections_hanlders =
                 WsConnectionsHandler::new(&gateway_address, agent, client_connection_handler_tx)
                     .await;
-            ws_connections_hanlders.listen_for_incoming_requests().await;
+            ws_connections_hanlders
+                .listen_for_incoming_requests(cloned_token)
+                .await;
+            warn!("Stopped accepting incoming connections");
         });
     }
 
@@ -140,6 +151,43 @@ impl GatewayServer {
                 // check if a poller task has terminated
                 Some(canister_id) = poller_channel_for_completion_rx.recv() => {
                     self.state.remove_poller_data(&canister_id);
+                },
+                // detect ctrl_c signal from the OS
+                _ = signal::ctrl_c() => {
+                    warn!("Starting graceful shutdown");
+                    self.token.cancel();
+                    let mut clients_state_cleaned = false;
+                    let mut pollers_state_clean = false;
+                    loop {
+                        select! {
+                            Some(WsConnectionState::ConnectionClosed(client_id)) = self.recv_from_client_connection_handler() => {
+                                // cleanup client's session from WS Gateway state
+                                self.state.remove_client(client_id, &self.agent).await;
+                                // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
+                                //       the rx returns None when the all the txs are dropped and we can break then
+                                if self.state.count_connected_clients() == 0 {
+                                    warn!("All clients data has been removed from the gateway state");
+                                    clients_state_cleaned = true;
+                                }
+                            }
+                            Some(canister_id) = poller_channel_for_completion_rx.recv() => {
+                                self.state.remove_poller_data(&canister_id);
+                                // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
+                                //       the rx returns None when the all the txs are dropped and we can break then
+                                if self.state.count_connected_pollers() == 0 {
+                                    warn!("All pollers data has been removed from the gateway state");
+                                    pollers_state_clean = true;
+                                }
+                            }
+                        }
+                        if clients_state_cleaned && pollers_state_clean {
+                            break;
+                        }
+                    }
+
+                    // tokio::time::sleep(Duration::from_secs(5)).await;
+                    warn!("Shutting down state manager");
+                    break;
                 }
             }
         }
@@ -364,6 +412,10 @@ impl GatewayState {
         }
     }
 
+    fn count_connected_clients(&self) -> usize {
+        self.client_key_map.len()
+    }
+
     #[tracing::instrument(
         name = "manage_pollers_state",
         skip(self, poller_channel_for_client_channel_sender_tx),
@@ -399,5 +451,9 @@ impl GatewayState {
         self.connected_canisters.remove(canister_id);
         // TODO: make sure that all the clients that were connected to the canister are also removed
         info!("Removed poller task data");
+    }
+
+    fn count_connected_pollers(&self) -> usize {
+        self.connected_canisters.len()
     }
 }

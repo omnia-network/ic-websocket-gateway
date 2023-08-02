@@ -1228,6 +1228,7 @@ dependencies = [
  "structopt",
  "tokio",
  "tokio-tungstenite",
+ "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

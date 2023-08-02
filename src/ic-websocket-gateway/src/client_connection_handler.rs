@@ -13,6 +13,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message},
     WebSocketStream,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, span, warn, Instrument, Level};
 
 use crate::{
@@ -70,31 +71,44 @@ impl WsConnectionsHandler {
         }
     }
 
-    pub async fn listen_for_incoming_requests(&mut self) {
-        while let Ok((stream, client_addr)) = self.listener.accept().await {
-            let agent_cl = Arc::clone(&self.agent);
-            let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
-            // spawn a connection handler task for each incoming client connection
-            let current_client_id = self.next_client_id;
-            let span = span!(
-                Level::INFO,
-                "handle_client_connection",
-                client_addr = ?client_addr,
-                client_id = current_client_id
-            );
-            tokio::spawn(
-                async move {
-                    let client_connection_handler = ClientConnectionHandler::new(
-                        current_client_id,
-                        agent_cl,
-                        client_connection_handler_tx_cl,
+    pub async fn listen_for_incoming_requests(&mut self, token: CancellationToken) {
+        loop {
+            select! {
+                Ok((stream, client_addr)) = self.listener.accept() => {
+                    let agent_cl = Arc::clone(&self.agent);
+                    let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
+                    // spawn a connection handler task for each incoming client connection
+                    let current_client_id = self.next_client_id;
+                    let span = span!(
+                        Level::INFO,
+                        "handle_client_connection",
+                        client_addr = ?client_addr,
+                        client_id = current_client_id
                     );
-                    info!("Spawned new connection handler");
-                    client_connection_handler.handle_stream(stream).await;
+
+                    let token_cl = token.clone();
+                    tokio::spawn(
+                        async move {
+                            let client_connection_handler = ClientConnectionHandler::new(
+                                current_client_id,
+                                agent_cl,
+                                client_connection_handler_tx_cl,
+                            );
+                            info!("Spawned new connection handler");
+                            client_connection_handler
+                                .handle_stream(stream, token_cl)
+                                .await;
+                        }
+                        .instrument(span),
+                    );
+                    self.next_client_id += 1;
+                },
+                _ = token.cancelled() => {
+                    warn!("Stopped listening for incoming requests");
+                    break;
                 }
-                .instrument(span),
-            );
-            self.next_client_id += 1;
+
+            }
         }
     }
 }
@@ -116,7 +130,7 @@ impl ClientConnectionHandler {
             client_connection_handler_tx,
         }
     }
-    pub async fn handle_stream(&self, stream: TcpStream) {
+    pub async fn handle_stream(&self, stream: TcpStream, token: CancellationToken) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 info!("Accepted WebSocket connection");
@@ -226,6 +240,16 @@ impl ClientConnectionHandler {
                                 },
                                 Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
                             }
+                        },
+                        _ = token.cancelled() => {
+                            self.send_connection_state_to_clients_manager(
+                                WsConnectionState::ConnectionClosed(self.id)
+                            )
+                            .await;
+                            // close the WebSocket connection
+                            ws_write.close().await.unwrap();
+                            warn!("Terminated client connection handler");
+                            return;
                         }
                     }
                 }
