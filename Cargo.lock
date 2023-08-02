@@ -1222,11 +1222,13 @@ dependencies = [
  "ic-cdk",
  "ic-cdk-macros 0.7.1",
  "ic-identity",
+ "native-tls",
  "serde",
  "serde_bytes",
  "serde_cbor",
  "structopt",
  "tokio",
+ "tokio-native-tls",
  "tokio-tungstenite",
  "tracing",
  "tracing-appender",
@@ -2961,6 +2963,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.27",
+]
+
+[[package]]
+name = "tokio-native-tls"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
+dependencies = [
+ "native-tls",
+ "tokio",
 ]
 
 [[package]]

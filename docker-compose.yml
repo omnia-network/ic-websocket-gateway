@@ -6,36 +6,23 @@ services:
         image: ic-websocket-gateway
         container_name: ic-websocket-gateway
         restart: unless-stopped
+        ports:
+            - ${LISTEN_PORT}:443
         command:
             [
                 "--gateway-address",
-                "0.0.0.0:8080",
+                "0.0.0.0:443",
                 "--subnet-url",
                 "${IC_URL}",
                 "--polling-interval",
                 "${POLLING_INTERVAL}",
+                "--tls-certificate-pem-path",
+                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
+                "--tls-certificate-key-pem-path",
+                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
             ]
         volumes:
             - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
-        networks:
-            - ic-ws-gateway-network
-
-    nginx_reverse_proxy:
-        image: nginx:latest
-        container_name: nginx-reverse-proxy
-        profiles:
-            - nginx
-        restart: always
-        ports:
-            - ${LISTEN_PORT}:443
-        environment:
-            - GATEWAY_ADDRESS=ic-websocket-gateway:8080
-            - DOMAIN_NAME=${DOMAIN_NAME}
-        volumes:
-            - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
-            - ./volumes/nginx/certs:/etc/letsencrypt
-        depends_on:
-            - ic_websocket_gateway
         networks:
             - ic-ws-gateway-network
 

@@ -37,39 +37,28 @@ A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](.
     ```
     cp .env.example .env
     ```
-    You can ignore the `NGINX reverse proxy` variables section for now.
-2. Run the gateway:
+2. The docker-compose.yml file is configured to make the gateway run with TLS enabled. For this, you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
+3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
+4. Run the gateway:
     ```
     docker compose up
     ```
-3. The Gateway will print its principal in the container logs, just as explained above.
-4. Whenever you want to rebuild the gateway image, run:
+5. The Gateway will print its principal in the container logs, just as explained above.
+6. Whenever you want to rebuild the gateway image, run:
     ```
     docker compose up --build
     ```
 
-### Adding NGINX as a reverse proxy (with TLS)
+### Obtain a TLS certificate
 
-It's possible to run the gateway behind an [NGINX reverse proxy](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/), which also enables to run the WebSocket server over TLS.
-
-1. Obtain a domain name and point it to the server where you are running the gateway.
-2. Set the environment variables:
-
-    ```
-    cp .env.example .env
-    ```
-    In this case you have to set the `NGINX reverse proxy` variables.
+1. Buy a domain name and point it to the server where you are running the gateway.
+2. Make sure the `.env` file is configured with the correct domain name, see above.
 3. Obtain an SSL certificate for your domain:
     ```
     ./scripts/certbot_certonly.sh
     ```
     This will guide you in obtaining a certificate using [Certbot](https://certbot.eff.org/) in [Standalone mode](https://eff-certbot.readthedocs.io/en/stable/using.html#standalone).
     > Make sure you have port `80` open on your server and reachable from the Internet, otherwise certbot will not be able to verify your domain. Port `80` is used only for the certificate generation and can be closed afterwards.
-4. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
-5. Run the gateway:
-    ```
-    docker compose --profile nginx up
-    ```
 
 To renew the SSL certificate, you can run the same command as above:
 ```

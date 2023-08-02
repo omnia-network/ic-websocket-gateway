@@ -1,19 +1,22 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::Agent;
+use native_tls::Identity;
 use serde_cbor::to_vec;
 use tokio::{
+    io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{self, Sender},
 };
+use tokio_native_tls::{TlsAcceptor, TlsStream};
 use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Message},
     WebSocketStream,
 };
-use tracing::{error, info, span, warn, Instrument, Level};
+use tracing::{debug, error, info, span, warn, Instrument, Level};
 
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
@@ -44,9 +47,21 @@ pub enum IcWsError {
     WsError(String),
 }
 
+/// Possible TCP streams.
+enum CustomTcpStream {
+    Tcp(TcpStream),
+    TcpWithTls(TlsStream<TcpStream>),
+}
+
+pub struct TlsConfig {
+    pub certificate_pem_path: String,
+    pub certificate_key_pem_path: String,
+}
+
 pub struct WsConnectionsHandler {
     // listener of incoming TCP connections
     listener: TcpListener,
+    tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
     // needed to know which gateway_session to delete in case of error or WS closed
@@ -58,12 +73,31 @@ impl WsConnectionsHandler {
         gateway_address: &str,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
+        tls_config: Option<TlsConfig>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
             .await
             .expect("Can't listen");
+        let mut tls_acceptor = None;
+        if let Some(tls_config) = tls_config {
+            let chain = fs::read(tls_config.certificate_pem_path).expect("Can't read certificate");
+            let privkey =
+                fs::read(tls_config.certificate_key_pem_path).expect("Can't read private key");
+            let tls_identity =
+                Identity::from_pkcs8(&chain, &privkey).expect("Can't create a TLS identity");
+            let acceptor = TlsAcceptor::from(
+                native_tls::TlsAcceptor::builder(tls_identity)
+                    .build()
+                    .expect("Can't create a TLS acceptor from the TLS identity"),
+            );
+            tls_acceptor = Some(acceptor);
+            info!("TLS enabled");
+        } else {
+            info!("TLS disabled");
+        }
         Self {
             listener,
+            tls_acceptor,
             agent,
             client_connection_handler_tx,
             next_client_id: 0,
@@ -72,6 +106,22 @@ impl WsConnectionsHandler {
 
     pub async fn listen_for_incoming_requests(&mut self) {
         while let Ok((stream, client_addr)) = self.listener.accept().await {
+            let stream = match self.tls_acceptor {
+                Some(ref acceptor) => {
+                    let tls_stream = acceptor.accept(stream).await;
+                    match tls_stream {
+                        Ok(tls_stream) => {
+                            debug!("TLS handshake successful");
+                            CustomTcpStream::TcpWithTls(tls_stream)
+                        },
+                        Err(e) => {
+                            error!("TLS handshake failed: {:?}", e);
+                            continue;
+                        },
+                    }
+                },
+                None => CustomTcpStream::Tcp(stream),
+            };
             let agent_cl = Arc::clone(&self.agent);
             let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
             // spawn a connection handler task for each incoming client connection
@@ -90,7 +140,14 @@ impl WsConnectionsHandler {
                         client_connection_handler_tx_cl,
                     );
                     info!("Spawned new connection handler");
-                    client_connection_handler.handle_stream(stream).await;
+                    match stream {
+                        CustomTcpStream::Tcp(stream) => {
+                            client_connection_handler.handle_stream(stream).await
+                        },
+                        CustomTcpStream::TcpWithTls(stream) => {
+                            client_connection_handler.handle_stream(stream).await
+                        },
+                    }
                 }
                 .instrument(span),
             );
@@ -116,7 +173,7 @@ impl ClientConnectionHandler {
             client_connection_handler_tx,
         }
     }
-    pub async fn handle_stream(&self, stream: TcpStream) {
+    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 info!("Accepted WebSocket connection");
@@ -256,8 +313,8 @@ impl ClientConnectionHandler {
     }
 }
 
-async fn send_ws_message_to_client(
-    ws_write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+async fn send_ws_message_to_client<S: AsyncRead + AsyncWrite + Unpin>(
+    ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
     message: Message,
 ) {
     if let Err(e) = ws_write.send(message).await {

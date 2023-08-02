@@ -76,7 +76,7 @@ mod tests {
         let identity = get_identity_from_key_pair(key_pair);
 
         let gateway_server = GatewayServer::new(gateway_addr, subnet_addr, identity).await;
-        gateway_server.start_accepting_incoming_connections();
+        gateway_server.start_accepting_incoming_connections(None);
         // delay the client connection in order to give the server time to start listening for incoming connections
         tokio::time::sleep(Duration::from_millis(100)).await;
         let client = get_mock_websocket_client(gateway_addr);
