@@ -111,6 +111,7 @@ impl CanisterPoller {
                 }
                 // poll canister for updates across multiple select! iterations
                 Ok(msgs) = &mut get_messages_operation => {
+                    info!("Received canister messages");
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -152,7 +153,9 @@ async fn get_canister_updates(
     nonce: u64,
     polling_interval: u64,
 ) -> Result<CanisterOutputCertifiedMessages, String> {
+    info!("Waitign for polling interval");
     tokio::time::sleep(Duration::from_millis(polling_interval)).await;
+    info!("Getting canister messages");
     canister_methods::ws_get_messages(agent, &canister_id, nonce).await
 }
 

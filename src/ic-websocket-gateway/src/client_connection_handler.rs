@@ -220,7 +220,10 @@ impl ClientConnectionHandler {
                             info!("Sending message with key: {:?} to client", canister_message.key);
                             // relay canister message to client, cbor encoded
                             match to_vec(&canister_message) {
-                                Ok(bytes) => send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await,
+                                Ok(bytes) => {
+                                    send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
+                                    info!("Message with key: {:?} sent to client", canister_message.key);
+                                },
                                 Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
                             }
                         }
@@ -258,6 +261,7 @@ async fn send_ws_message_to_client(
     message: Message,
 ) {
     if let Err(e) = ws_write.send(message).await {
+        // TODO: graceful shutdown fo client task
         error!("Could not send message to client: {:?}", e);
     }
 }
