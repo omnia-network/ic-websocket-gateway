@@ -25,6 +25,7 @@ pub struct CertifiedMessage {
 /// ends of the channels needed by each canister poller tasks:
 /// - main_to_poller: receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
 /// - poller_to_main: sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
+#[derive(Debug)]
 pub struct PollerChannelsPollerEnds {
     main_to_poller: Receiver<PollerToClientChannelData>,
     poller_to_main: Sender<Principal>,
@@ -61,16 +62,24 @@ impl CanisterPoller {
         Self { canister_id, agent }
     }
 
+    #[tracing::instrument(
+        name = "poll_canister",
+        skip_all,
+        fields(
+            canister_id = %self.canister_id
+        )
+    )]
     pub async fn run_polling(
         &self,
-        mut poller_chnanels: PollerChannelsPollerEnds,
+        mut poller_channels: PollerChannelsPollerEnds,
         mut nonce: u64,
         polling_interval: u64,
     ) {
+        info!("Created new poller task starting from nonce: {}", nonce);
+
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPublicKey, Sender<CertifiedMessage>> =
             HashMap::new();
-        info!("Poller started from nonce: {}", nonce);
 
         let get_messages_operation =
             get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
@@ -81,7 +90,7 @@ impl CanisterPoller {
         loop {
             select! {
                 // receive channel used to send canister updates to new client's task
-                Some(channel_data) = poller_chnanels.main_to_poller.recv() => {
+                Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
                             info!("Added new channel to poller for client: {:?}", client_key);
@@ -93,8 +102,8 @@ impl CanisterPoller {
                             info!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
-                                poller_chnanels.poller_to_main.send(self.canister_id).await.expect("channel with main should be open");
-                                info!("Terminating poller task");
+                                signal_poller_task_termination(&mut poller_channels.poller_to_main, self.canister_id).await;
+                                info!("Terminating poller task as no clients are connected");
                                 break;
                             }
                         }
@@ -102,6 +111,7 @@ impl CanisterPoller {
                 }
                 // poll canister for updates across multiple select! iterations
                 Ok(msgs) = &mut get_messages_operation => {
+                    info!("Received canister messages");
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -113,23 +123,20 @@ impl CanisterPoller {
 
                         match client_channels.get(&client_key) {
                             Some(client_channel_rx) => {
-                                info!("Sending message with key: {:?} to client handler task", m.key);
+                                info!("Received message with key: {:?} from canister", m.key);
                                 if let Err(e) = client_channel_rx.send(m).await {
                                     error!("Client's thread terminated: {}", e);
                                 }
                             },
-                            None => error!("Connection with client with key {:?} closed before message could be delivered", client_key)
+                            None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
                         }
 
-                        nonce = encoded_message
-                            .key
-                            .split('_')
-                            .last()
-                            .unwrap()
-                            .parse()
-                            .unwrap();
-                        nonce += 1;
-
+                        match get_nonce_from_message(encoded_message.key) {
+                            Ok(last_nonce) => nonce = last_nonce + 1,
+                            Err(_e) => {
+                                panic!("TODO: graceful shutdown of poller task and related clients disconnection");
+                            }
+                        }
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
@@ -146,6 +153,29 @@ async fn get_canister_updates(
     nonce: u64,
     polling_interval: u64,
 ) -> Result<CanisterOutputCertifiedMessages, String> {
+    info!("Waitign for polling interval");
     tokio::time::sleep(Duration::from_millis(polling_interval)).await;
+    info!("Getting canister messages");
     canister_methods::ws_get_messages(agent, &canister_id, nonce).await
+}
+
+fn get_nonce_from_message(key: String) -> Result<u64, String> {
+    if let Some(nonce_str) = key.split('_').last() {
+        let nonce = nonce_str
+            .parse()
+            .map_err(|e| format!("Could not parse nonce. Error: {:?}", e))?;
+        return Ok(nonce);
+    }
+    Err(String::from(
+        "Key in canister message is not formatted correctly",
+    ))
+}
+
+async fn signal_poller_task_termination(channel: &mut Sender<Principal>, canister_id: Principal) {
+    if let Err(e) = channel.send(canister_id).await {
+        error!(
+            "Receiver has been dropped on the pollers connection manager's side. Error: {:?}",
+            e
+        );
+    }
 }

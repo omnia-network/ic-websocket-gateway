@@ -1,6 +1,7 @@
 use candid::CandidType;
 use candid::Decode;
 use ed25519_compact::{PublicKey, Signature};
+use ic_agent::AgentError;
 use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, export::Principal,
     identity::BasicIdentity, Agent,
@@ -126,17 +127,20 @@ pub struct CanisterOutputCertifiedMessages {
     pub tree: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
 }
 
-pub async fn get_new_agent(url: &str, identity: BasicIdentity, fetch_key: bool) -> Agent {
-    let transport = ReqwestHttpReplicaV2Transport::create(url.to_string()).unwrap();
+pub async fn get_new_agent(
+    url: &str,
+    identity: BasicIdentity,
+    fetch_key: bool,
+) -> Result<Agent, AgentError> {
+    let transport = ReqwestHttpReplicaV2Transport::create(url.to_string())?;
     let agent = Agent::builder()
         .with_transport(transport)
         .with_identity(identity)
-        .build()
-        .unwrap();
+        .build()?;
     if fetch_key {
-        agent.fetch_root_key().await.unwrap();
+        agent.fetch_root_key().await?;
     }
-    agent
+    Ok(agent)
 }
 
 fn validate_first_message(
@@ -200,18 +204,17 @@ pub async fn ws_open(
     content: Vec<u8>,
     sig: Vec<u8>,
 ) -> CanisterWsOpenResult {
-    let args = candid::encode_args((CanisterWsOpenArguments { msg: content, sig },)).unwrap();
+    let args = candid::encode_args((CanisterWsOpenArguments { msg: content, sig },))
+        .map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_open")
         .with_arg(args)
         .call_and_wait()
         .await
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsOpenResult)
-        .map_err(|e| e.to_string())
-        .unwrap()
+    Decode!(&res, CanisterWsOpenResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_close(
@@ -219,18 +222,17 @@ pub async fn ws_close(
     canister_id: &Principal,
     client_key: ClientPublicKey,
 ) -> CanisterWsCloseResult {
-    let args = candid::encode_args((CanisterWsCloseArguments { client_key },)).unwrap();
+    let args = candid::encode_args((CanisterWsCloseArguments { client_key },))
+        .map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_close")
         .with_arg(args)
         .call_and_wait()
         .await
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsCloseResult)
-        .map_err(|e| e.to_string())
-        .unwrap()
+    Decode!(&res, CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_message(
@@ -238,18 +240,17 @@ pub async fn ws_message(
     canister_id: &Principal,
     msg: CanisterIncomingMessage,
 ) -> CanisterWsMessageResult {
-    let args = candid::encode_args((CanisterWsMessageArguments { msg },)).unwrap();
+    let args =
+        candid::encode_args((CanisterWsMessageArguments { msg },)).map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_message")
         .with_arg(args)
         .call_and_wait()
         .await
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsMessageResult)
-        .map_err(|e| e.to_string())
-        .unwrap()
+    Decode!(&res, CanisterWsMessageResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_get_messages(
@@ -258,17 +259,14 @@ pub async fn ws_get_messages(
     nonce: u64,
 ) -> CanisterWsGetMessagesResult {
     let args = candid::encode_args((CanisterWsGetMessagesArguments { nonce },))
-        .map_err(|e| e.to_string())
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
     let res = agent
         .query(canister_id, "ws_get_messages")
         .with_arg(&args)
         .call()
         .await
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsGetMessagesResult)
-        .map_err(|e| e.to_string())
-        .unwrap()
+    Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| e.to_string())?
 }
