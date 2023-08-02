@@ -6,10 +6,12 @@ services:
         image: ic-websocket-gateway
         container_name: ic-websocket-gateway
         restart: unless-stopped
+        ports:
+            - ${LISTEN_PORT}:443
         command:
             [
                 "--gateway-address",
-                "0.0.0.0:${LISTEN_PORT}",
+                "0.0.0.0:443",
                 "--subnet-url",
                 "${IC_URL}",
                 "--polling-interval",
