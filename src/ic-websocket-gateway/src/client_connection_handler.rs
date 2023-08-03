@@ -101,6 +101,7 @@ impl WsConnectionsHandler {
                             client_connection_handler
                                 .handle_stream(stream)
                                 .await;
+                            info!("Terminated client connection handler task");
                         }
                         .instrument(span),
                     );
@@ -193,7 +194,7 @@ impl ClientConnectionHandler {
                                                     ).await;
                                                 }
                                                 else {
-                                                    warn!("Terminated client connection handler task");
+                                                    warn!("Preventing client connection handler task to establish new WS connection");
                                                     break;
                                                 }
                                             },

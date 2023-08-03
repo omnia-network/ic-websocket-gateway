@@ -164,11 +164,7 @@ impl GatewayServer {
                 Some(termination_info) = poller_channel_for_completion_rx.recv() => {
                     match termination_info {
                         TerminationInfo::LastClientDisconnected(canister_id) => self.state.remove_poller_data(&canister_id),
-                        TerminationInfo::CdkError(canister_id) => {
-                            // TODO: terminate connection handler task of each client connected to the canister
-                            //       and client data from gateway state
-                            self.state.remove_poller_data(&canister_id)
-                        }
+                        TerminationInfo::CdkError(canister_id) => self.handle_failed_poller(&canister_id).await,
                     }
                 },
                 // detect ctrl_c signal from the OS
@@ -177,6 +173,13 @@ impl GatewayServer {
         }
         self.graceful_shutdown(poller_channel_for_completion_rx)
             .await;
+    }
+
+    async fn handle_failed_poller(&mut self, canister_id: &Principal) {
+        let _clients_of_canister = self.state.client_session_map.remove(canister_id);
+        error!("Removed all client data for canister");
+        // TODO: terminate connection handler task of each client connected to the canister
+        self.state.remove_poller_data(&canister_id);
     }
 
     #[tracing::instrument(name = "graceful_shutdown", skip_all)]
@@ -195,6 +198,7 @@ impl GatewayServer {
             }
             // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
             //       the rx returns None when the all the txs are dropped and we can break then
+            //       alternatively, we could count the number of tasks in the same way we counted the number of returns of ws_close
             if self.state.count_connected_clients() == 0 {
                 warn!("All clients data has been removed from the gateway state");
                 break;
@@ -213,8 +217,6 @@ impl GatewayServer {
         }
         // needed to make sure that all ws_close are executed before shutting down
         while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
-
-        warn!("Terminated state manager");
     }
 
     pub async fn recv_from_client_connection_handler(&mut self) -> Option<WsConnectionState> {
