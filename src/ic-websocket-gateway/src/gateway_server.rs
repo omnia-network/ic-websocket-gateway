@@ -5,7 +5,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
 };
 use tokio::{
     select, signal,
@@ -179,42 +178,35 @@ impl GatewayServer {
     ) {
         warn!("Starting graceful shutdown");
         self.token.cancel();
-        let mut clients_state_cleaned = false;
-        let mut pollers_state_cleaned = false;
         loop {
-            select! {
-                Some(WsConnectionState::ConnectionClosed(client_id)) = self.recv_from_client_connection_handler(), if !clients_state_cleaned => {
-                    // cleanup client's session from WS Gateway state
-                    self.state.remove_client(client_id, &self.agent).await;
-                    // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
-                    //       the rx returns None when the all the txs are dropped and we can break then
-                    if self.state.count_connected_clients() == 0 {
-                        warn!("All clients data has been removed from the gateway state");
-                        clients_state_cleaned = true;
-                    }
-                }
-                Some(canister_id) = poller_channel_for_completion_rx.recv(), if !pollers_state_cleaned => {
-                    self.state.remove_poller_data(&canister_id);
-                    if self.state.count_connected_pollers() == 0 {
-                        warn!("All pollers data has been removed from the gateway state");
-                        pollers_state_cleaned = true;
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    if ((clients_state_cleaned && pollers_state_cleaned)
-                        // needed to shutdown in case no client is connected
-                        || (self.state.count_connected_clients() == 0 && self.state.count_connected_pollers() == 0))
-                        // needed to make sure that all ws_close are executed before shutting down
-                        && CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) == 0 {
-                        break;
-                    }
-                }
+            if let Ok(WsConnectionState::ConnectionClosed(client_id)) =
+                self.client_connection_handler_rx.try_recv()
+            {
+                // cleanup client's session from WS Gateway state
+                self.state.remove_client(client_id, &self.agent).await;
+            }
+            // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
+            //       the rx returns None when the all the txs are dropped and we can break then
+            if self.state.count_connected_clients() == 0 {
+                warn!("All clients data has been removed from the gateway state");
+                break;
             }
         }
+        loop {
+            if let Ok(canister_id) = poller_channel_for_completion_rx.try_recv() {
+                self.state.remove_poller_data(&canister_id);
+            }
+            if self.state.count_connected_pollers() == 0 {
+                warn!("All pollers data has been removed from the gateway state");
+                break;
+            }
+        }
+        // needed to make sure that all ws_close are executed before shutting down
+        while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
 
-        // tokio::time::sleep(Duration::from_secs(5)).await;
-        warn!("Shutting down state manager");
+        warn!("Terminated state manager");
     }
+
     pub async fn recv_from_client_connection_handler(&mut self) -> Option<WsConnectionState> {
         self.client_connection_handler_rx.recv().await
     }
