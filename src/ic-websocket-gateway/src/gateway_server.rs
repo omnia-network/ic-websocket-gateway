@@ -17,6 +17,7 @@ use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
     canister_poller::{
         CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
+        TerminationInfo,
     },
     client_connection_handler::{WsConnectionState, WsConnectionsHandler},
 };
@@ -144,8 +145,8 @@ impl GatewayServer {
         // channel used by the poller task to let the main task know that the last client disconnected
         // and so the WS Gateway can cleanup the poller task data from its state
         let (poller_channel_for_completion_tx, mut poller_channel_for_completion_rx): (
-            Sender<Principal>,
-            Receiver<Principal>,
+            Sender<TerminationInfo>,
+            Receiver<TerminationInfo>,
         ) = mpsc::channel(100);
 
         loop {
@@ -160,8 +161,15 @@ impl GatewayServer {
 
                 }
                 // check if a poller task has terminated
-                Some(canister_id) = poller_channel_for_completion_rx.recv() => {
-                    self.state.remove_poller_data(&canister_id);
+                Some(termination_info) = poller_channel_for_completion_rx.recv() => {
+                    match termination_info {
+                        TerminationInfo::LastClientDisconnected(canister_id) => self.state.remove_poller_data(&canister_id),
+                        TerminationInfo::CdkError(canister_id) => {
+                            // TODO: terminate connection handler task of each client connected to the canister
+                            //       and client data from gateway state
+                            self.state.remove_poller_data(&canister_id)
+                        }
+                    }
                 },
                 // detect ctrl_c signal from the OS
                 _ = signal::ctrl_c() => break
@@ -174,7 +182,7 @@ impl GatewayServer {
     #[tracing::instrument(name = "graceful_shutdown", skip_all)]
     async fn graceful_shutdown(
         &mut self,
-        mut poller_channel_for_completion_rx: Receiver<Principal>,
+        mut poller_channel_for_completion_rx: Receiver<TerminationInfo>,
     ) {
         warn!("Starting graceful shutdown");
         self.token.cancel();
@@ -193,7 +201,9 @@ impl GatewayServer {
             }
         }
         loop {
-            if let Ok(canister_id) = poller_channel_for_completion_rx.try_recv() {
+            if let Ok(TerminationInfo::LastClientDisconnected(canister_id)) =
+                poller_channel_for_completion_rx.try_recv()
+            {
                 self.state.remove_poller_data(&canister_id);
             }
             if self.state.count_connected_pollers() == 0 {
@@ -239,7 +249,7 @@ impl GatewayState {
     async fn manage_clients_connections(
         &mut self,
         connection_state: WsConnectionState,
-        poller_channel_for_completion_tx: Sender<Principal>,
+        poller_channel_for_completion_tx: Sender<TerminationInfo>,
         polling_interval: u64,
         agent: &Arc<Agent>,
     ) {

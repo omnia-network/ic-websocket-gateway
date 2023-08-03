@@ -28,13 +28,13 @@ pub struct CertifiedMessage {
 #[derive(Debug)]
 pub struct PollerChannelsPollerEnds {
     main_to_poller: Receiver<PollerToClientChannelData>,
-    poller_to_main: Sender<Principal>,
+    poller_to_main: Sender<TerminationInfo>,
 }
 
 impl PollerChannelsPollerEnds {
     pub fn new(
         main_to_poller: Receiver<PollerToClientChannelData>,
-        poller_to_main: Sender<Principal>,
+        poller_to_main: Sender<TerminationInfo>,
     ) -> Self {
         Self {
             main_to_poller,
@@ -43,13 +43,21 @@ impl PollerChannelsPollerEnds {
     }
 }
 
-/// contains the information that the main sends to the poller task
+/// contains the information that the main sends to the poller task:
 /// - NewClientChannel: sending side of the channel use by the poller to send messages to the client
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
     NewClientChannel(ClientPublicKey, Sender<CertifiedMessage>),
     ClientDisconnected(ClientPublicKey),
+}
+
+/// determines the reason of the poller task termination:
+/// - LastClientDisconnected: last client disconnected and therefore there is no need to continue polling
+/// - CdkError: error while polling the canister
+pub enum TerminationInfo {
+    LastClientDisconnected(Principal),
+    CdkError(Principal),
 }
 
 pub struct CanisterPoller {
@@ -87,7 +95,7 @@ impl CanisterPoller {
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
 
-        loop {
+        'poller_loop: loop {
             select! {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
@@ -102,7 +110,7 @@ impl CanisterPoller {
                             info!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
-                                signal_poller_task_termination(&mut poller_channels.poller_to_main, self.canister_id).await;
+                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
                                 info!("Terminating poller task as no clients are connected");
                                 break;
                             }
@@ -133,8 +141,10 @@ impl CanisterPoller {
 
                         match get_nonce_from_message(encoded_message.key) {
                             Ok(last_nonce) => nonce = last_nonce + 1,
-                            Err(_e) => {
-                                panic!("TODO: graceful shutdown of poller task and related clients disconnection");
+                            Err(e) => {
+                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
+                                error!("Terminating poller task due to CDK error: {}", e);
+                                break 'poller_loop;
                             }
                         }
                     }
@@ -171,8 +181,11 @@ fn get_nonce_from_message(key: String) -> Result<u64, String> {
     ))
 }
 
-async fn signal_poller_task_termination(channel: &mut Sender<Principal>, canister_id: Principal) {
-    if let Err(e) = channel.send(canister_id).await {
+async fn signal_poller_task_termination(
+    channel: &mut Sender<TerminationInfo>,
+    info: TerminationInfo,
+) {
+    if let Err(e) = channel.send(info).await {
         error!(
             "Receiver has been dropped on the pollers connection manager's side. Error: {:?}",
             e
