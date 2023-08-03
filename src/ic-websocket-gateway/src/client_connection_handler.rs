@@ -16,6 +16,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message},
     WebSocketStream,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Instrument, Level};
 
 use crate::{
@@ -104,54 +105,70 @@ impl WsConnectionsHandler {
         }
     }
 
-    pub async fn listen_for_incoming_requests(&mut self) {
-        while let Ok((stream, client_addr)) = self.listener.accept().await {
-            let stream = match self.tls_acceptor {
-                Some(ref acceptor) => {
-                    let tls_stream = acceptor.accept(stream).await;
-                    match tls_stream {
-                        Ok(tls_stream) => {
-                            debug!("TLS handshake successful");
-                            CustomTcpStream::TcpWithTls(tls_stream)
+    pub async fn listen_for_incoming_requests(&mut self, parent_token: CancellationToken) {
+        // needed to ensure that we stop listening for incoming requests before we start shutting down the connections
+        let child_token = CancellationToken::new();
+        loop {
+            select! {
+                Ok((stream, client_addr)) = self.listener.accept(), if !parent_token.is_cancelled() => {
+                    let stream = match self.tls_acceptor {
+                        Some(ref acceptor) => {
+                            let tls_stream = acceptor.accept(stream).await;
+                            match tls_stream {
+                                Ok(tls_stream) => {
+                                    debug!("TLS handshake successful");
+                                    CustomTcpStream::TcpWithTls(tls_stream)
+                                },
+                                Err(e) => {
+                                    error!("TLS handshake failed: {:?}", e);
+                                    continue;
+                                },
+                            }
                         },
-                        Err(e) => {
-                            error!("TLS handshake failed: {:?}", e);
-                            continue;
-                        },
-                    }
-                },
-                None => CustomTcpStream::Tcp(stream),
-            };
-            let agent_cl = Arc::clone(&self.agent);
-            let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
-            // spawn a connection handler task for each incoming client connection
-            let current_client_id = self.next_client_id;
-            let span = span!(
-                Level::INFO,
-                "handle_client_connection",
-                client_addr = ?client_addr,
-                client_id = current_client_id
-            );
-            tokio::spawn(
-                async move {
-                    let client_connection_handler = ClientConnectionHandler::new(
-                        current_client_id,
-                        agent_cl,
-                        client_connection_handler_tx_cl,
+                        None => CustomTcpStream::Tcp(stream),
+                    };
+                    let agent_cl = Arc::clone(&self.agent);
+                    let client_connection_handler_tx_cl = self.client_connection_handler_tx.clone();
+                    // spawn a connection handler task for each incoming client connection
+                    let current_client_id = self.next_client_id;
+                    let span = span!(
+                        Level::INFO,
+                        "handle_client_connection",
+                        client_addr = ?client_addr,
+                        client_id = current_client_id
                     );
-                    info!("Spawned new connection handler");
-                    match stream {
-                        CustomTcpStream::Tcp(stream) => {
-                            client_connection_handler.handle_stream(stream).await
-                        },
-                        CustomTcpStream::TcpWithTls(stream) => {
-                            client_connection_handler.handle_stream(stream).await
-                        },
-                    }
+
+                    let child_token_cl = child_token.clone();
+                    tokio::spawn(
+                        async move {
+                            let client_connection_handler = ClientConnectionHandler::new(
+                                current_client_id,
+                                agent_cl,
+                                client_connection_handler_tx_cl,
+                                child_token_cl
+                            );
+                            info!("Spawned new connection handler");
+                            match stream {
+                                CustomTcpStream::Tcp(stream) => {
+                                    client_connection_handler.handle_stream(stream).await
+                                },
+                                CustomTcpStream::TcpWithTls(stream) => {
+                                    client_connection_handler.handle_stream(stream).await
+                                },
+                            }
+                            info!("Terminated client connection handler task");
+                        }
+                        .instrument(span),
+                    );
+                    self.next_client_id += 1;
+                },
+                _ = parent_token.cancelled() => {
+                    child_token.cancel();
+                    warn!("Stopped listening for incoming requests");
+                    break;
                 }
-                .instrument(span),
-            );
-            self.next_client_id += 1;
+
+            }
         }
     }
 }
@@ -160,17 +177,20 @@ struct ClientConnectionHandler {
     id: u64,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
+    token: CancellationToken,
 }
 impl ClientConnectionHandler {
     pub fn new(
         id: u64,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
+        token: CancellationToken,
     ) -> Self {
         Self {
             id,
             agent,
             client_connection_handler_tx,
+            token,
         }
     }
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
@@ -181,10 +201,12 @@ impl ClientConnectionHandler {
                 let mut is_first_message = true;
                 // create channel which will be used to send messages from the canister poller directly to this client
                 let (message_for_client_tx, mut message_for_client_rx) = mpsc::channel(100);
+                let (terminate_client_handler_tx, mut terminate_client_handler_rx) =
+                    mpsc::channel(1);
                 loop {
                     select! {
                         // wait for incoming message from client
-                        msg_res = ws_read.try_next() => {
+                        msg_res = ws_read.try_next(), if !self.token.is_cancelled() => {
                             match msg_res {
                                 Ok(Some(message)) => {
                                     // check if the WebSocket connection is closed
@@ -206,25 +228,34 @@ impl ClientConnectionHandler {
                                                 // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                                                 nonce,
                                             }) => {
-                                                info!("Client established IC WebSocket connection");
-                                                // let the client know that the IC WS connection is setup correctly
-                                                send_ws_message_to_client(&mut ws_write, Message::Text("1".to_string())).await;
+                                                // prevent adding a new client to the gateway state while shutting down
+                                                if !self.token.is_cancelled() {
+                                                    info!("Client established IC WebSocket connection");
+                                                    // let the client know that the IC WS connection is setup correctly
+                                                    send_ws_message_to_client(&mut ws_write, Message::Text("1".to_string())).await;
 
-                                                // create a new sender side of the channel which will be used to send canister messages
-                                                // from the poller task directly to the client's connection handler task
-                                                let message_for_client_tx_cl = message_for_client_tx.clone();
-                                                // instantiate a new GatewaySession and send it to the main thread
-                                                self.send_connection_state_to_clients_manager(
-                                                    WsConnectionState::ConnectionEstablished(
-                                                        GatewaySession::new(
-                                                            self.id,
-                                                            client_key,
-                                                            canister_id,
-                                                            message_for_client_tx_cl,
-                                                            nonce,
-                                                        ),
-                                                    )
-                                                ).await;
+                                                    // create a new sender side of the channel which will be used to send canister messages
+                                                    // from the poller task directly to the client's connection handler task
+                                                    let message_for_client_tx_cl = message_for_client_tx.clone();
+                                                    let terminate_client_handler_tx_cl = terminate_client_handler_tx.clone();
+                                                    // instantiate a new GatewaySession and send it to the main thread
+                                                    self.send_connection_state_to_clients_manager(
+                                                        WsConnectionState::ConnectionEstablished(
+                                                            GatewaySession::new(
+                                                                self.id,
+                                                                client_key,
+                                                                canister_id,
+                                                                message_for_client_tx_cl,
+                                                                terminate_client_handler_tx_cl,
+                                                                nonce,
+                                                            ),
+                                                        )
+                                                    ).await;
+                                                }
+                                                else {
+                                                    warn!("Preventing client connection handler task to establish new WS connection");
+                                                    break;
+                                                }
                                             },
                                             Err(e) => {
                                                 info!("Client did not follow IC WebSocket establishment protocol: {:?}", e);
@@ -283,10 +314,25 @@ impl ClientConnectionHandler {
                                 },
                                 Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
                             }
+                        },
+                        _ = self.token.cancelled() => {
+                            self.send_connection_state_to_clients_manager(
+                                WsConnectionState::ConnectionClosed(self.id)
+                            )
+                            .await;
+                            // close the WebSocket connection
+                            ws_write.close().await.unwrap();
+                            warn!("Terminating client connection handler task");
+                            break;
+                        },
+                        _ = terminate_client_handler_rx.recv() => {
+                            // close the WebSocket connection
+                            ws_write.close().await.unwrap();
+                            error!("Terminating client connection handler task due to CDK error");
+                            break;
                         }
                     }
                 }
-                info!("Terminating client connection handler task");
             },
             // no cleanup needed on the WS Gateway has the client's session has never been created
             Err(e) => {

@@ -1,6 +1,6 @@
 use gateway_server::GatewayServer;
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter, prelude::*};
 
@@ -55,8 +55,11 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
     let debug_log_file = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_file)
-        .with_thread_ids(true);
-    let debug_log_stdout = tracing_subscriber::fmt::layer().with_writer(non_blocking_stdout);
+        .with_thread_ids(true)
+        .pretty();
+    let debug_log_stdout = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking_stdout)
+        .pretty();
     tracing_subscriber::registry()
         .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
         .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO))
@@ -108,6 +111,7 @@ async fn main() -> Result<(), String> {
     gateway_server
         .manage_state(deployment_info.polling_interval)
         .await;
+    warn!("Terminated state manager");
 
     Ok(())
 }
