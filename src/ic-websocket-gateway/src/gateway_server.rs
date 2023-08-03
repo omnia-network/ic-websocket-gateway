@@ -230,11 +230,12 @@ struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
     connected_canisters: HashMap<Principal, Sender<PollerToClientChannelData>>,
     /// maps the client's public key to the state of the client's session
-    client_session_map: HashMap<ClientPublicKey, GatewaySession>,
-    /// maps the client id to its public key
+    /// clients are grouped by the principal of the canister they are connected to
+    client_session_map: HashMap<Principal, HashMap<ClientPublicKey, GatewaySession>>,
+    /// maps the client id to a tuple containing its public key and the principal of the canister it's connected to
     // needed because when a client disconnects, we only know its id but in order to clean the state of the client's session
     // we need to know the public key of the client
-    client_key_map: HashMap<u64, ClientPublicKey>,
+    client_info_map: HashMap<u64, (ClientPublicKey, Principal)>,
 }
 
 impl GatewayState {
@@ -242,7 +243,7 @@ impl GatewayState {
         Self {
             connected_canisters: HashMap::default(),
             client_session_map: HashMap::default(),
-            client_key_map: HashMap::default(),
+            client_info_map: HashMap::default(),
         }
     }
 
@@ -372,9 +373,18 @@ impl GatewayState {
     fn add_client(&mut self, gateway_session: GatewaySession) {
         let client_key = gateway_session.client_key.clone();
         let client_id = gateway_session.client_id.clone();
+        let canister_id = gateway_session.canister_id.clone();
 
-        self.client_key_map.insert(client_id, client_key.clone());
-        self.client_session_map.insert(client_key, gateway_session);
+        if let Some(clients_of_canister) = self.client_session_map.get_mut(&canister_id) {
+            clients_of_canister.insert(client_key.clone(), gateway_session);
+        } else {
+            let mut client_of_new_canister = HashMap::new();
+            client_of_new_canister.insert(client_key.clone(), gateway_session);
+            self.client_session_map
+                .insert(canister_id, client_of_new_canister);
+        }
+        self.client_info_map
+            .insert(client_id, (client_key, canister_id));
         CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         info!("Client added to gateway state");
     }
@@ -382,13 +392,14 @@ impl GatewayState {
     async fn remove_client(&mut self, client_id: u64, agent: &Agent) {
         let span = span!(Level::INFO, "manage_clients_state", client_id = client_id);
         let _guard = span.enter();
-        match self.client_key_map.remove(&client_id) {
-            Some(client_key) => {
+        match self.client_info_map.remove(&client_id) {
+            Some((client_key, canister_id)) => {
                 let gateway_session = self
                     .client_session_map
-                    .remove(&client_key.clone())
+                    .get_mut(&canister_id)
+                    .and_then(|clients_of_canister| clients_of_canister.remove(&client_key))
                     // TODO: this error should never happen but must still be handled
-                    .expect("gateway session must be registered");
+                    .expect("clients of canister must be registered");
                 info!("Client removed from gateway state");
 
                 let agent_cl = agent.clone();
@@ -438,7 +449,7 @@ impl GatewayState {
     }
 
     fn count_connected_clients(&self) -> usize {
-        self.client_key_map.len()
+        self.client_info_map.len()
     }
 
     #[tracing::instrument(
