@@ -26,7 +26,18 @@ Make sure you have the **Rust toolchain** installed. You can find instructions [
 
     This is the principal that the gateway uses to interact with the canister IC WebSocket CDK.
 
-3. Copy the gateway principal as you will need initialize the canister CDK in order for the canister to authenticate the gateway. How to do this is explained [here](https://github.com/omnia-network/ic_websocket_example#running-the-project-locally)
+3. Copy the gateway principal as you will need it to initialize the canister CDK, so that the canister can authenticate the gateway. How to do this is explained in the [ic_websocket_example](https://github.com/omnia-network/ic_websocket_example#running-the-project-locally) README.
+
+### Options available
+
+There are some command line arguments that you can set when running the gateway:
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
+| `--subnet-url` | The URL of the IC subnet to which the gateway will connect. | `http://127.0.0.1:4943` |
+| `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
+| `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
+| `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 
 ## Docker
 
