@@ -1,5 +1,5 @@
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select, signal,
     sync::mpsc::{self, Receiver, Sender},
@@ -157,10 +157,10 @@ impl GatewayServer {
                     warn!("Starting graceful shutdown");
                     self.token.cancel();
                     let mut clients_state_cleaned = false;
-                    let mut pollers_state_clean = false;
+                    let mut pollers_state_cleaned = false;
                     loop {
                         select! {
-                            Some(WsConnectionState::ConnectionClosed(client_id)) = self.recv_from_client_connection_handler() => {
+                            Some(WsConnectionState::ConnectionClosed(client_id)) = self.recv_from_client_connection_handler(), if !clients_state_cleaned => {
                                 // cleanup client's session from WS Gateway state
                                 self.state.remove_client(client_id, &self.agent).await;
                                 // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
@@ -170,18 +170,20 @@ impl GatewayServer {
                                     clients_state_cleaned = true;
                                 }
                             }
-                            Some(canister_id) = poller_channel_for_completion_rx.recv() => {
+                            Some(canister_id) = poller_channel_for_completion_rx.recv(), if !pollers_state_cleaned => {
                                 self.state.remove_poller_data(&canister_id);
-                                // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
-                                //       the rx returns None when the all the txs are dropped and we can break then
                                 if self.state.count_connected_pollers() == 0 {
                                     warn!("All pollers data has been removed from the gateway state");
-                                    pollers_state_clean = true;
+                                    pollers_state_cleaned = true;
                                 }
                             }
-                        }
-                        if clients_state_cleaned && pollers_state_clean {
-                            break;
+                            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                                if (clients_state_cleaned && pollers_state_cleaned)
+                                    // needed to shutdown in case no client is connected
+                                    || (self.state.count_connected_clients() == 0 && self.state.count_connected_pollers() == 0) {
+                                    break;
+                                }
+                            }
                         }
                     }
 
