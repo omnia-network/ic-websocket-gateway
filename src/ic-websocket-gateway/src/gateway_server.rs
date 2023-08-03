@@ -11,7 +11,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, span, warn, Instrument, Level};
+use tracing::{error, info, span, warn, Level};
 
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
@@ -35,6 +35,7 @@ pub struct GatewaySession {
     client_key: ClientPublicKey,
     canister_id: Principal,
     message_for_client_tx: Sender<CertifiedMessage>,
+    terminate_client_handler_tx: Sender<bool>,
     nonce: u64,
 }
 
@@ -47,6 +48,7 @@ pub struct GatewaySession {
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<CertifiedMessage>,
+    pub terminate_client_handler_tx: Sender<bool>,
     pub nonce: u64,
 }
 
@@ -56,6 +58,7 @@ impl GatewaySession {
         client_key: Vec<u8>,
         canister_id: Principal,
         message_for_client_tx: Sender<CertifiedMessage>,
+        terminate_client_handler_tx: Sender<bool>,
         nonce: u64,
     ) -> Self {
         Self {
@@ -63,6 +66,7 @@ impl GatewaySession {
             client_key,
             canister_id,
             message_for_client_tx,
+            terminate_client_handler_tx,
             nonce,
         }
     }
@@ -157,7 +161,7 @@ impl GatewayServer {
                     // - the GatewaySession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
-                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, &self.agent).await;
+                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, self.agent.clone()).await;
 
                 }
                 // check if a poller task has terminated
@@ -175,10 +179,37 @@ impl GatewayServer {
             .await;
     }
 
+    #[tracing::instrument(name = "manage_pollers_state", skip(self)
+        fields(
+            canister_id = %canister_id
+        )
+    )]
     async fn handle_failed_poller(&mut self, canister_id: &Principal) {
-        let _clients_of_canister = self.state.client_session_map.remove(canister_id);
+        let clients_of_canister = self
+            .state
+            .client_session_map
+            .remove(canister_id)
+            .expect("clients of canister must be registered");
+        // terminate connection handler task of each client connected to the canister,
+        // cleanup client data from gateway state
+        // and close client connection on CDK
+        for gateway_session in clients_of_canister.values() {
+            self.state
+                .client_info_map
+                .remove(&gateway_session.client_id);
+            gateway_session
+                .terminate_client_handler_tx
+                .send(true)
+                .await
+                .unwrap();
+
+            call_ws_close_in_background(
+                self.agent.clone(),
+                gateway_session.canister_id.clone(),
+                gateway_session.client_key.clone(),
+            );
+        }
         error!("Removed all client data for canister");
-        // TODO: terminate connection handler task of each client connected to the canister
         self.state.remove_poller_data(&canister_id);
     }
 
@@ -194,7 +225,9 @@ impl GatewayServer {
                 self.client_connection_handler_rx.try_recv()
             {
                 // cleanup client's session from WS Gateway state
-                self.state.remove_client(client_id, &self.agent).await;
+                self.state
+                    .remove_client(client_id, self.agent.clone())
+                    .await;
             }
             // TODO: drop all the tx sides of the channel so that we do not have to check the connected clients every time
             //       the rx returns None when the all the txs are dropped and we can break then
@@ -254,7 +287,7 @@ impl GatewayState {
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
         polling_interval: u64,
-        agent: &Arc<Agent>,
+        agent: Arc<Agent>,
     ) {
         match connection_state {
             WsConnectionState::ConnectionEstablished(gateway_session) => {
@@ -308,7 +341,7 @@ impl GatewayState {
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
                     );
-                    let agent = Arc::clone(agent);
+                    let agent = Arc::clone(&agent);
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
@@ -340,7 +373,7 @@ impl GatewayState {
                 }
 
                 // notify canister that it can now send messages for the client corresponding to client_key
-                let agent = Arc::clone(agent);
+                let agent = Arc::clone(&agent);
                 tokio::spawn(async move {
                     let gateway_message =
                         CanisterIncomingMessage::IcWebSocketEstablished(client_key);
@@ -354,7 +387,7 @@ impl GatewayState {
             },
             WsConnectionState::ConnectionClosed(client_id) => {
                 // cleanup client's session from WS Gateway state
-                self.remove_client(client_id, &agent).await;
+                self.remove_client(client_id, agent).await;
             },
             WsConnectionState::ConnectionError(e) => {
                 let _entered = span!(Level::INFO, "ws_connection_error").entered();
@@ -391,9 +424,12 @@ impl GatewayState {
         info!("Client added to gateway state");
     }
 
-    async fn remove_client(&mut self, client_id: u64, agent: &Agent) {
-        let span = span!(Level::INFO, "manage_clients_state", client_id = client_id);
-        let _guard = span.enter();
+    #[tracing::instrument(name = "manage_clients_state", skip_all,
+        fields(
+            client_id = client_id
+        )
+    )]
+    async fn remove_client(&mut self, client_id: u64, agent: Arc<Agent>) {
         match self.client_info_map.remove(&client_id) {
             Some((client_key, canister_id)) => {
                 let gateway_session = self
@@ -404,24 +440,10 @@ impl GatewayState {
                     .expect("clients of canister must be registered");
                 info!("Client removed from gateway state");
 
-                let agent_cl = agent.clone();
-                let canister_id_cl = gateway_session.canister_id.clone();
-                let client_key_cl = client_key.clone();
-                // close client connection on canister
-                // sending the request to the canister takes a few seconds
-                // therefore this is done in a separate task
-                // in order to not slow down the main task
-                tokio::spawn(
-                    async move {
-                        if let Err(e) =
-                            canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl)
-                                .await
-                        {
-                            error!("Calling ws_close on canister failed: {}", e);
-                        }
-                        CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
-                    }
-                    .instrument(span.clone()),
+                call_ws_close_in_background(
+                    agent.clone(),
+                    gateway_session.canister_id.clone(),
+                    gateway_session.client_key.clone(),
                 );
 
                 // remove client's channel from poller, if it exists and is not finished
@@ -494,4 +516,22 @@ impl GatewayState {
     fn count_connected_pollers(&self) -> usize {
         self.connected_canisters.len()
     }
+}
+
+fn call_ws_close_in_background(
+    agent_cl: Arc<Agent>,
+    canister_id_cl: Principal,
+    client_key_cl: Vec<u8>,
+) {
+    // close client connection on canister
+    // sending the request to the canister takes a few seconds
+    // therefore this is done in a separate task
+    // in order to not slow down the main task
+    tokio::spawn(async move {
+        if let Err(e) = canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
+        {
+            error!("Calling ws_close on canister failed: {}", e);
+        }
+        CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
+    });
 }

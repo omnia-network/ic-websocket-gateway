@@ -146,6 +146,8 @@ impl ClientConnectionHandler {
                 let mut is_first_message = true;
                 // create channel which will be used to send messages from the canister poller directly to this client
                 let (message_for_client_tx, mut message_for_client_rx) = mpsc::channel(100);
+                let (terminate_client_handler_tx, mut terminate_client_handler_rx) =
+                    mpsc::channel(1);
                 loop {
                     select! {
                         // wait for incoming message from client
@@ -180,6 +182,7 @@ impl ClientConnectionHandler {
                                                     // create a new sender side of the channel which will be used to send canister messages
                                                     // from the poller task directly to the client's connection handler task
                                                     let message_for_client_tx_cl = message_for_client_tx.clone();
+                                                    let terminate_client_handler_tx_cl = terminate_client_handler_tx.clone();
                                                     // instantiate a new GatewaySession and send it to the main thread
                                                     self.send_connection_state_to_clients_manager(
                                                         WsConnectionState::ConnectionEstablished(
@@ -188,6 +191,7 @@ impl ClientConnectionHandler {
                                                                 client_key,
                                                                 canister_id,
                                                                 message_for_client_tx_cl,
+                                                                terminate_client_handler_tx_cl,
                                                                 nonce,
                                                             ),
                                                         )
@@ -263,12 +267,17 @@ impl ClientConnectionHandler {
                             .await;
                             // close the WebSocket connection
                             ws_write.close().await.unwrap();
-                            warn!("Terminated client connection handler task");
+                            warn!("Terminating client connection handler task");
+                            break;
+                        },
+                        _ = terminate_client_handler_rx.recv() => {
+                            // close the WebSocket connection
+                            ws_write.close().await.unwrap();
+                            error!("Terminating client connection handler task due to CDK error");
                             break;
                         }
                     }
                 }
-                info!("Terminating client connection handler task");
             },
             // no cleanup needed on the WS Gateway has the client's session has never been created
             Err(e) => {
