@@ -6,6 +6,8 @@ use ic_websocket_cdk::{
     ws_send, ClientPublicKey, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
 
+use crate::CLIENTS_CONNECTED;
+
 pub const GATEWAY_PRINCIPAL: &str =
     "sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae";
 
@@ -18,6 +20,13 @@ pub struct AppMessage {
 }
 
 pub fn on_open(args: OnOpenCallbackArgs) {
+    // add client to the list of connected clients
+    CLIENTS_CONNECTED.with(|clients_connected| {
+        clients_connected.borrow_mut().insert(args.client_key.clone(), ());
+
+        print(format!("[on_open] # clients connected: {}", clients_connected.borrow().len()));
+    });
+
     let msg = AppMessage {
         text: String::from("ping"),
         timestamp: time(),
@@ -31,17 +40,22 @@ pub fn on_message(args: OnMessageCallbackArgs) {
         text: app_msg.clone().text + " ping",
         timestamp: time(),
     };
-    print(format!("Received message: {:?}", app_msg));
+    print(format!("[on_message] Received message"));
     send_app_message(args.client_key, new_msg)
 }
 
 fn send_app_message(client_key: ClientPublicKey, msg: AppMessage) {
-    print(format!("Sending message: {:?}", msg));
+    print(format!("Sending message"));
     if let Err(e) = ws_send(client_key, msg) {
-        println!("Could not send message: {}", e);
+        print(format!("Could not send message: {}", e));
     }
 }
 
 pub fn on_close(args: OnCloseCallbackArgs) {
-    print(format!("Client {:?} disconnected", args.client_key));
+    // remove client from the list of connected clients
+    CLIENTS_CONNECTED.with(|clients_connected| {
+        clients_connected.borrow_mut().remove(&args.client_key);
+
+        print(format!("[on_close] # clients connected: {}", clients_connected.borrow().len()));
+    });
 }
