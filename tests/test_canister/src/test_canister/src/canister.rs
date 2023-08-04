@@ -1,4 +1,4 @@
-use ic_cdk::{export::candid::CandidType, print, api::time};
+use ic_cdk::{api::time, export::candid::CandidType, print};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 
@@ -22,9 +22,14 @@ pub struct AppMessage {
 pub fn on_open(args: OnOpenCallbackArgs) {
     // add client to the list of connected clients
     CLIENTS_CONNECTED.with(|clients_connected| {
-        clients_connected.borrow_mut().insert(args.client_key.clone(), ());
+        clients_connected
+            .borrow_mut()
+            .insert(args.client_key.clone());
 
-        print(format!("[on_open] # clients connected: {}", clients_connected.borrow().len()));
+        print(format!(
+            "[on_open] # clients connected: {}",
+            clients_connected.borrow().len()
+        ));
     });
 
     let msg = AppMessage {
@@ -56,6 +61,9 @@ pub fn on_close(args: OnCloseCallbackArgs) {
     CLIENTS_CONNECTED.with(|clients_connected| {
         clients_connected.borrow_mut().remove(&args.client_key);
 
-        print(format!("[on_close] # clients connected: {}", clients_connected.borrow().len()));
+        print(format!(
+            "[on_close] # clients connected: {}",
+            clients_connected.borrow().len()
+        ));
     });
 }

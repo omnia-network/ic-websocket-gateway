@@ -1,5 +1,5 @@
 use ic_cdk_macros::*;
-use std::{collections::HashMap, cell::RefCell};
+use std::{cell::RefCell, collections::HashSet};
 
 use canister::{on_close, on_message, on_open, AppMessage, GATEWAY_PRINCIPAL};
 use ic_websocket_cdk::{
@@ -12,7 +12,7 @@ use ic_websocket_cdk::{
 mod canister;
 
 thread_local! {
-    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashMap<ClientPublicKey, ()>> = RefCell::new(HashMap::new());
+    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPublicKey>> = RefCell::new(HashSet::new());
 }
 
 #[init]
