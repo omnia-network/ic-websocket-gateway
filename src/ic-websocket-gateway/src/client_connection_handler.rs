@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_tungstenite::{
     accept_async,
@@ -78,29 +78,30 @@ impl ClientConnectionHandler {
 
                 // channel used by the poller task to send canister messages from the directly to this client connection handler task
                 // which will then forward it to the client via the WebSocket connection
-                let (message_for_client_tx, mut message_for_client_rx) = mpsc::channel(100);
+                let (message_for_client_tx, mut message_for_client_rx): (
+                    Sender<Result<CertifiedMessage, String>>,
+                    Receiver<Result<CertifiedMessage, String>>,
+                ) = mpsc::channel(100);
 
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
                 let mut is_first_message = true;
                 loop {
                     select! {
-                        // wait for incoming message from client
-                        ws_message = ws_read.try_next() => {
-                            if let Err(e) = self.handle_incoming_ws_message(
-                                ws_message,
-                                is_first_message,
-                                &mut ws_write,
-                                message_for_client_tx.clone(),
-                            ).await {
-                                // break from the loop so that the connection handler task can terminate
-                                warn!(e);
-                                break;
-                            }
-                            else {
-                                is_first_message = false;
-                            }
-                        }
+                        // bias select! to check token cancellation first
+                        // with 'biased', async functions are polled in the order in which they appear
+                        biased;
+                        // waits for the token to be cancelled
+                        _ = &mut wait_for_cancellation => {
+                            self.send_connection_state_to_clients_manager(
+                                WsConnectionState::Closed(self.id)
+                            )
+                            .await;
+                            // close the WebSocket connection
+                            ws_write.close().await.unwrap();
+                            warn!("Terminating client connection handler task");
+                            break;
+                        },
                         // wait for canister message to send to client
                         Some(poller_message) = message_for_client_rx.recv() => {
                             match poller_message {
@@ -125,16 +126,21 @@ impl ClientConnectionHandler {
                                 }
                             }
                         },
-                        // waits for the token to be cancelled
-                        _ = &mut wait_for_cancellation => {
-                            self.send_connection_state_to_clients_manager(
-                                WsConnectionState::Closed(self.id)
-                            )
-                            .await;
-                            // close the WebSocket connection
-                            ws_write.close().await.unwrap();
-                            warn!("Terminating client connection handler task");
-                            break;
+                        // wait for incoming message from client
+                        ws_message = ws_read.try_next() => {
+                            if let Err(e) = self.handle_incoming_ws_message(
+                                ws_message,
+                                is_first_message,
+                                &mut ws_write,
+                                message_for_client_tx.clone(),
+                            ).await {
+                                // break from the loop so that the connection handler task can terminate
+                                warn!(e);
+                                break;
+                            }
+                            else {
+                                is_first_message = false;
+                            }
                         }
                     }
                 }

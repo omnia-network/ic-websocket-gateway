@@ -77,6 +77,14 @@ impl WsListener {
         tokio::pin!(wait_for_cancellation);
         loop {
             select! {
+                // bias select! to check token cancellation first
+                // with 'biased', async functions are polled in the order in which they appear
+                biased;
+                _ = &mut wait_for_cancellation => {
+                    child_token.cancel();
+                    warn!("Stopped listening for incoming requests");
+                    break;
+                },
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     let current_client_id = self.next_client_id;
                     let span = span!(
@@ -107,12 +115,6 @@ impl WsListener {
 
                     self.next_client_id += 1;
                 },
-                _ = &mut wait_for_cancellation => {
-                    child_token.cancel();
-                    warn!("Stopped listening for incoming requests");
-                    break;
-                }
-
             }
         }
     }
