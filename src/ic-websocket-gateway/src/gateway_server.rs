@@ -209,12 +209,12 @@ impl GatewayServer {
 
             call_ws_close_in_background(
                 self.agent.clone(),
-                gateway_session.canister_id.clone(),
+                gateway_session.canister_id,
                 gateway_session.client_key.clone(),
             );
         }
         error!("Removed all client data for canister");
-        self.state.remove_poller_data(&canister_id);
+        self.state.remove_poller_data(canister_id);
     }
 
     #[tracing::instrument(name = "graceful_shutdown", skip_all)]
@@ -225,7 +225,7 @@ impl GatewayServer {
         warn!("Starting graceful shutdown");
         self.token.cancel();
         loop {
-            if let Ok(WsConnectionState::ConnectionClosed(client_id)) =
+            if let Ok(WsConnectionState::Closed(client_id)) =
                 self.client_connection_handler_rx.try_recv()
             {
                 // cleanup client's session from WS Gateway state
@@ -294,9 +294,9 @@ impl GatewayState {
         agent: Arc<Agent>,
     ) {
         match connection_state {
-            WsConnectionState::ConnectionEstablished(gateway_session) => {
+            WsConnectionState::Established(gateway_session) => {
                 let client_key = gateway_session.client_key.clone();
-                let canister_id = gateway_session.canister_id.clone();
+                let canister_id = gateway_session.canister_id;
 
                 // add client's session state to the WS Gateway state
                 self.add_client(gateway_session.clone());
@@ -349,7 +349,7 @@ impl GatewayState {
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(canister_id.clone(), agent);
+                        let poller = CanisterPoller::new(canister_id, agent);
                         // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
                         // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                         // the new poller thread should not get those same messages again
@@ -389,11 +389,11 @@ impl GatewayState {
                     }
                 });
             },
-            WsConnectionState::ConnectionClosed(client_id) => {
+            WsConnectionState::Closed(client_id) => {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            WsConnectionState::ConnectionError(e) => {
+            WsConnectionState::Error(e) => {
                 let _entered = span!(Level::INFO, "ws_connection_error").entered();
                 error!("Connection handler terminated with an error: {:?}", e);
                 // TODO: make sure that cleaning up is not needed
@@ -411,8 +411,8 @@ impl GatewayState {
     )]
     fn add_client(&mut self, gateway_session: GatewaySession) {
         let client_key = gateway_session.client_key.clone();
-        let client_id = gateway_session.client_id.clone();
-        let canister_id = gateway_session.canister_id.clone();
+        let client_id = gateway_session.client_id;
+        let canister_id = gateway_session.canister_id;
 
         if let Some(clients_of_canister) = self.client_session_map.get_mut(&canister_id) {
             clients_of_canister.insert(client_key.clone(), gateway_session);
@@ -446,28 +446,25 @@ impl GatewayState {
 
                 call_ws_close_in_background(
                     agent.clone(),
-                    gateway_session.canister_id.clone(),
+                    gateway_session.canister_id,
                     gateway_session.client_key.clone(),
                 );
 
                 // remove client's channel from poller, if it exists and is not finished
-                match self
+                if let Some(poller_channel_for_client_channel_sender_tx) = self
                     .connected_canisters
                     .get_mut(&gateway_session.canister_id)
                 {
-                    Some(poller_channel_for_client_channel_sender_tx) => {
-                        // try sending message to poller task
-                        if poller_channel_for_client_channel_sender_tx
-                            .send(PollerToClientChannelData::ClientDisconnected(client_key))
-                            .await
-                            .is_err()
-                        {
-                            // if poller task is finished, remove its data from WS Gateway state
-                            warn!("Poller task closed but data is still in state");
-                            self.remove_poller_data(&gateway_session.canister_id)
-                        }
-                    },
-                    None => (),
+                    // try sending message to poller task
+                    if poller_channel_for_client_channel_sender_tx
+                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .await
+                        .is_err()
+                    {
+                        // if poller task is finished, remove its data from WS Gateway state
+                        warn!("Poller task closed but data is still in state");
+                        self.remove_poller_data(&gateway_session.canister_id)
+                    }
                 }
             },
             None => {

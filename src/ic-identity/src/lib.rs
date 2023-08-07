@@ -11,14 +11,12 @@ pub fn load_key_pair(dir: &str) -> Result<Ed25519KeyPair, String> {
             .as_ref()
             .to_vec();
         // TODO: print out seed phrase
-        fs::write(dir, &key_pair)
-            .map_err(|e| format!("Could not write to file. Error: {}", e.to_string()))?;
+        fs::write(dir, &key_pair).map_err(|e| format!("Could not write to file. Error: {}", e))?;
     } else {
-        key_pair = fs::read(dir)
-            .map_err(|e| format!("Could not read from file. Error: {}", e.to_string()))?;
+        key_pair = fs::read(dir).map_err(|e| format!("Could not read from file. Error: {}", e))?;
     }
     Ed25519KeyPair::from_pkcs8(&key_pair)
-        .map_err(|e| format!("Could not parse the key pair. Error: {}", e.to_string()))
+        .map_err(|e| format!("Could not parse the key pair. Error: {}", e))
 }
 
 pub fn get_identity_from_key_pair(key_pair: Ed25519KeyPair) -> BasicIdentity {

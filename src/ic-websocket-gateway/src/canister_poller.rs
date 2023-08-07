@@ -163,9 +163,7 @@ async fn get_canister_updates(
     nonce: u64,
     polling_interval: u64,
 ) -> Result<CanisterOutputCertifiedMessages, String> {
-    info!("Waitign for polling interval");
     tokio::time::sleep(Duration::from_millis(polling_interval)).await;
-    info!("Getting canister messages");
     canister_methods::ws_get_messages(agent, &canister_id, nonce).await
 }
 

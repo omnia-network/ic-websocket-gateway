@@ -97,9 +97,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("first message from client should be binary encoded")
@@ -120,9 +118,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("first message is not of type RelayedClientMessage")
@@ -150,9 +146,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("content of first message is not of type CanisterFirstMessageContent")
@@ -186,9 +180,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("first message does not contain a valid signature")
@@ -224,9 +216,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("first message does not contain a valid public key")
@@ -263,9 +253,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionError(IcWsError::InitializationError(e)) =
-            ws_connection_state
-        {
+        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
                 String::from("client's signature does not verify against public key")
@@ -294,7 +282,7 @@ mod tests {
         let expected_nonce = 0 as u64;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionEstablished(GatewaySession {
+        if let WsConnectionState::Established(GatewaySession {
             client_id,
             client_key,
             canister_id,
@@ -334,7 +322,7 @@ mod tests {
         let expected_client_id = 0;
 
         let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::ConnectionClosed(client_id) = ws_connection_state {
+        if let WsConnectionState::Closed(client_id) = ws_connection_state {
             return assert_eq!(client_id, expected_client_id);
         }
         panic!("ws_connection_state does not have the expected type");
