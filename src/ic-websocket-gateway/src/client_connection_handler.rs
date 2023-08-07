@@ -108,9 +108,12 @@ impl WsConnectionsHandler {
     pub async fn listen_for_incoming_requests(&mut self, parent_token: CancellationToken) {
         // needed to ensure that we stop listening for incoming requests before we start shutting down the connections
         let child_token = CancellationToken::new();
+        let wait_for_cancellation = parent_token.cancelled();
+        tokio::pin!(wait_for_cancellation);
+
         loop {
             select! {
-                Ok((stream, client_addr)) = self.listener.accept(), if !parent_token.is_cancelled() => {
+                Ok((stream, client_addr)) = self.listener.accept() => {
                     let stream = match self.tls_acceptor {
                         Some(ref acceptor) => {
                             let tls_stream = acceptor.accept(stream).await;
@@ -162,7 +165,7 @@ impl WsConnectionsHandler {
                     );
                     self.next_client_id += 1;
                 },
-                _ = parent_token.cancelled() => {
+                _ = &mut wait_for_cancellation => {
                     child_token.cancel();
                     warn!("Stopped listening for incoming requests");
                     break;

@@ -89,11 +89,11 @@ pub struct GatewayServer {
 }
 
 impl GatewayServer {
-    pub async fn new(gateway_address: &str, subnet_url: &str, identity: BasicIdentity) -> Self {
+    pub async fn new(gateway_address: String, subnet_url: String, identity: BasicIdentity) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
         if let Ok(agent) =
-            canister_methods::get_new_agent(subnet_url, identity, fetch_ic_root_key).await
+            canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key).await
         {
             let agent = Arc::new(agent);
             info!(
@@ -113,7 +113,7 @@ impl GatewayServer {
 
             return Self {
                 agent,
-                address: String::from(gateway_address),
+                address: gateway_address,
                 client_connection_handler_tx,
                 client_connection_handler_rx,
                 state: GatewayState::default(),
@@ -128,9 +128,7 @@ impl GatewayServer {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        let cloned_token = self.token.clone();
-
-        info!("Start accepting incoming connections");
+        let token = self.token.clone();
         tokio::spawn(async move {
             let mut ws_connections_hanlders = WsConnectionsHandler::new(
                 &gateway_address,
@@ -139,8 +137,10 @@ impl GatewayServer {
                 tls_config,
             )
             .await;
+
+            info!("Start accepting incoming connections");
             ws_connections_hanlders
-                .listen_for_incoming_requests(cloned_token)
+                .listen_for_incoming_requests(token)
                 .await;
             warn!("Stopped accepting incoming connections");
         });

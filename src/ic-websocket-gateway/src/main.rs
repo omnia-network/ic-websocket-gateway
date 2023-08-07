@@ -1,17 +1,15 @@
-use gateway_server::GatewayServer;
+use crate::client_connection_handler::TlsConfig;
+use crate::gateway_server::GatewayServer;
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
-use tracing::{info, warn};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter, prelude::*};
-
 use std::{
     fs::{self, File},
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 use structopt::StructOpt;
-
-use crate::client_connection_handler::TlsConfig;
+use tracing::{info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{filter, prelude::*};
 
 mod canister_methods;
 mod canister_poller;
@@ -36,6 +34,13 @@ struct DeploymentInfo {
 
     #[structopt(long)]
     tls_certificate_key_pem_path: Option<String>,
+}
+
+fn create_data_dir() -> Result<(), String> {
+    if !Path::new("./data").is_dir() {
+        fs::create_dir("./data").map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
@@ -68,13 +73,6 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     Ok((guard_file, guard_stdout))
 }
 
-fn create_data_dir() -> Result<(), String> {
-    if !Path::new("./data").is_dir() {
-        fs::create_dir("./data").map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<(), String> {
     create_data_dir()?;
@@ -87,8 +85,8 @@ async fn main() -> Result<(), String> {
     let identity = get_identity_from_key_pair(key_pair);
 
     let mut gateway_server = GatewayServer::new(
-        &deployment_info.gateway_address,
-        &deployment_info.subnet_url,
+        deployment_info.gateway_address,
+        deployment_info.subnet_url,
         identity,
     )
     .await;
