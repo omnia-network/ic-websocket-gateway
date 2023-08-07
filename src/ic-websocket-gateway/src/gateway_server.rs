@@ -19,7 +19,8 @@ use crate::{
         CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
     },
-    client_connection_handler::{TlsConfig, WsConnectionState, WsConnectionsHandler},
+    client_connection_handler::WsConnectionState,
+    ws_listener::{TlsConfig, WsListener},
 };
 
 /// keeps track of the numbe rof clients registered in the CDK
@@ -130,7 +131,7 @@ impl GatewayServer {
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         let token = self.token.clone();
         tokio::spawn(async move {
-            let mut ws_connections_hanlders = WsConnectionsHandler::new(
+            let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 client_connection_handler_tx,
@@ -139,9 +140,7 @@ impl GatewayServer {
             .await;
 
             info!("Start accepting incoming connections");
-            ws_connections_hanlders
-                .listen_for_incoming_requests(token)
-                .await;
+            ws_listener.listen_for_incoming_requests(token).await;
             warn!("Stopped accepting incoming connections");
         });
     }

@@ -1,5 +1,5 @@
-use crate::client_connection_handler::TlsConfig;
 use crate::gateway_server::GatewayServer;
+use crate::ws_listener::TlsConfig;
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self, File},
@@ -16,6 +16,7 @@ mod canister_poller;
 mod client_connection_handler;
 mod gateway_server;
 mod unit_tests;
+mod ws_listener;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
