@@ -3,13 +3,24 @@ use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
 };
 
-use crate::canister_methods::{self, CanisterOutputCertifiedMessages, ClientPublicKey};
+use crate::canister_methods::{
+    self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, ClientPublicKey,
+};
+
+const GATEWAY_STATUS_INTERVAL: u64 = 30_000;
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CertifiedMessage {
@@ -80,10 +91,13 @@ impl CanisterPoller {
     pub async fn run_polling(
         &self,
         mut poller_channels: PollerChannelsPollerEnds,
-        mut nonce: u64,
+        mut message_nonce: u64,
         polling_interval: u64,
     ) {
-        info!("Created new poller task starting from nonce: {}", nonce);
+        info!(
+            "Created new poller task starting from nonce: {}",
+            message_nonce
+        );
 
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<
@@ -91,11 +105,20 @@ impl CanisterPoller {
             Sender<Result<CertifiedMessage, String>>,
         > = HashMap::new();
 
-        let get_messages_operation =
-            get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
+        let get_messages_operation = get_canister_updates(
+            &self.agent,
+            self.canister_id,
+            message_nonce,
+            polling_interval,
+        );
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
+
+        // nonce used by the CDK to detect when the WS Gateway fails
+        static IC_WS_GATEWAY_STATUS: AtomicUsize = AtomicUsize::new(0);
+        let gateway_status_operation = sleep(GATEWAY_STATUS_INTERVAL);
+        tokio::pin!(gateway_status_operation);
 
         'poller_loop: loop {
             select! {
@@ -141,7 +164,7 @@ impl CanisterPoller {
                         }
 
                         match get_nonce_from_message(encoded_message.key) {
-                            Ok(last_nonce) => nonce = last_nonce + 1,
+                            Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
                             Err(cdk_err) => {
                                 // let the main task know that this poller will terminate due to a CDK error
                                 signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
@@ -159,7 +182,25 @@ impl CanisterPoller {
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-                    get_messages_operation.set(get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval));
+                    get_messages_operation.set(get_canister_updates(&self.agent, self.canister_id, message_nonce, polling_interval));
+                },
+                _ = &mut gateway_status_operation => {
+                    let agent = self.agent.clone();
+                    let canister_id = self.canister_id;
+                    // notify the CDK about the status of the WS Gateway
+                    tokio::spawn(async move {
+                        let ic_ws_status_nonce = IC_WS_GATEWAY_STATUS.load(Ordering::SeqCst);
+                        let gateway_message = CanisterIncomingMessage::IcWebSocketGatewayStatus(ic_ws_status_nonce);
+                        if let Err(e) = canister_methods::ws_message(&agent, &canister_id, gateway_message).await {
+                            error!("Calling ws_message on canister failed: {}", e);
+                            // TODO: try again or report failure
+                        }
+                        else {
+                            info!("Sent gateway status update: {}", ic_ws_status_nonce);
+                            IC_WS_GATEWAY_STATUS.fetch_add(1, Ordering::SeqCst);
+                        }
+                    });
+                    gateway_status_operation.set(sleep(GATEWAY_STATUS_INTERVAL));
                 }
             }
         }
@@ -169,19 +210,20 @@ impl CanisterPoller {
 async fn get_canister_updates(
     agent: &Agent,
     canister_id: Principal,
-    nonce: u64,
+    message_nonce: u64,
     polling_interval: u64,
 ) -> Result<CanisterOutputCertifiedMessages, String> {
-    tokio::time::sleep(Duration::from_millis(polling_interval)).await;
-    canister_methods::ws_get_messages(agent, &canister_id, nonce).await
+    sleep(polling_interval).await;
+    // get messages to be relayed to clients from canister (starting from 'message_nonce')
+    canister_methods::ws_get_messages(agent, &canister_id, message_nonce).await
 }
 
 fn get_nonce_from_message(key: String) -> Result<u64, String> {
-    if let Some(nonce_str) = key.split('_').last() {
-        let nonce = nonce_str
+    if let Some(message_nonce_str) = key.split('_').last() {
+        let message_nonce = message_nonce_str
             .parse()
             .map_err(|e| format!("Could not parse nonce. Error: {:?}", e))?;
-        return Ok(nonce);
+        return Ok(message_nonce);
     }
     Err(String::from(
         "Key in canister message is not formatted correctly",
@@ -198,4 +240,8 @@ async fn signal_poller_task_termination(
             e
         );
     }
+}
+
+async fn sleep(millis: u64) {
+    tokio::time::sleep(Duration::from_millis(millis)).await;
 }

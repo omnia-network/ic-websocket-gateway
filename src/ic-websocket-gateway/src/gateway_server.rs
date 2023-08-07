@@ -23,7 +23,7 @@ use crate::{
     ws_listener::{TlsConfig, WsListener},
 };
 
-/// keeps track of the numbe rof clients registered in the CDK
+/// keeps track of the number of clients registered in the CDK
 /// increased when a client is added from the gateway state
 /// decreased when the ws_close returns (after client is removed)
 static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
@@ -239,7 +239,8 @@ impl GatewayServer {
                 break;
             }
         }
-        // needed to make sure that all ws_close are executed before shutting down
+        // wait to make sure that all ws_close are executed before shutting down
+        // each time a ws_close returns the counter is decremented by 1
         while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
     }
 

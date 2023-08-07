@@ -94,6 +94,7 @@ pub enum CanisterIncomingMessage {
     DirectlyFromClient(DirectClientMessage),
     RelayedByGateway(RelayedClientMessage),
     IcWebSocketEstablished(ClientPublicKey),
+    IcWebSocketGatewayStatus(usize),
 }
 
 /// Messages exchanged through the WebSocket.
