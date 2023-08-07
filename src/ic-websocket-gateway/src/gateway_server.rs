@@ -35,8 +35,7 @@ pub struct GatewaySession {
     client_id: u64,
     client_key: ClientPublicKey,
     canister_id: Principal,
-    message_for_client_tx: Sender<CertifiedMessage>,
-    terminate_client_handler_tx: Sender<bool>,
+    message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     nonce: u64,
 }
 
@@ -48,8 +47,7 @@ pub struct GatewaySession {
     pub client_id: u64,
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
-    pub message_for_client_tx: Sender<CertifiedMessage>,
-    pub terminate_client_handler_tx: Sender<bool>,
+    pub message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     pub nonce: u64,
 }
 
@@ -58,8 +56,7 @@ impl GatewaySession {
         client_id: u64,
         client_key: Vec<u8>,
         canister_id: Principal,
-        message_for_client_tx: Sender<CertifiedMessage>,
-        terminate_client_handler_tx: Sender<bool>,
+        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
         nonce: u64,
     ) -> Self {
         Self {
@@ -67,7 +64,6 @@ impl GatewaySession {
             client_key,
             canister_id,
             message_for_client_tx,
-            terminate_client_handler_tx,
             nonce,
         }
     }
@@ -93,35 +89,33 @@ impl GatewayServer {
     pub async fn new(gateway_address: String, subnet_url: String, identity: BasicIdentity) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
-        if let Ok(agent) =
-            canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key).await
-        {
-            let agent = Arc::new(agent);
-            info!(
-                "Gateway Agent principal: {}",
-                agent.get_principal().expect("Principal should be set")
-            );
+        let agent = canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key)
+            .await
+            .expect("could not get new agent");
+        let agent = Arc::new(agent);
+        info!(
+            "Gateway Agent principal: {}",
+            agent.get_principal().expect("Principal should be set")
+        );
 
-            // [main task]                         [client connection handler task]
-            // client_connection_handler_rx <----- client_connection_handler_tx
+        // [main task]                         [client connection handler task]
+        // client_connection_handler_rx <----- client_connection_handler_tx
 
-            // channel used to send the state of the client connection
-            // the client connection handler task sends the session information when the WebSocket connection is established and
-            // the id the of the client when the connection is closed
-            let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
+        // channel used to send the state of the client connection
+        // the client connection handler task sends the session information when the WebSocket connection is established and
+        // the id the of the client when the connection is closed
+        let (client_connection_handler_tx, client_connection_handler_rx) = mpsc::channel(100);
 
-            let token = CancellationToken::new();
+        let token = CancellationToken::new();
 
-            return Self {
-                agent,
-                address: gateway_address,
-                client_connection_handler_tx,
-                client_connection_handler_rx,
-                state: GatewayState::default(),
-                token,
-            };
-        }
-        panic!("TODO: graceful shutdown");
+        return Self {
+            agent,
+            address: gateway_address,
+            client_connection_handler_tx,
+            client_connection_handler_rx,
+            state: GatewayState::default(),
+            token,
+        };
     }
 
     pub fn start_accepting_incoming_connections(&self, tls_config: Option<TlsConfig>) {
@@ -188,23 +182,17 @@ impl GatewayServer {
         )
     )]
     async fn handle_failed_poller(&mut self, canister_id: &Principal) {
+        // cleanup client data from gateway state and close client connection on CDK
+        // the client connection handlers are terminated directly by the poller via the direct channel between them
         let clients_of_canister = self
             .state
             .client_session_map
             .remove(canister_id)
             .expect("clients of canister must be registered");
-        // terminate connection handler task of each client connected to the canister,
-        // cleanup client data from gateway state
-        // and close client connection on CDK
         for gateway_session in clients_of_canister.values() {
             self.state
                 .client_info_map
                 .remove(&gateway_session.client_id);
-            gateway_session
-                .terminate_client_handler_tx
-                .send(true)
-                .await
-                .unwrap();
 
             call_ws_close_in_background(
                 self.agent.clone(),

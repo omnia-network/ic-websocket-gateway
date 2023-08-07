@@ -48,7 +48,7 @@ impl PollerChannelsPollerEnds {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(ClientPublicKey, Sender<CertifiedMessage>),
+    NewClientChannel(ClientPublicKey, Sender<Result<CertifiedMessage, String>>),
     ClientDisconnected(ClientPublicKey),
 }
 
@@ -86,8 +86,10 @@ impl CanisterPoller {
         info!("Created new poller task starting from nonce: {}", nonce);
 
         // channels used to communicate with client's WebSocket task
-        let mut client_channels: HashMap<ClientPublicKey, Sender<CertifiedMessage>> =
-            HashMap::new();
+        let mut client_channels: HashMap<
+            ClientPublicKey,
+            Sender<Result<CertifiedMessage, String>>,
+        > = HashMap::new();
 
         let get_messages_operation =
             get_canister_updates(&self.agent, self.canister_id, nonce, polling_interval);
@@ -119,7 +121,6 @@ impl CanisterPoller {
                 }
                 // poll canister for updates across multiple select! iterations
                 Ok(msgs) = &mut get_messages_operation => {
-                    info!("Received canister messages");
                     for encoded_message in msgs.messages {
                         let client_key = encoded_message.client_key;
                         let m = CertifiedMessage {
@@ -130,9 +131,9 @@ impl CanisterPoller {
                         };
 
                         match client_channels.get(&client_key) {
-                            Some(client_channel_rx) => {
+                            Some(client_channel_tx) => {
                                 info!("Received message with key: {:?} from canister", m.key);
-                                if let Err(e) = client_channel_rx.send(m).await {
+                                if let Err(e) = client_channel_tx.send(Ok(m)).await {
                                     error!("Client's thread terminated: {}", e);
                                 }
                             },
@@ -141,9 +142,17 @@ impl CanisterPoller {
 
                         match get_nonce_from_message(encoded_message.key) {
                             Ok(last_nonce) => nonce = last_nonce + 1,
-                            Err(e) => {
+                            Err(cdk_err) => {
+                                // let the main task know that this poller will terminate due to a CDK error
                                 signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
-                                error!("Terminating poller task due to CDK error: {}", e);
+                                // let each client connection handler task connected to this poller know that the poller will terminate
+                                // and thus they also have to close the WebSocket connection and terminate
+                                for client_channel_tx in client_channels.values() {
+                                    if let Err(channel_err) = client_channel_tx.send(Err(format!("Terminating poller task due to CDK error: {}", cdk_err))).await {
+                                        error!("Client's thread terminated: {}", channel_err);
+                                    }
+                                }
+                                error!("Terminating poller task due to CDK error: {}", cdk_err);
                                 break 'poller_loop;
                             }
                         }

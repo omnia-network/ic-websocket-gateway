@@ -80,15 +80,6 @@ impl ClientConnectionHandler {
                 // which will then forward it to the client via the WebSocket connection
                 let (message_for_client_tx, mut message_for_client_rx) = mpsc::channel(100);
 
-                // [client connection handler task]        [main task]
-                // terminate_client_handler_rx      <----- terminate_client_handler_tx
-
-                // channel used by the main task to to let this client connection handler task know that it should terminate
-                // this is used when the poller task detects an error from the canister and informs the main task that all client
-                // connections to the respective canister should be closed
-                let (terminate_client_handler_tx, mut terminate_client_handler_rx) =
-                    mpsc::channel(1);
-
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
                 let mut is_first_message = true;
@@ -101,7 +92,6 @@ impl ClientConnectionHandler {
                                 is_first_message,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
-                                terminate_client_handler_tx.clone()
                             ).await {
                                 // break from the loop so that the connection handler task can terminate
                                 warn!(e);
@@ -112,15 +102,27 @@ impl ClientConnectionHandler {
                             }
                         }
                         // wait for canister message to send to client
-                        Some(canister_message) = message_for_client_rx.recv() => {
-                            info!("Sending message with key: {:?} to client", canister_message.key);
-                            // relay canister message to client, cbor encoded
-                            match to_vec(&canister_message) {
-                                Ok(bytes) => {
-                                    send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
-                                    info!("Message with key: {:?} sent to client", canister_message.key);
-                                },
-                                Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
+                        Some(poller_message) = message_for_client_rx.recv() => {
+                            match poller_message {
+                                // check if the poller task detected an error from the CDK
+                                Ok(canister_message) => {
+                                    info!("Sending message with key: {:?} to client", canister_message.key);
+                                    // relay canister message to client, cbor encoded
+                                    match to_vec(&canister_message) {
+                                        Ok(bytes) => {
+                                            send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
+                                            info!("Message with key: {:?} sent to client", canister_message.key);
+                                        },
+                                        Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
+                                    }
+                                }
+                                // the poller task terminates all the client connection tasks connected to that poller
+                                Err(e) => {
+                                    // close the WebSocket connection
+                                    ws_write.close().await.unwrap();
+                                    error!("Terminating client connection handler task. Error: {}", e);
+                                    break;
+                                }
                             }
                         },
                         // waits for the token to be cancelled
@@ -132,13 +134,6 @@ impl ClientConnectionHandler {
                             // close the WebSocket connection
                             ws_write.close().await.unwrap();
                             warn!("Terminating client connection handler task");
-                            break;
-                        },
-                        // waits for the main task to signal that the connection should be closed
-                        _ = terminate_client_handler_rx.recv() => {
-                            // close the WebSocket connection
-                            ws_write.close().await.unwrap();
-                            error!("Terminating client connection handler task due to CDK error");
                             break;
                         }
                     }
@@ -160,8 +155,7 @@ impl ClientConnectionHandler {
         ws_message: Result<Option<Message>, Error>,
         is_first_message: bool,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
-        message_for_client_tx: Sender<CertifiedMessage>,
-        terminate_client_handler_tx: Sender<bool>,
+        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     ) -> Result<(), String> {
         match ws_message {
             // handle message sent from client via WebSocket
@@ -207,7 +201,6 @@ impl ClientConnectionHandler {
                                         client_key,
                                         canister_id,
                                         message_for_client_tx,
-                                        terminate_client_handler_tx,
                                         nonce,
                                     )),
                                 )
