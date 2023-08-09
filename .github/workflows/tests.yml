@@ -30,5 +30,7 @@ jobs:
             tests/test_canister
       - name: Install tests dependencies
         run: ./scripts/install_test_dependencies.sh
-      - name: Run tests
-        run: ./scripts/ci_cd_test.sh
+      - name: Run unit tests
+        run: ./scripts/ci_cd_test_unit.sh
+      - name: Run integration tests
+        run: ./scripts/ci_cd_test_integration.sh
