@@ -139,7 +139,7 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(&mut self, polling_interval: u64) {
+    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -158,7 +158,13 @@ impl GatewayServer {
                     // - the GatewaySession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
-                    self.state.manage_clients_connections(connection_state, poller_channel_for_completion_tx.clone(), polling_interval, self.agent.clone()).await;
+                    self.state.manage_clients_connections(
+                        connection_state,
+                        poller_channel_for_completion_tx.clone(),
+                        polling_interval,
+                        send_status_interval,
+                        self.agent.clone()
+                    ).await;
 
                 }
                 // check if a poller task has terminated
@@ -279,6 +285,7 @@ impl GatewayState {
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
         polling_interval: u64,
+        send_status_interval: u64,
         agent: Arc<Agent>,
     ) {
         match connection_state {
@@ -337,16 +344,17 @@ impl GatewayState {
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(canister_id, agent);
+                        let poller = CanisterPoller::new(
+                            canister_id,
+                            agent,
+                            polling_interval,
+                            send_status_interval,
+                        );
                         // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
                         // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                         // the new poller thread should not get those same messages again
                         poller
-                            .run_polling(
-                                poller_channels_poller_ends,
-                                gateway_session.nonce,
-                                polling_interval,
-                            )
+                            .run_polling(poller_channels_poller_ends, gateway_session.nonce)
                             .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
