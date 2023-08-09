@@ -12,4 +12,4 @@ ic-cdk = "0.9.2"
 ic-cdk-macros = "0.7.0"
 serde = "1.0.176"
 serde_cbor = "0.11.2"
-ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "989f74b6f871c113628cd20697e42b85d503e37d" }
+ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "58eb3acd481920b70f5239f266b31c66cc7745d5" }

@@ -6,7 +6,7 @@ use tracing::{error, info};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
     time::Duration,
@@ -18,6 +18,7 @@ use tokio::{
 
 use crate::canister_methods::{
     self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, ClientPublicKey,
+    GatewayStatusMessage,
 };
 
 const GATEWAY_STATUS_INTERVAL: u64 = 30_000;
@@ -115,8 +116,8 @@ impl CanisterPoller {
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
 
-        // nonce used by the CDK to detect when the WS Gateway fails
-        static IC_WS_GATEWAY_STATUS: AtomicUsize = AtomicUsize::new(0);
+        // status index used by the CDK to detect when the WS Gateway fails
+        static IC_WS_GATEWAY_STATUS_INDEX: AtomicU64 = AtomicU64::new(0);
         let gateway_status_operation = sleep(GATEWAY_STATUS_INTERVAL);
         tokio::pin!(gateway_status_operation);
 
@@ -189,15 +190,17 @@ impl CanisterPoller {
                     let canister_id = self.canister_id;
                     // notify the CDK about the status of the WS Gateway
                     tokio::spawn(async move {
-                        let ic_ws_status_nonce = IC_WS_GATEWAY_STATUS.load(Ordering::SeqCst);
-                        let gateway_message = CanisterIncomingMessage::IcWebSocketGatewayStatus(ic_ws_status_nonce);
+                        let ic_ws_status_index = IC_WS_GATEWAY_STATUS_INDEX.load(Ordering::SeqCst);
+                        let gateway_message = CanisterIncomingMessage::IcWebSocketGatewayStatus(GatewayStatusMessage {
+                            status_index: ic_ws_status_index,
+                        });
                         if let Err(e) = canister_methods::ws_message(&agent, &canister_id, gateway_message).await {
                             error!("Calling ws_message on canister failed: {}", e);
                             // TODO: try again or report failure
                         }
                         else {
-                            info!("Sent gateway status update: {}", ic_ws_status_nonce);
-                            IC_WS_GATEWAY_STATUS.fetch_add(1, Ordering::SeqCst);
+                            info!("Sent gateway status update: {}", ic_ws_status_index);
+                            IC_WS_GATEWAY_STATUS_INDEX.fetch_add(1, Ordering::SeqCst);
                         }
                     });
                     gateway_status_operation.set(sleep(GATEWAY_STATUS_INTERVAL));

@@ -10,10 +10,15 @@ type RelayedClientMessage = record {
   sig : blob;
 };
 
+type GatewayStatusMessage = record {
+  status_index : nat64;
+};
+
 type CanisterIncomingMessage = variant {
   DirectlyFromClient : DirectClientMessage;
   RelayedByGateway : RelayedClientMessage;
   IcWebSocketEstablished : ClientPublicKey;
+  IcWebSocketGatewayStatus : GatewayStatusMessage;
 };
 
 type CanisterOutputMessage = record {

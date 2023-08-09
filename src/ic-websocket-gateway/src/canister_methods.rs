@@ -88,13 +88,20 @@ pub struct DirectClientMessage {
     pub client_key: ClientPublicKey,
 }
 
+/// Heartbeat message sent from the WS Gateway to the canister, so that the canister can
+/// verify that the WS Gateway is still alive.
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct GatewayStatusMessage {
+    pub status_index: u64,
+}
+
 /// The possible messages received by the canister in `ws_message`.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub enum CanisterIncomingMessage {
     DirectlyFromClient(DirectClientMessage),
     RelayedByGateway(RelayedClientMessage),
     IcWebSocketEstablished(ClientPublicKey),
-    IcWebSocketGatewayStatus(usize),
+    IcWebSocketGatewayStatus(GatewayStatusMessage),
 }
 
 /// Messages exchanged through the WebSocket.

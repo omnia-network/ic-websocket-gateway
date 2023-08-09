@@ -27,17 +27,7 @@ fn init(gateway_principal: Option<String>) {
 
 #[post_upgrade]
 fn post_upgrade(gateway_principal: Option<String>) {
-    let handlers = WsHandlers {
-        on_open: Some(on_open),
-        on_message: Some(on_message),
-        on_close: Some(on_close),
-    };
-
-    if let Some(gateway_principal) = gateway_principal {
-        ic_websocket_cdk::init(handlers, &gateway_principal)
-    } else {
-        ic_websocket_cdk::init(handlers, GATEWAY_PRINCIPAL)
-    }
+    init(gateway_principal);
 }
 
 // method called by the client SDK when instantiating a new IcWebSocket

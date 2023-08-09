@@ -1,4 +1,4 @@
-use ic_cdk::{export::candid::CandidType, print, api::time};
+use ic_cdk::{api::time, export::candid::CandidType, print};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 
@@ -31,12 +31,12 @@ pub fn on_message(args: OnMessageCallbackArgs) {
         text: app_msg.clone().text + " ping",
         timestamp: time(),
     };
-    print(format!("Received message: {:?}", app_msg));
+    print("Received message");
     send_app_message(args.client_key, new_msg)
 }
 
 fn send_app_message(client_key: ClientPublicKey, msg: AppMessage) {
-    print(format!("Sending message: {:?}", msg));
+    print("Sending message");
     if let Err(e) = ws_send(client_key, msg) {
         println!("Could not send message: {}", e);
     }
