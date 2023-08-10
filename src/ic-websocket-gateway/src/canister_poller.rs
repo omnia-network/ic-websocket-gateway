@@ -1,7 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use std::{
     collections::HashMap,
@@ -126,13 +126,13 @@ impl CanisterPoller {
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
-                            info!("Added new channel to poller for client: {:?}", client_key);
+                            debug!("Added new channel to poller for client: {:?}", client_key);
                             client_channels.insert(client_key, client_channel);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            info!("Removed client channel from poller for client {:?}", client_key);
+                            debug!("Removed client channel from poller for client {:?}", client_key);
                             client_channels.remove(&client_key);
-                            info!("{} clients connected to poller", client_channels.len());
+                            debug!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
                                 signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
@@ -155,7 +155,7 @@ impl CanisterPoller {
 
                         match client_channels.get(&client_key) {
                             Some(client_channel_tx) => {
-                                info!("Received message with key: {:?} from canister", m.key);
+                                debug!("Received message with key: {:?} from canister", m.key);
                                 if let Err(e) = client_channel_tx.send(Ok(m)).await {
                                     error!("Client's thread terminated: {}", e);
                                 }
@@ -196,7 +196,7 @@ impl CanisterPoller {
                             // TODO: try again or report failure
                         }
                         else {
-                            info!("Sent gateway status update: {}", ic_ws_status_nonce);
+                            debug!("Sent gateway status update: {}", ic_ws_status_nonce);
                             IC_WS_GATEWAY_STATUS.fetch_add(1, Ordering::SeqCst);
                         }
                     });

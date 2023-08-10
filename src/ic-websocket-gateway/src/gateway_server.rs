@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
+        mpsc::Receiver as StdReceiver,
         Arc,
     },
 };
@@ -11,7 +12,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, span, warn, Level};
+use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
@@ -21,6 +22,7 @@ use crate::{
     },
     client_connection_handler::WsConnectionState,
     ws_listener::{TlsConfig, WsListener},
+    TimingData,
 };
 
 /// keeps track of the number of clients registered in the CDK
@@ -133,13 +135,17 @@ impl GatewayServer {
             )
             .await;
 
-            info!("Start accepting incoming connections");
+            debug!("Start accepting incoming connections");
             ws_listener.listen_for_incoming_requests(token).await;
-            warn!("Stopped accepting incoming connections");
+            info!("Stopped accepting incoming connections");
         });
     }
 
-    pub async fn manage_state(&mut self, polling_interval: u64) {
+    pub async fn manage_state(
+        &mut self,
+        polling_interval: u64,
+        tracing_timing_rx: StdReceiver<TimingData>,
+    ) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -168,8 +174,11 @@ impl GatewayServer {
                         TerminationInfo::CdkError(canister_id) => self.handle_failed_poller(&canister_id).await,
                     }
                 },
+                Ok(timing_data) = async { tracing_timing_rx.try_recv() } => {
+                    warn!("{:?}", timing_data);
+                },
                 // detect ctrl_c signal from the OS
-                _ = signal::ctrl_c() => break
+                _ = signal::ctrl_c() => break,
             }
         }
         self.graceful_shutdown(poller_channel_for_completion_rx)
@@ -209,7 +218,7 @@ impl GatewayServer {
         &mut self,
         mut poller_channel_for_completion_rx: Receiver<TerminationInfo>,
     ) {
-        warn!("Starting graceful shutdown");
+        info!("Starting graceful shutdown");
         self.token.cancel();
         loop {
             if let Ok(WsConnectionState::Closed(client_id)) =
@@ -224,7 +233,7 @@ impl GatewayServer {
             //       the rx returns None when the all the txs are dropped and we can break then
             //       alternatively, we could count the number of tasks in the same way we counted the number of returns of ws_close
             if self.state.count_connected_clients() == 0 {
-                warn!("All clients data has been removed from the gateway state");
+                info!("All clients data has been removed from the gateway state");
                 break;
             }
         }
@@ -235,7 +244,7 @@ impl GatewayServer {
                 self.state.remove_poller_data(&canister_id);
             }
             if self.state.count_connected_pollers() == 0 {
-                warn!("All pollers data has been removed from the gateway state");
+                info!("All pollers data has been removed from the gateway state");
                 break;
             }
         }
@@ -389,7 +398,6 @@ impl GatewayState {
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();
-        info!("{} clients registered", self.client_session_map.len());
     }
 
     #[tracing::instrument(name = "manage_clients_state", skip_all,
@@ -413,7 +421,7 @@ impl GatewayState {
         self.client_info_map
             .insert(client_id, (client_key, canister_id));
         CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
-        info!("Client added to gateway state");
+        debug!("Client added to gateway state");
     }
 
     #[tracing::instrument(name = "manage_clients_state", skip_all,
@@ -430,7 +438,7 @@ impl GatewayState {
                     .and_then(|clients_of_canister| clients_of_canister.remove(&client_key))
                     // TODO: this error should never happen but must still be handled
                     .expect("clients of canister must be registered");
-                info!("Client removed from gateway state");
+                debug!("Client removed from gateway state");
 
                 call_ws_close_in_background(
                     agent.clone(),
@@ -456,7 +464,7 @@ impl GatewayState {
                 }
             },
             None => {
-                info!("Client closed connection before being registered in gateway state");
+                warn!("Client closed connection before being registered in gateway state");
             },
         }
     }

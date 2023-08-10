@@ -21,7 +21,8 @@ ed25519-compact = "2.0.4"
 futures-util = "0.3.28"
 structopt = "0.3.21"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.17", features = ["fmt", "std"] }
+tracing-subscriber = { version = "0.3.17", features = ["fmt", "std", "json"] }
+tracing-timing = "0.6.0"
 tracing-appender = "0.2"
 ic-identity = { version = "0.1.0", path = "../ic-identity" }
 

@@ -19,7 +19,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// possible states of the WebSocket connection:
 /// - established
@@ -70,7 +70,7 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                info!("Accepted WebSocket connection");
+                debug!("Accepted WebSocket connection");
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
                 // [client connection handler task]        [poller task]
@@ -99,7 +99,7 @@ impl ClientConnectionHandler {
                             .await;
                             // close the WebSocket connection
                             ws_write.close().await.unwrap();
-                            warn!("Terminating client connection handler task");
+                            debug!("Terminating client connection handler task");
                             break;
                         },
                         // wait for canister message to send to client
@@ -107,12 +107,12 @@ impl ClientConnectionHandler {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
                                 Ok(canister_message) => {
-                                    info!("Sending message with key: {:?} to client", canister_message.key);
+                                    debug!("Sending message with key: {:?} to client", canister_message.key);
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
                                         Ok(bytes) => {
                                             send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
-                                            info!("Message with key: {:?} sent to client", canister_message.key);
+                                            debug!("Message with key: {:?} sent to client", canister_message.key);
                                         },
                                         Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
                                     }
