@@ -5,7 +5,7 @@ echo "Running unit tests for gateway"
 cargo test --workspace -- --test-threads=1
 
 echo "Starting gateway in the background"
-cargo run > scripts/gateway_test.log &
+cargo run -- --send-status-interval 5000 > scripts/gateway_test.log &
 pid=$!
 
 echo "Deploying test canister"
