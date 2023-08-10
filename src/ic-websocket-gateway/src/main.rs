@@ -23,14 +23,17 @@ mod ws_listener;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
-    #[structopt(short, long, default_value = "http://127.0.0.1:4943")]
+    #[structopt(long, default_value = "http://127.0.0.1:4943")]
     subnet_url: String,
 
-    #[structopt(short, long, default_value = "0.0.0.0:8080")]
+    #[structopt(long, default_value = "0.0.0.0:8080")]
     gateway_address: String,
 
-    #[structopt(short, long, default_value = "100")]
+    #[structopt(long, default_value = "100")]
     polling_interval: u64,
+
+    #[structopt(long, default_value = "30000")]
+    send_status_interval: u64,
 
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
@@ -174,7 +177,11 @@ async fn main() -> Result<(), String> {
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     gateway_server
-        .manage_state(deployment_info.polling_interval, tracing_timing_rx)
+        .manage_state(
+            deployment_info.polling_interval,
+            deployment_info.send_status_interval,
+            tracing_timing_rx,
+        )
         .await;
     info!("Terminated state manager");
 
