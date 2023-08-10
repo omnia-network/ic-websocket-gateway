@@ -109,7 +109,7 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
                 if let Some(hs) = &mut hs.get_mut("request") {
                     if let Some(h) = hs.get_mut("incoming_request") {
                         let count = h.len();
-                        if count > 5 {
+                        if count > 20 {
                             let data = TimingData {
                                 event: String::from("incoming_request"),
                                 min: h.min(),
@@ -123,7 +123,7 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
                     }
                     if let Some(h) = hs.get_mut("accepted_without_tls") {
                         let count = h.len();
-                        if count > 5 {
+                        if count > 20 {
                             let data = TimingData {
                                 event: String::from("accepted_without_tls"),
                                 min: h.min(),
