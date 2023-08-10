@@ -1,5 +1,6 @@
 use crate::gateway_server::GatewayServer;
 use crate::ws_listener::TlsConfig;
+use hdrhistogram::sync::SyncHistogram;
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self, File},
@@ -11,7 +12,7 @@ use structopt::StructOpt;
 use tracing::{info, Dispatch};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter, prelude::*};
-use tracing_timing::{Builder, Histogram, TimingLayer};
+use tracing_timing::{Builder, HashMap, Histogram, TimingLayer};
 
 mod canister_methods;
 mod canister_poller;
@@ -42,6 +43,22 @@ struct DeploymentInfo {
     tls_certificate_key_pem_path: Option<String>,
 }
 
+struct TimingMetadata<'a>(HashMap<&'a str, HashMap<&'a str, u64>>);
+
+impl<'a> TimingMetadata<'a> {
+    fn new(metadata: Vec<(&'a str, Vec<(&'a str, u64)>)>) -> Self {
+        let mut span_map = HashMap::default();
+        for (span, events) in metadata {
+            let mut event_map = HashMap::default();
+            for (event, period) in events {
+                event_map.insert(event, period);
+            }
+            span_map.insert(span, event_map);
+        }
+        Self(span_map)
+    }
+}
+
 #[derive(Debug)]
 pub struct TimingData {
     event: String,
@@ -49,6 +66,18 @@ pub struct TimingData {
     mean: f64,
     max: u64,
     count: u64,
+}
+
+impl TimingData {
+    fn new(event: &str, h: &mut SyncHistogram<u64>) -> Self {
+        Self {
+            event: String::from(event),
+            min: h.min(),
+            mean: h.mean(),
+            max: h.max(),
+            count: h.len(),
+        }
+    }
 }
 
 fn create_data_dir() -> Result<(), String> {
@@ -106,33 +135,23 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
             .downcast_ref::<TimingLayer>()
             .unwrap()
             .with_histograms(|hs| {
-                if let Some(hs) = &mut hs.get_mut("request") {
-                    if let Some(h) = hs.get_mut("incoming_request") {
-                        let count = h.len();
-                        if count > 20 {
-                            let data = TimingData {
-                                event: String::from("incoming_request"),
-                                min: h.min(),
-                                mean: h.mean(),
-                                max: h.max(),
-                                count: count,
-                            };
-                            h.clear();
-                            tracing_timing_tx.send(data).unwrap();
-                        }
-                    }
-                    if let Some(h) = hs.get_mut("accepted_without_tls") {
-                        let count = h.len();
-                        if count > 20 {
-                            let data = TimingData {
-                                event: String::from("accepted_without_tls"),
-                                min: h.min(),
-                                mean: h.mean(),
-                                max: h.max(),
-                                count: count,
-                            };
-                            h.clear();
-                            tracing_timing_tx.send(data).unwrap();
+                let metadata = vec![(
+                    "request",
+                    vec![("incoming_request", 100), ("accepted_without_tls", 50)],
+                )];
+
+                let timing_metadata = TimingMetadata::new(metadata);
+                for (span, events) in timing_metadata.0 {
+                    if let Some(hs) = &mut hs.get_mut(span) {
+                        for (event, period) in events {
+                            if let Some(h) = hs.get_mut(event) {
+                                let count = h.len();
+                                if count >= period {
+                                    let data = TimingData::new(event, h);
+                                    h.clear();
+                                    tracing_timing_tx.send(data).unwrap();
+                                }
+                            }
                         }
                     }
                 }

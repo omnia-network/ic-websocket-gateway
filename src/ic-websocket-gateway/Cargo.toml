@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3.17", features = ["fmt", "std", "json"] }
 tracing-timing = "0.6.0"
 tracing-appender = "0.2"
 ic-identity = { version = "0.1.0", path = "../ic-identity" }
+hdrhistogram = "7.5.2"
 
 [dev-dependencies]
 websocket = "0.26.5"

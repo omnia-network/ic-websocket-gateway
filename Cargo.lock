@@ -1311,6 +1311,7 @@ dependencies = [
  "candid 0.8.4",
  "ed25519-compact",
  "futures-util",
+ "hdrhistogram",
  "ic-agent",
  "ic-cdk",
  "ic-cdk-macros 0.7.1",
