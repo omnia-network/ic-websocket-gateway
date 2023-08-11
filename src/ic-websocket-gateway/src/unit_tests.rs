@@ -100,7 +100,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("first message from client should be binary encoded")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"first message from client should be binary encoded\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -121,7 +121,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("first message is not of type RelayedClientMessage")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"first message is not of type RelayedClientMessage\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -149,7 +149,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("content of first message is not of type CanisterFirstMessageContent")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"content of first message is not of type CanisterFirstMessageContent\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -183,7 +183,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("first message does not contain a valid signature")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid signature\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -219,7 +219,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("first message does not contain a valid public key")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid public key\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -256,7 +256,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("client's signature does not verify against public key")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"client's signature does not verify against public key\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
