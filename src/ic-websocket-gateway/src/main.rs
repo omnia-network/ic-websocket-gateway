@@ -126,36 +126,39 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard, Dispatch), String> {
 }
 
 fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<TimingData>) {
-    std::thread::spawn(move || loop {
-        dispatch
-            .downcast_ref::<TimingLayer>()
-            .unwrap()
-            .force_synchronize();
-        dispatch
-            .downcast_ref::<TimingLayer>()
-            .unwrap()
-            .with_histograms(|hs| {
-                let metadata = vec![(
-                    "request",
-                    vec![("incoming_request", 100), ("accepted_without_tls", 50)],
-                )];
+    std::thread::spawn(move || {
+        let metadata = vec![(
+            "request",
+            vec![("incoming_request", 10), ("accepted_without_tls", 10)],
+        )];
 
-                let timing_metadata = TimingMetadata::new(metadata);
-                for (span, events) in timing_metadata.0 {
-                    if let Some(hs) = &mut hs.get_mut(span) {
-                        for (event, period) in events {
-                            if let Some(h) = hs.get_mut(event) {
-                                let count = h.len();
-                                if count >= period {
-                                    let data = TimingData::new(event, h);
-                                    h.clear();
-                                    tracing_timing_tx.send(data).unwrap();
+        let timing_metadata = TimingMetadata::new(metadata);
+
+        loop {
+            dispatch
+                .downcast_ref::<TimingLayer>()
+                .unwrap()
+                .force_synchronize();
+            dispatch
+                .downcast_ref::<TimingLayer>()
+                .unwrap()
+                .with_histograms(|hs| {
+                    for (span, events) in &timing_metadata.0 {
+                        if let Some(hs) = &mut hs.get_mut(*span) {
+                            for (event, period) in events {
+                                if let Some(h) = hs.get_mut(*event) {
+                                    let count = h.len();
+                                    if count >= *period {
+                                        let data = TimingData::new(event, h);
+                                        h.clear();
+                                        tracing_timing_tx.send(data).unwrap();
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+        }
     });
 }
 

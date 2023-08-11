@@ -2,7 +2,7 @@ use crate::client_connection_handler::{ClientConnectionHandler, WsConnectionStat
 
 use ic_agent::Agent;
 use native_tls::Identity;
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -107,7 +107,6 @@ impl WsListener {
                             }
                         },
                         None => {
-                            tokio::time::sleep(Duration::from_millis(10)).await;
                             trace!("accepted_without_tls");
                             CustomStream::Tcp(stream)
                         },
