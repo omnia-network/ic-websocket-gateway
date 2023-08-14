@@ -9,7 +9,7 @@ use std::{
 use structopt::StructOpt;
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter, prelude::*};
+use tracing_subscriber::{filter, prelude::*, EnvFilter};
 
 mod canister_methods;
 mod canister_poller;
@@ -62,17 +62,23 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let log_file = File::create(filename).map_err(|e| e.to_string())?;
     let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
-    let debug_log_file = tracing_subscriber::fmt::layer()
+
+    let env_filter_file =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_writer(non_blocking_file)
-        .with_thread_ids(true);
-    let debug_log_stdout = tracing_subscriber::fmt::layer()
+        .with_thread_ids(true)
+        .with_filter(env_filter_file);
+    let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
-        .pretty();
+        .pretty()
+        .with_filter(filter::LevelFilter::INFO);
 
     tracing_subscriber::registry()
-        .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
-        .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO))
+        .with(file_tracing_layer)
+        .with(stdout_tracing_layer)
         .init();
 
     Ok((guard_file, guard_stdout))

@@ -77,6 +77,17 @@ To renew the SSL certificate, you can run the same command as above:
 ./scripts/certbot_certonly.sh
 ```
 
+## Configure logging
+
+The gateway uses the [tracing](https://docs.rs/tracing) crate for logging. There are two tracing outputs configured:
+- output to **stdout**, which has the `info` level and cannot be changed;
+- output to a **file**, which is saved in the `data/traces/` folder and has the default `info` level. The file name is `gateway_{start-timestamp}.log`.
+    It's possible to configure the file tracing level by setting the `RUST_LOG` environment variable. For example, to set the tracing level to `debug`, you can run:
+    ```
+    RUST_LOG=ic_websocket_gateway=debug cargo run
+    ```
+    The `RUST_LOG` environment variable enables to set different levels for each module. See the [EnvFilter](https://docs.rs/tracing-subscriber/0.3.17/tracing_subscriber/filter/struct.EnvFilter.html) documentation for more details.
+
 # Development
 
 ## Testing
