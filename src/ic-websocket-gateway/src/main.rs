@@ -117,7 +117,16 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard, Dispatch), String> {
         }));
 
     let my_registry = tracing_subscriber::registry()
-        .with(debug_log_file.with_filter(filter::LevelFilter::INFO))
+        .with(
+            debug_log_file
+                .with_filter(filter::LevelFilter::DEBUG)
+                .with_filter(filter::filter_fn(|metadata| {
+                    // filter out the unwanted DEBUG traces
+                    !(metadata.target().contains("hyper")
+                        || metadata.target().contains("tungstenite")
+                        || metadata.target().contains("reqwest"))
+                })),
+        )
         .with(debug_log_stdout.with_filter(filter::LevelFilter::INFO));
 
     let dispatch = Dispatch::new(timing_layer.with_subscriber(my_registry));
