@@ -163,6 +163,13 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
                     ("established_ic_ws_connection", 10),
                 ],
             ),
+            (
+                "timing_canister_poller",
+                vec![
+                    ("received_canister_messages", 10),
+                    ("sent_message_to_client_handler", 50),
+                ],
+            ),
         ];
 
         let timing_metadata = TimingMetadata::new(metadata);

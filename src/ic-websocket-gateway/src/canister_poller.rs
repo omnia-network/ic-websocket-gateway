@@ -1,7 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace, Instrument, Level};
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -10,8 +10,8 @@ use tokio::{
 };
 
 use crate::canister_methods::{
-    self, CanisterIncomingMessage, CanisterWsGetMessagesResult, CanisterWsMessageResult,
-    ClientPublicKey, GatewayStatusMessage,
+    self, CanisterIncomingMessage, CanisterOutputMessage, CanisterWsGetMessagesResult,
+    CanisterWsMessageResult, ClientPublicKey, GatewayStatusMessage,
 };
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
@@ -145,23 +145,7 @@ impl CanisterPoller {
                 //       a new call is not pinned again. We have to handle the error case
                 Ok(msgs) = &mut get_messages_operation => {
                     for encoded_message in msgs.messages {
-                        let client_key = encoded_message.client_key;
-                        let m = CertifiedMessage {
-                            key: encoded_message.key.clone(),
-                            val: encoded_message.val,
-                            cert: msgs.cert.clone(),
-                            tree: msgs.tree.clone(),
-                        };
-
-                        match client_channels.get(&client_key) {
-                            Some(client_channel_tx) => {
-                                debug!("Received message with key: {:?} from canister", m.key);
-                                if let Err(e) = client_channel_tx.send(Ok(m)).await {
-                                    error!("Client's thread terminated: {}", e);
-                                }
-                            },
-                            None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
-                        }
+                        self.send_message_to_client_handler(&client_channels, &encoded_message, msgs.cert.clone(), msgs.tree.clone()).in_current_span().await;
 
                         match get_nonce_from_message(encoded_message.key) {
                             Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
@@ -194,10 +178,46 @@ impl CanisterPoller {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, name = "timing_canister_poller", skip_all)]
     async fn get_canister_updates(&self, message_nonce: u64) -> CanisterWsGetMessagesResult {
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce).await
+        let messages =
+            canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce).await;
+        trace!("received_canister_messages");
+        messages
+    }
+
+    #[tracing::instrument(level = Level::TRACE, name = "timing_canister_poller", skip_all)]
+    async fn send_message_to_client_handler(
+        &self,
+        client_channels: &HashMap<ClientPublicKey, Sender<Result<CertifiedMessage, String>>>,
+        encoded_message: &CanisterOutputMessage,
+        cert: Vec<u8>,
+        tree: Vec<u8>,
+    ) {
+        let client_key = encoded_message.client_key.clone();
+        let m = CertifiedMessage {
+            key: encoded_message.key.clone(),
+            val: encoded_message.val.clone(),
+            cert,
+            tree,
+        };
+
+        match client_channels.get(&client_key) {
+            Some(client_channel_tx) => {
+                debug!("Received message with key: {:?} from canister", m.key);
+                if let Err(e) = client_channel_tx.send(Ok(m)).await {
+                    error!("Client's thread terminated: {}", e);
+                } else {
+                    trace!("sent_message_to_client_handler");
+                }
+            },
+            None => error!(
+                "Connection to client with key: {:?} closed before message could be delivered",
+                client_key
+            ),
+        }
     }
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
