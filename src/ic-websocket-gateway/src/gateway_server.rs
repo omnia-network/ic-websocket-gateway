@@ -12,7 +12,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level};
 
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
@@ -289,7 +289,7 @@ impl GatewayState {
             client_info_map: HashMap::default(),
         }
     }
-
+    #[tracing::instrument(level = Level::TRACE, name = "timing_manage_clients", skip_all)]
     async fn manage_clients_connections(
         &mut self,
         connection_state: WsConnectionState,
@@ -300,11 +300,17 @@ impl GatewayState {
     ) {
         match connection_state {
             WsConnectionState::Established(gateway_session) => {
+                let manage_clients_state_span = span!(
+                    Level::INFO,
+                    "manage_clients_state",
+                    client_id = gateway_session.client_id
+                );
                 let client_key = gateway_session.client_key.clone();
                 let canister_id = gateway_session.canister_id;
 
                 // add client's session state to the WS Gateway state
                 self.add_client(gateway_session.clone());
+                trace!("added_client_to_state");
 
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
@@ -380,20 +386,31 @@ impl GatewayState {
                             e
                         )
                     }
+                    trace!("spawned_new_poller");
                 }
 
                 // notify canister that it can now send messages for the client corresponding to client_key
                 let agent = Arc::clone(&agent);
-                tokio::spawn(async move {
-                    let gateway_message =
-                        CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                    if let Err(e) =
-                        canister_methods::ws_message(&agent, &canister_id, gateway_message).await
-                    {
-                        error!("Calling ws_message on canister failed: {}", e);
-                        // TODO: try again or report failure to client
+                tokio::spawn(
+                    async move {
+                        let gateway_message =
+                            CanisterIncomingMessage::IcWebSocketEstablished(client_key);
+                        if let Err(e) =
+                            canister_methods::ws_message(&agent, &canister_id, gateway_message)
+                                .await
+                        {
+                            manage_clients_state_span.in_scope(|| {
+                                error!("Calling ws_message on canister failed: {}", e)
+                            });
+                            // TODO: try again or report failure to client
+                        } else {
+                            manage_clients_state_span
+                                .in_scope(|| debug!("Client established IC WebSocket connection"));
+                            trace!("established_ic_ws_connection");
+                        }
                     }
-                });
+                    .in_current_span(),
+                );
             },
             WsConnectionState::Closed(client_id) => {
                 // cleanup client's session from WS Gateway state
@@ -405,8 +422,6 @@ impl GatewayState {
                 // TODO: make sure that cleaning up is not needed
             },
         }
-
-        let _entered = span!(Level::INFO, "manage_clients_state").entered();
     }
 
     #[tracing::instrument(name = "manage_clients_state", skip_all,

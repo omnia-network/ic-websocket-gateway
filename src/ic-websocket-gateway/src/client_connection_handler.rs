@@ -202,8 +202,8 @@ impl ClientConnectionHandler {
                             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
                             // is already executing
                             if !self.token.is_cancelled() {
-                                debug!("Client established IC WebSocket connection");
-                                trace!("established_ic_ws_connection");
+                                debug!("Client requested IC WebSocket connection");
+                                trace!("requested_ic_ws_connection");
                                 // let the client know that the IC WS connection is setup correctly
                                 send_ws_message_to_client(
                                     &mut ws_write,
@@ -223,7 +223,7 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
-                                trace!("added_client_state_to_manager");
+                                trace!("sent_client_session_to_manager");
                                 WsConnectionState::Established(gateway_session)
                             } else {
                                 // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting

@@ -151,8 +151,16 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
                 vec![
                     ("accepted_ws_connection", 10),
                     ("received_first_message", 10),
+                    ("requested_ic_ws_connection", 10),
+                    ("sent_client_session_to_manager", 10),
+                ],
+            ),
+            (
+                "timing_manage_clients",
+                vec![
+                    ("added_client_to_state", 10),
+                    ("spawned_new_poller", 1),
                     ("established_ic_ws_connection", 10),
-                    ("added_client_state_to_manager", 10),
                 ],
             ),
         ];
