@@ -69,12 +69,9 @@ impl ClientConnectionHandler {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, name = "timing_establish_connection", skip_all)]
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
-        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
-        match accept_async(stream)
-            .instrument(timing_incoming_request_span)
-            .await
-        {
+        match accept_async(stream).await {
             Ok(ws_stream) => {
                 debug!("Accepted WebSocket connection");
                 trace!("accepted_ws_connection");
@@ -176,7 +173,6 @@ impl ClientConnectionHandler {
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     ) -> WsConnectionState {
-        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
         match ws_message {
             // handle message sent from client via WebSocket
             Ok(Some(message)) => {
@@ -193,9 +189,7 @@ impl ClientConnectionHandler {
                 if is_first_message {
                     trace!("received_first_message");
                     // check if client followed the IC WebSocket connection establishment protocol
-                    match canister_methods::check_canister_init(&self.agent, message.clone())
-                        .instrument(timing_incoming_request_span)
-                        .await
+                    match canister_methods::check_canister_init(&self.agent, message.clone()).await
                     {
                         Ok(CanisterWsOpenResultValue {
                             client_key,

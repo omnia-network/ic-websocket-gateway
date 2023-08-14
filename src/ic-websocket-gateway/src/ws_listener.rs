@@ -69,7 +69,7 @@ impl WsListener {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, name = "incoming_request", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, name = "timing_incoming_request", skip_all)]
     pub async fn listen_for_incoming_requests(&mut self, parent_token: CancellationToken) {
         // needed to ensure that we stop listening for incoming requests before we start shutting down the connections
         let child_token = CancellationToken::new();
@@ -134,7 +134,6 @@ impl WsListener {
     ) {
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
@@ -145,7 +144,7 @@ impl WsListener {
                     token,
                 );
                 debug!("Spawned new connection handler");
-                trace!("spawned_connection_handler");
+
                 match stream {
                     CustomStream::Tcp(stream) => {
                         client_connection_handler.handle_stream(stream).await
@@ -156,8 +155,8 @@ impl WsListener {
                 }
                 debug!("Terminated client connection handler task");
             }
-            .instrument(timing_incoming_request_span)
             .instrument(handle_client_connection_span),
         );
+        trace!("spawned_connection_handler");
     }
 }

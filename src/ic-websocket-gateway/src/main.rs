@@ -137,18 +137,25 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard, Dispatch), String> {
 
 fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<TimingData>) {
     std::thread::spawn(move || {
-        let metadata = vec![(
-            "incoming_request",
-            vec![
-                ("accepted_without_tls", 10),
-                ("started_connection_handler", 10),
-                ("spawned_connection_handler", 10),
-                ("accepted_ws_connection", 10),
-                ("received_first_message", 10),
-                ("established_ic_ws_connection", 10),
-                ("added_client_state_to_manager", 10),
-            ],
-        )];
+        let metadata = vec![
+            (
+                "timing_incoming_request",
+                vec![
+                    ("accepted_without_tls", 10),
+                    ("started_connection_handler", 10),
+                    ("spawned_connection_handler", 10),
+                ],
+            ),
+            (
+                "timing_establish_connection",
+                vec![
+                    ("accepted_ws_connection", 10),
+                    ("received_first_message", 10),
+                    ("established_ic_ws_connection", 10),
+                    ("added_client_state_to_manager", 10),
+                ],
+            ),
+        ];
 
         let timing_metadata = TimingMetadata::new(metadata);
 
