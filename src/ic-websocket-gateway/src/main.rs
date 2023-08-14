@@ -62,19 +62,20 @@ impl<'a> TimingMetadata<'a> {
 #[derive(Debug)]
 pub struct TimingData {
     event: String,
-    min: u64,
+    min: f64,
     mean: f64,
-    max: u64,
+    max: f64,
     count: u64,
 }
 
 impl TimingData {
     fn new(event: &str, h: &mut SyncHistogram<u64>) -> Self {
+        // timings are in milliseconds
         Self {
             event: String::from(event),
-            min: h.min(),
-            mean: h.mean(),
-            max: h.max(),
+            min: h.min() as f64 / 1_000_000.0,
+            mean: h.mean() / 1_000_000.0,
+            max: h.max() as f64 / 1_000_000.0,
             count: h.len(),
         }
     }
@@ -128,8 +129,12 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard, Dispatch), String> {
 fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<TimingData>) {
     std::thread::spawn(move || {
         let metadata = vec![(
-            "request",
-            vec![("incoming_request", 10), ("accepted_without_tls", 10)],
+            "incoming_request",
+            vec![
+                ("accepted_without_tls", 10),
+                ("started_connection_handler", 10),
+                ("spawned_connection_handler", 10),
+            ],
         )];
 
         let timing_metadata = TimingMetadata::new(metadata);

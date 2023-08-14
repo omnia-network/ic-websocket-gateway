@@ -69,6 +69,7 @@ impl WsListener {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, name = "incoming_request", skip_all)]
     pub async fn listen_for_incoming_requests(&mut self, parent_token: CancellationToken) {
         // needed to ensure that we stop listening for incoming requests before we start shutting down the connections
         let child_token = CancellationToken::new();
@@ -86,9 +87,6 @@ impl WsListener {
                     break;
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
-                    let timing_span = span!(Level::TRACE, "request");
-                    let _timing_guard = timing_span.enter();
-                    trace!("incoming_request");
                     let current_client_id = self.next_client_id;
 
                     let stream = match self.tls_acceptor {
@@ -112,13 +110,14 @@ impl WsListener {
                         },
                     };
 
-                    let span = span!(
+                    let handle_client_connection_span = span!(
                         Level::INFO,
                         "handle_client_connection",
                         client_addr = ?client_addr,
                         client_id = current_client_id
                     );
-                    self.start_connection_handler(stream, current_client_id, child_token.clone(), span);
+                    self.start_connection_handler(stream, current_client_id, child_token.clone(), handle_client_connection_span);
+                    trace!("started_connection_handler");
 
                     self.next_client_id += 1;
                 },
@@ -126,15 +125,17 @@ impl WsListener {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, name = "incoming_request", skip_all)]
     fn start_connection_handler(
         &self,
         stream: CustomStream,
         client_id: u64,
         token: CancellationToken,
-        span: Span,
+        handle_client_connection_span: Span,
     ) {
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
@@ -145,6 +146,7 @@ impl WsListener {
                     token,
                 );
                 debug!("Spawned new connection handler");
+                trace!("spawned_connection_handler");
                 match stream {
                     CustomStream::Tcp(stream) => {
                         client_connection_handler.handle_stream(stream).await
@@ -155,7 +157,8 @@ impl WsListener {
                 }
                 debug!("Terminated client connection handler task");
             }
-            .instrument(span),
+            .instrument(timing_incoming_request_span)
+            .instrument(handle_client_connection_span),
         );
     }
 }
