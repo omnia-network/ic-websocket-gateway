@@ -88,18 +88,23 @@ impl WsListener {
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     let current_client_id = self.next_client_id;
-
+                    let handle_client_connection_span = span!(
+                        Level::INFO,
+                        "handle_client_connection",
+                        client_addr = ?client_addr,
+                        client_id = current_client_id
+                    );
                     let stream = match self.tls_acceptor {
                         Some(ref acceptor) => {
                             let tls_stream = acceptor.accept(stream).await;
                             match tls_stream {
                                 Ok(tls_stream) => {
-                                    debug!("TLS handshake successful");
+                                    handle_client_connection_span.in_scope(|| debug!("TLS handshake successful"));
                                     trace!("accepted_with_tls");
                                     CustomStream::TcpWithTls(tls_stream)
                                 },
                                 Err(e) => {
-                                    error!("TLS handshake failed: {:?}", e);
+                                    handle_client_connection_span.in_scope(|| error!("TLS handshake failed: {:?}", e));
                                     continue;
                                 },
                             }
@@ -110,16 +115,9 @@ impl WsListener {
                         },
                     };
 
-                    let handle_client_connection_span = span!(
-                        Level::INFO,
-                        "handle_client_connection",
-                        client_addr = ?client_addr,
-                        client_id = current_client_id
-                    );
                     self.start_connection_handler(stream, current_client_id, child_token.clone(), handle_client_connection_span);
-                    trace!("started_connection_handler");
-
                     self.next_client_id += 1;
+                    trace!("started_connection_handler");
                 },
             }
         }

@@ -19,7 +19,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, trace, warn, Instrument, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 
 /// possible states of the WebSocket connection:
 /// - established
