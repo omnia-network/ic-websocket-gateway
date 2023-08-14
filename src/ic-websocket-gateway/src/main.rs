@@ -143,6 +143,10 @@ fn start_time_traces_thread(dispatch: Dispatch, tracing_timing_tx: StdSender<Tim
                 ("accepted_without_tls", 10),
                 ("started_connection_handler", 10),
                 ("spawned_connection_handler", 10),
+                ("accepted_ws_connection", 10),
+                ("received_first_message", 10),
+                ("established_ic_ws_connection", 10),
+                ("added_client_state_to_manager", 10),
             ],
         )];
 

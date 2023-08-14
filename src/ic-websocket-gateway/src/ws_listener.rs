@@ -125,7 +125,6 @@ impl WsListener {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, name = "incoming_request", skip_all)]
     fn start_connection_handler(
         &self,
         stream: CustomStream,

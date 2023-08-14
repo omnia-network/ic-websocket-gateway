@@ -19,7 +19,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level};
 
 /// possible states of the WebSocket connection:
 /// - established
@@ -70,9 +70,14 @@ impl ClientConnectionHandler {
     }
 
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
-        match accept_async(stream).await {
+        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
+        match accept_async(stream)
+            .instrument(timing_incoming_request_span)
+            .await
+        {
             Ok(ws_stream) => {
                 debug!("Accepted WebSocket connection");
+                trace!("accepted_ws_connection");
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
                 // [client connection handler task]        [poller task]
@@ -171,6 +176,7 @@ impl ClientConnectionHandler {
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     ) -> WsConnectionState {
+        let timing_incoming_request_span = span!(Level::TRACE, "timing_incoming_request");
         match ws_message {
             // handle message sent from client via WebSocket
             Ok(Some(message)) => {
@@ -185,8 +191,11 @@ impl ClientConnectionHandler {
                 }
                 // check if it is the first message being sent by the client via WebSocket
                 if is_first_message {
+                    trace!("received_first_message");
                     // check if client followed the IC WebSocket connection establishment protocol
-                    match canister_methods::check_canister_init(&self.agent, message.clone()).await
+                    match canister_methods::check_canister_init(&self.agent, message.clone())
+                        .instrument(timing_incoming_request_span)
+                        .await
                     {
                         Ok(CanisterWsOpenResultValue {
                             client_key,
@@ -200,6 +209,7 @@ impl ClientConnectionHandler {
                             // is already executing
                             if !self.token.is_cancelled() {
                                 debug!("Client established IC WebSocket connection");
+                                trace!("established_ic_ws_connection");
                                 // let the client know that the IC WS connection is setup correctly
                                 send_ws_message_to_client(
                                     &mut ws_write,
@@ -219,6 +229,7 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
+                                trace!("added_client_state_to_manager");
                                 WsConnectionState::Established(gateway_session)
                             } else {
                                 // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
