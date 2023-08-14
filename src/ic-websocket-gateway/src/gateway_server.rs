@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::Receiver as StdReceiver,
         Arc,
     },
 };
@@ -22,7 +21,6 @@ use crate::{
     },
     client_connection_handler::WsConnectionState,
     ws_listener::{TlsConfig, WsListener},
-    TimingData,
 };
 
 /// keeps track of the number of clients registered in the CDK
@@ -141,12 +139,7 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(
-        &mut self,
-        polling_interval: u64,
-        send_status_interval: u64,
-        tracing_timing_rx: StdReceiver<TimingData>,
-    ) {
+    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -180,9 +173,6 @@ impl GatewayServer {
                         TerminationInfo::LastClientDisconnected(canister_id) => self.state.remove_poller_data(&canister_id),
                         TerminationInfo::CdkError(canister_id) => self.handle_failed_poller(&canister_id).await,
                     }
-                },
-                Ok(timing_data) = async { tracing_timing_rx.try_recv() } => {
-                    warn!("{:?}", timing_data);
                 },
                 // detect ctrl_c signal from the OS
                 _ = signal::ctrl_c() => break,

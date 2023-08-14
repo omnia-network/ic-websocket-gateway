@@ -2,7 +2,7 @@ use crate::client_connection_handler::{ClientConnectionHandler, WsConnectionStat
 
 use ic_agent::Agent;
 use native_tls::Identity;
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -10,7 +10,7 @@ use tokio::{
 };
 use tokio_native_tls::{TlsAcceptor, TlsStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, trace, Instrument, Level, Span};
+use tracing::{debug, error, info, span, Instrument, Level, Span};
 
 /// Possible TCP streams.
 enum CustomStream {
@@ -86,10 +86,14 @@ impl WsListener {
                     break;
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
-                    let timing_span = span!(Level::TRACE, "request");
-                    let _timing_guard = timing_span.enter();
-                    trace!("incoming_request");
                     let current_client_id = self.next_client_id;
+                    let span = span!(
+                        Level::INFO,
+                        "handle_client_connection",
+                        client_addr = ?client_addr,
+                        client_id = current_client_id
+                    );
+                    let _guard = span.enter();
 
                     let stream = match self.tls_acceptor {
                         Some(ref acceptor) => {
@@ -97,7 +101,6 @@ impl WsListener {
                             match tls_stream {
                                 Ok(tls_stream) => {
                                     debug!("TLS handshake successful");
-                                    trace!("accepted_with_tls");
                                     CustomStream::TcpWithTls(tls_stream)
                                 },
                                 Err(e) => {
@@ -107,19 +110,11 @@ impl WsListener {
                             }
                         },
                         None => {
-                            tokio::time::sleep(Duration::from_millis(10)).await;
-                            trace!("accepted_without_tls");
                             CustomStream::Tcp(stream)
                         },
                     };
 
-                    let span = span!(
-                        Level::INFO,
-                        "handle_client_connection",
-                        client_addr = ?client_addr,
-                        client_id = current_client_id
-                    );
-                    self.start_connection_handler(stream, current_client_id, child_token.clone(), span);
+                    self.start_connection_handler(stream, current_client_id, child_token.clone(), span.clone());
 
                     self.next_client_id += 1;
                 },
