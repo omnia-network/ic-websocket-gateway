@@ -21,6 +21,8 @@ services:
                 "--tls-certificate-key-pem-path",
                 "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
             ]
+        environment:
+            - RUST_LOG=${RUST_LOG}
         volumes:
             - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
         networks:
