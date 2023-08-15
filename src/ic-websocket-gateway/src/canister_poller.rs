@@ -35,16 +35,19 @@ pub struct CertifiedMessage {
 pub struct PollerChannelsPollerEnds {
     main_to_poller: Receiver<PollerToClientChannelData>,
     poller_to_main: Sender<TerminationInfo>,
+    poller_to_analyzer: Sender<PollerMetrics>,
 }
 
 impl PollerChannelsPollerEnds {
     pub fn new(
         main_to_poller: Receiver<PollerToClientChannelData>,
         poller_to_main: Sender<TerminationInfo>,
+        poller_to_analyzer: Sender<PollerMetrics>,
     ) -> Self {
         Self {
             main_to_poller,
             poller_to_main,
+            poller_to_analyzer,
         }
     }
 }
@@ -104,7 +107,7 @@ impl PollerMetrics {
         self.messages_relayed.push(None);
     }
 
-    fn compute_deltas(&self) -> Option<PollerDeltas> {
+    pub fn compute_deltas(&self) -> Option<PollerDeltas> {
         let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
         let time_to_start_relaying = self
             .start_relaying_messages?
@@ -134,14 +137,14 @@ impl PollerMetrics {
 }
 
 #[derive(Debug)]
-struct PollerDeltas {
+pub struct PollerDeltas {
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     times_to_relay: Vec<Option<Duration>>,
 }
 
 impl PollerDeltas {
-    fn new(
+    pub fn new(
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
         times_to_relay: Vec<Option<Duration>>,
@@ -151,6 +154,13 @@ impl PollerDeltas {
             time_to_start_relaying,
             times_to_relay,
         }
+    }
+
+    pub fn display(&self) {
+        info!(
+            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}",
+            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay
+        );
     }
 }
 
@@ -278,9 +288,7 @@ impl CanisterPoller {
                             }
                         }
 
-                        if let Some(deltas) = poller_metrics.compute_deltas() {
-                            info!("\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}", deltas.time_to_receive, deltas.time_to_start_relaying, deltas.times_to_relay);
-                        }
+                        poller_channels.poller_to_analyzer.send(poller_metrics).await.expect("analyzer's side of the channel dropped");
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones

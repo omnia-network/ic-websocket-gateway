@@ -16,8 +16,8 @@ use tracing::{debug, error, info, span, warn, Level};
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
     canister_poller::{
-        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
-        TerminationInfo,
+        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerMetrics,
+        PollerToClientChannelData, TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
     ws_listener::{TlsConfig, WsListener},
@@ -139,7 +139,12 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
+    pub async fn manage_state(
+        &mut self,
+        polling_interval: u64,
+        send_status_interval: u64,
+        metrics_channel_tx: Sender<PollerMetrics>,
+    ) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -161,6 +166,7 @@ impl GatewayServer {
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
+                        metrics_channel_tx.clone(),
                         polling_interval,
                         send_status_interval,
                         self.agent.clone()
@@ -284,6 +290,7 @@ impl GatewayState {
         &mut self,
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
+        metrics_channel_tx: Sender<PollerMetrics>,
         polling_interval: u64,
         send_status_interval: u64,
         agent: Arc<Agent>,
@@ -339,6 +346,7 @@ impl GatewayState {
                     let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
+                        metrics_channel_tx,
                     );
                     let agent = Arc::clone(&agent);
 

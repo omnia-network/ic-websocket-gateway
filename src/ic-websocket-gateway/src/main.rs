@@ -1,5 +1,5 @@
-use crate::gateway_server::GatewayServer;
 use crate::ws_listener::TlsConfig;
+use crate::{gateway_server::GatewayServer, metrics_analyzer::MetricsAnalyzer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self, File},
@@ -7,6 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use structopt::StructOpt;
+use tokio::sync::mpsc;
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter, prelude::*, EnvFilter};
@@ -15,6 +16,7 @@ mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
 mod gateway_server;
+mod metrics_analyzer;
 mod unit_tests;
 mod ws_listener;
 
@@ -113,6 +115,12 @@ async fn main() -> Result<(), String> {
         None
     };
 
+    let (metrics_channel_tx, metrics_channel_rx) = mpsc::channel(100);
+    tokio::spawn(async move {
+        let mut metrics_analyzer = MetricsAnalyzer::new(metrics_channel_rx);
+        metrics_analyzer.start_processing().await;
+    });
+
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
     gateway_server.start_accepting_incoming_connections(tls_config);
 
@@ -121,6 +129,7 @@ async fn main() -> Result<(), String> {
         .manage_state(
             deployment_info.polling_interval,
             deployment_info.send_status_interval,
+            metrics_channel_tx,
         )
         .await;
     info!("Terminated state manager");
