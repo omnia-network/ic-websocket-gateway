@@ -1,7 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -174,10 +174,14 @@ impl PollerDeltas {
 
 impl Deltas for PollerDeltas {
     fn display(&self) {
-        info!(
+        warn!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
             self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
         );
+    }
+
+    fn get_interval(&self) -> Duration {
+        self.time_to_previous
     }
 }
 
