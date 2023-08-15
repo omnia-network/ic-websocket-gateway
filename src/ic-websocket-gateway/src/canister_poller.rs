@@ -10,9 +10,12 @@ use tokio::{
     time::Instant,
 };
 
-use crate::canister_methods::{
-    self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
-    ClientPublicKey, GatewayStatusMessage,
+use crate::{
+    canister_methods::{
+        self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
+        ClientPublicKey, GatewayStatusMessage,
+    },
+    metrics_analyzer::{Deltas, Metrics},
 };
 
 type CanisterGetMessagesWithMetrics = (CanisterOutputCertifiedMessages, PollerMetrics);
@@ -106,8 +109,12 @@ impl PollerMetrics {
     fn set_no_message_relayed(&mut self) {
         self.messages_relayed.push(None);
     }
+}
 
-    pub fn compute_deltas(&self) -> Option<PollerDeltas> {
+impl Metrics for PollerMetrics {
+    type Item = PollerDeltas;
+
+    fn compute_deltas(&self) -> Option<Self::Item> {
         let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
         let time_to_start_relaying = self
             .start_relaying_messages?
@@ -155,8 +162,10 @@ impl PollerDeltas {
             times_to_relay,
         }
     }
+}
 
-    pub fn display(&self) {
+impl Deltas for PollerDeltas {
+    fn display(&self) {
         info!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}",
             self.time_to_receive, self.time_to_start_relaying, self.times_to_relay
