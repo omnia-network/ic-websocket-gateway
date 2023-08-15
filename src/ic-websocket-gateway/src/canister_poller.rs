@@ -7,12 +7,15 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
+    time::Instant,
 };
 
 use crate::canister_methods::{
-    self, CanisterIncomingMessage, CanisterWsGetMessagesResult, CanisterWsMessageResult,
+    self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
     ClientPublicKey, GatewayStatusMessage,
 };
+
+type CanisterGetMessagesWithMetrics = (CanisterOutputCertifiedMessages, PollerMetrics);
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CertifiedMessage {
@@ -61,6 +64,94 @@ pub enum PollerToClientChannelData {
 pub enum TerminationInfo {
     LastClientDisconnected(Principal),
     CdkError(Principal),
+}
+
+#[derive(Debug)]
+pub struct PollerMetrics {
+    start_polling: Option<Instant>,
+    received_messages: Option<Instant>,
+    start_relaying_messages: Option<Instant>,
+    messages_relayed: Vec<Option<Instant>>,
+}
+
+impl PollerMetrics {
+    fn default() -> Self {
+        Self {
+            start_polling: None,
+            received_messages: None,
+            start_relaying_messages: None,
+            messages_relayed: Vec::new(),
+        }
+    }
+
+    fn set_start_polling(&mut self) {
+        let _ = self.start_polling.insert(Instant::now());
+    }
+
+    fn set_received_messages(&mut self) {
+        let _ = self.received_messages.insert(Instant::now());
+    }
+
+    fn set_start_relaying_messages(&mut self) {
+        let _ = self.start_relaying_messages.insert(Instant::now());
+    }
+
+    fn set_message_relayed(&mut self) {
+        self.messages_relayed.push(Some(Instant::now()));
+    }
+
+    fn set_no_message_relayed(&mut self) {
+        self.messages_relayed.push(None);
+    }
+
+    fn compute_deltas(&self) -> Option<PollerDeltas> {
+        let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
+        let time_to_start_relaying = self
+            .start_relaying_messages?
+            .duration_since(self.received_messages?);
+        let times_to_relay = self.messages_relayed.iter().fold(
+            Vec::<Option<Duration>>::new(),
+            |mut deltas, message_relayed| {
+                match message_relayed {
+                    Some(message_relayed) => {
+                        let delta = message_relayed.duration_since(
+                            self.start_relaying_messages.expect("must not be None"),
+                        );
+                        deltas.push(Some(delta));
+                    },
+                    None => deltas.push(None),
+                }
+                deltas
+            },
+        );
+
+        Some(PollerDeltas::new(
+            time_to_receive,
+            time_to_start_relaying,
+            times_to_relay,
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct PollerDeltas {
+    time_to_receive: Duration,
+    time_to_start_relaying: Duration,
+    times_to_relay: Vec<Option<Duration>>,
+}
+
+impl PollerDeltas {
+    fn new(
+        time_to_receive: Duration,
+        time_to_start_relaying: Duration,
+        times_to_relay: Vec<Option<Duration>>,
+    ) -> Self {
+        Self {
+            time_to_receive,
+            time_to_start_relaying,
+            times_to_relay,
+        }
+    }
 }
 
 pub struct CanisterPoller {
@@ -143,41 +234,52 @@ impl CanisterPoller {
                 // poll canister for updates across multiple select! iterations
                 // TODO: in the current implementation, if this call fails,
                 //       a new call is not pinned again. We have to handle the error case
-                Ok(msgs) = &mut get_messages_operation => {
-                    for encoded_message in msgs.messages {
-                        let client_key = encoded_message.client_key;
-                        let m = CertifiedMessage {
-                            key: encoded_message.key.clone(),
-                            val: encoded_message.val,
-                            cert: msgs.cert.clone(),
-                            tree: msgs.tree.clone(),
-                        };
+                res = &mut get_messages_operation => {
+                    if let Some((msgs, mut poller_metrics)) = res {
+                        poller_metrics.set_start_relaying_messages();
+                        for encoded_message in msgs.messages {
+                            let client_key = encoded_message.client_key;
+                            let m = CertifiedMessage {
+                                key: encoded_message.key.clone(),
+                                val: encoded_message.val,
+                                cert: msgs.cert.clone(),
+                                tree: msgs.tree.clone(),
+                            };
 
-                        match client_channels.get(&client_key) {
-                            Some(client_channel_tx) => {
-                                debug!("Received message with key: {:?} from canister", m.key);
-                                if let Err(e) = client_channel_tx.send(Ok(m)).await {
-                                    error!("Client's thread terminated: {}", e);
+                            match client_channels.get(&client_key) {
+                                Some(client_channel_tx) => {
+                                    debug!("Received message with key: {:?} from canister", m.key);
+                                    if let Err(e) = client_channel_tx.send(Ok(m)).await {
+                                        error!("Client's thread terminated: {}", e);
+                                        poller_metrics.set_no_message_relayed();
+                                    }
+                                    else {
+                                        poller_metrics.set_message_relayed();
+                                    }
+                                },
+                                None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
+                            }
+
+                            match get_nonce_from_message(encoded_message.key) {
+                                Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
+                                Err(cdk_err) => {
+                                    // let the main task know that this poller will terminate due to a CDK error
+                                    signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
+                                    // let each client connection handler task connected to this poller know that the poller will terminate
+                                    // and thus they also have to close the WebSocket connection and terminate
+                                    for client_channel_tx in client_channels.values() {
+                                        if let Err(channel_err) = client_channel_tx.send(Err(format!("Terminating poller task due to CDK error: {}", cdk_err))).await {
+                                            error!("Client's thread terminated: {}", channel_err);
+                                        }
+                                    }
+                                    error!("Terminating poller task due to CDK error: {}", cdk_err);
+                                    break 'poller_loop;
                                 }
-                            },
-                            None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
+                            }
                         }
 
-                        match get_nonce_from_message(encoded_message.key) {
-                            Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
-                            Err(cdk_err) => {
-                                // let the main task know that this poller will terminate due to a CDK error
-                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
-                                // let each client connection handler task connected to this poller know that the poller will terminate
-                                // and thus they also have to close the WebSocket connection and terminate
-                                for client_channel_tx in client_channels.values() {
-                                    if let Err(channel_err) = client_channel_tx.send(Err(format!("Terminating poller task due to CDK error: {}", cdk_err))).await {
-                                        error!("Client's thread terminated: {}", channel_err);
-                                    }
-                                }
-                                error!("Terminating poller task due to CDK error: {}", cdk_err);
-                                break 'poller_loop;
-                            }
+                        if let Some(deltas) = poller_metrics.compute_deltas() {
+                            info!("\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}", deltas.time_to_receive, deltas.time_to_start_relaying, deltas.times_to_relay);
                         }
                     }
 
@@ -194,10 +296,23 @@ impl CanisterPoller {
         }
     }
 
-    async fn get_canister_updates(&self, message_nonce: u64) -> CanisterWsGetMessagesResult {
+    async fn get_canister_updates(
+        &self,
+        message_nonce: u64,
+    ) -> Option<CanisterGetMessagesWithMetrics> {
+        let mut poller_metrics = PollerMetrics::default();
+        poller_metrics.set_start_polling();
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce).await
+        let canister_result =
+            canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce)
+                .await
+                .ok()?;
+        poller_metrics.set_received_messages();
+        if canister_result.messages.len() > 0 {
+            return Some((canister_result, poller_metrics));
+        }
+        None
     }
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
