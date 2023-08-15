@@ -72,7 +72,7 @@ pub enum TerminationInfo {
     CdkError(Principal),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PollerMetrics {
     start_polling: Option<Instant>,
     received_messages: Option<Instant>,
@@ -112,9 +112,17 @@ impl PollerMetrics {
 }
 
 impl Metrics for PollerMetrics {
-    type Item = PollerDeltas;
+    type ReturnType = PollerDeltas;
+    type Param = PollerMetrics;
 
-    fn compute_deltas(&self) -> Option<Self::Item> {
+    fn get_interval(&self, previous: PollerMetrics) -> Option<Duration> {
+        Some(
+            self.start_relaying_messages?
+                .duration_since(previous.start_relaying_messages?),
+        )
+    }
+
+    fn compute_deltas(&self) -> Option<Self::ReturnType> {
         let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
         let time_to_start_relaying = self
             .start_relaying_messages?
