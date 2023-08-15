@@ -72,7 +72,7 @@ pub enum TerminationInfo {
     CdkError(Principal),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PollerMetrics {
     start_polling: Option<Instant>,
     received_messages: Option<Instant>,
@@ -115,14 +115,7 @@ impl Metrics for PollerMetrics {
     type ReturnType = PollerDeltas;
     type Param = PollerMetrics;
 
-    fn get_interval(&self, previous: PollerMetrics) -> Option<Duration> {
-        Some(
-            self.start_relaying_messages?
-                .duration_since(previous.start_relaying_messages?),
-        )
-    }
-
-    fn compute_deltas(&self) -> Option<Self::ReturnType> {
+    fn compute_deltas(&self, previous: Self::Param) -> Option<Self::ReturnType> {
         let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
         let time_to_start_relaying = self
             .start_relaying_messages?
@@ -142,11 +135,15 @@ impl Metrics for PollerMetrics {
                 deltas
             },
         );
+        let time_to_previous = self
+            .start_relaying_messages?
+            .duration_since(previous.start_relaying_messages?);
 
         Some(PollerDeltas::new(
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
+            time_to_previous,
         ))
     }
 }
@@ -156,6 +153,7 @@ pub struct PollerDeltas {
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     times_to_relay: Vec<Option<Duration>>,
+    time_to_previous: Duration,
 }
 
 impl PollerDeltas {
@@ -163,11 +161,13 @@ impl PollerDeltas {
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
         times_to_relay: Vec<Option<Duration>>,
+        time_to_previous: Duration,
     ) -> Self {
         Self {
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
+            time_to_previous,
         }
     }
 }
@@ -175,8 +175,8 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         info!(
-            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay
+            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
+            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
         );
     }
 }
