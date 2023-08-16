@@ -174,14 +174,16 @@ impl PollerDeltas {
 
 impl Deltas for PollerDeltas {
     fn display(&self) {
-        warn!(
+        debug!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
             self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
         );
     }
 
     fn get_interval(&self) -> Duration {
-        self.time_to_previous
+        // interval: time between two consecutive polling iterations - time to receive the messages from canister
+        // this gives an idea of the time "wasted" compared to desidered polling interval
+        self.time_to_previous - self.time_to_receive
     }
 }
 

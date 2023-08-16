@@ -45,10 +45,11 @@ impl<T: Metrics> MetricsAnalyzer<T> {
                 }
                 previous = Some(metrics);
                 iter += 1;
-                if iter > 100 {
+                if iter > 10 {
                     let sum: Duration = aggregated_intervals.iter().sum();
                     let avg = sum.div_f64(aggregated_intervals.len() as f64);
                     info!("Average interval: {:?}", avg);
+                    aggregated_intervals = Vec::new();
                     iter = 0;
                 }
             }
