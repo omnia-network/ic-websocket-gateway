@@ -1,5 +1,5 @@
 use std::time::Duration;
-use tokio::sync::mpsc::Receiver;
+use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::info;
 
 /// trait implemented by the structs containing the relevant events of each component
@@ -16,6 +16,32 @@ pub trait Deltas {
     fn display(&self);
 
     fn get_interval(&self) -> Duration;
+}
+
+#[derive(Debug)]
+/// struct containing the instant of an event and helper methods to calculate duration between events
+pub struct Timeable {
+    instant: Option<Instant>,
+}
+
+impl Timeable {
+    pub fn default() -> Self {
+        Self { instant: None }
+    }
+
+    pub fn now() -> Self {
+        Self {
+            instant: Some(Instant::now()),
+        }
+    }
+
+    pub fn set_now(&mut self) {
+        self.instant = Some(Instant::now());
+    }
+
+    pub fn duration_since(&self, other: &Timeable) -> Option<Duration> {
+        Some(self.instant?.duration_since(other.instant?))
+    }
 }
 
 /// metrics analyzer receives metrics from different components of the WS Gateway

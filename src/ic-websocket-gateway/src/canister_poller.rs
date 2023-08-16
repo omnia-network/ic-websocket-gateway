@@ -15,7 +15,7 @@ use crate::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
-    metrics_analyzer::{Deltas, Metrics},
+    metrics_analyzer::{Deltas, Metrics, Timeable},
 };
 
 type CanisterGetMessagesWithMetrics = (CanisterOutputCertifiedMessages, PollerMetrics);
@@ -74,40 +74,40 @@ pub enum TerminationInfo {
 
 #[derive(Debug)]
 pub struct PollerMetrics {
-    start_polling: Option<Instant>,
-    received_messages: Option<Instant>,
-    start_relaying_messages: Option<Instant>,
-    messages_relayed: Vec<Option<Instant>>,
+    start_polling: Timeable,
+    received_messages: Timeable,
+    start_relaying_messages: Timeable,
+    messages_relayed: Vec<Timeable>,
 }
 
 impl PollerMetrics {
     fn default() -> Self {
         Self {
-            start_polling: None,
-            received_messages: None,
-            start_relaying_messages: None,
+            start_polling: Timeable::default(),
+            received_messages: Timeable::default(),
+            start_relaying_messages: Timeable::default(),
             messages_relayed: Vec::new(),
         }
     }
 
     fn set_start_polling(&mut self) {
-        let _ = self.start_polling.insert(Instant::now());
+        self.start_polling.set_now();
     }
 
     fn set_received_messages(&mut self) {
-        let _ = self.received_messages.insert(Instant::now());
+        self.received_messages.set_now();
     }
 
     fn set_start_relaying_messages(&mut self) {
-        let _ = self.start_relaying_messages.insert(Instant::now());
+        self.start_relaying_messages.set_now();
     }
 
     fn set_message_relayed(&mut self) {
-        self.messages_relayed.push(Some(Instant::now()));
+        self.messages_relayed.push(Timeable::now());
     }
 
     fn set_no_message_relayed(&mut self) {
-        self.messages_relayed.push(None);
+        self.messages_relayed.push(Timeable::default());
     }
 }
 
@@ -116,28 +116,21 @@ impl Metrics for PollerMetrics {
     type Param = PollerMetrics;
 
     fn compute_deltas(&self, previous: Self::Param) -> Option<Self::ReturnType> {
-        let time_to_receive = self.received_messages?.duration_since(self.start_polling?);
+        let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
-            .start_relaying_messages?
-            .duration_since(self.received_messages?);
+            .start_relaying_messages
+            .duration_since(&self.received_messages)?;
         let times_to_relay = self.messages_relayed.iter().fold(
             Vec::<Option<Duration>>::new(),
             |mut deltas, message_relayed| {
-                match message_relayed {
-                    Some(message_relayed) => {
-                        let delta = message_relayed.duration_since(
-                            self.start_relaying_messages.expect("must not be None"),
-                        );
-                        deltas.push(Some(delta));
-                    },
-                    None => deltas.push(None),
-                }
+                let delta = message_relayed.duration_since(&self.start_relaying_messages);
+                deltas.push(delta);
                 deltas
             },
         );
         let time_to_previous = self
-            .start_relaying_messages?
-            .duration_since(previous.start_relaying_messages?);
+            .start_relaying_messages
+            .duration_since(&previous.start_relaying_messages)?;
 
         Some(PollerDeltas::new(
             time_to_receive,
