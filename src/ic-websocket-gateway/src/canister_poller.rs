@@ -1,13 +1,12 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
-    time::Instant,
 };
 
 use crate::{
@@ -113,9 +112,8 @@ impl PollerMetrics {
 
 impl Metrics for PollerMetrics {
     type ReturnType = PollerDeltas;
-    type Param = PollerMetrics;
 
-    fn compute_deltas(&self, previous: Self::Param) -> Option<Self::ReturnType> {
+    fn compute_deltas(&self, previous: PollerMetrics) -> Option<Self::ReturnType> {
         let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
             .start_relaying_messages

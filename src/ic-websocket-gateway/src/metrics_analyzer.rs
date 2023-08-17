@@ -6,7 +6,6 @@ use tracing::info;
 pub trait Metrics<S = Self> {
     // bound ReturnType to implementors of the Deltas trait
     type ReturnType: Deltas;
-    type Param;
 
     fn compute_deltas(&self, previous: S) -> Option<Self::ReturnType>;
 }
