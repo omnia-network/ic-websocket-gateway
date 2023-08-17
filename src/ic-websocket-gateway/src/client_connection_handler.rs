@@ -2,12 +2,13 @@ use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
     gateway_server::GatewaySession,
+    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
 };
 
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::Agent;
 use serde_cbor::to_vec;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
@@ -47,10 +48,110 @@ pub enum IcWsError {
     NotImplemented(String),
 }
 
+#[derive(Debug)]
+struct ConnectionSetupMetrics {
+    accepted_ws_connection: TimeableEvent,
+    received_first_message: TimeableEvent,
+    validated_first_message: TimeableEvent,
+    established_ws_connection: TimeableEvent,
+}
+
+impl ConnectionSetupMetrics {
+    fn default() -> Self {
+        Self {
+            accepted_ws_connection: TimeableEvent::default(),
+            received_first_message: TimeableEvent::default(),
+            validated_first_message: TimeableEvent::default(),
+            established_ws_connection: TimeableEvent::default(),
+        }
+    }
+    fn set_accepted_ws_connection(&mut self) {
+        self.accepted_ws_connection.set_now();
+    }
+
+    fn set_received_first_message(&mut self) {
+        self.received_first_message.set_now();
+    }
+
+    fn set_validated_first_message(&mut self) {
+        self.validated_first_message.set_now();
+    }
+
+    fn set_established_ws_connection(&mut self) {
+        self.established_ws_connection.set_now();
+    }
+}
+
+impl Metrics for ConnectionSetupMetrics {
+    fn get_value_for_interval(&self) -> &TimeableEvent {
+        &self.established_ws_connection
+    }
+
+    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
+        let time_to_first_message = self
+            .received_first_message
+            .duration_since(&self.accepted_ws_connection)?;
+        let time_to_validation = self
+            .validated_first_message
+            .duration_since(&self.received_first_message)?;
+        let time_to_establishment = self
+            .established_ws_connection
+            .duration_since(&self.validated_first_message)?;
+        let time_to_previous = self
+            .established_ws_connection
+            .duration_since(previous.get_value_for_interval())?;
+
+        Some(Box::new(ConnectionSetupDeltas::new(
+            time_to_first_message,
+            time_to_validation,
+            time_to_establishment,
+            time_to_previous,
+        )))
+    }
+}
+
+#[derive(Debug)]
+struct ConnectionSetupDeltas {
+    time_to_first_message: Duration,
+    time_to_validation: Duration,
+    time_to_establishment: Duration,
+    time_to_previous: Duration,
+}
+
+impl ConnectionSetupDeltas {
+    pub fn new(
+        time_to_first_message: Duration,
+        time_to_validation: Duration,
+        time_to_establishment: Duration,
+        time_to_previous: Duration,
+    ) -> Self {
+        Self {
+            time_to_first_message,
+            time_to_validation,
+            time_to_establishment,
+            time_to_previous,
+        }
+    }
+}
+
+impl Deltas for ConnectionSetupDeltas {
+    fn display(&self) {
+        debug!(
+            "\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}",
+            self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous
+        );
+    }
+
+    fn get_interval(&self) -> Duration {
+        self.time_to_previous
+    }
+}
+
 pub struct ClientConnectionHandler {
     id: u64,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
+    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
     token: CancellationToken,
 }
 
@@ -59,12 +160,14 @@ impl ClientConnectionHandler {
         id: u64,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
+        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
         token: CancellationToken,
     ) -> Self {
         Self {
             id,
             agent,
             client_connection_handler_tx,
+            metrics_channel_tx,
             token,
         }
     }
@@ -72,6 +175,11 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
+                let mut connection_setup_metrics = Some(ConnectionSetupMetrics::default());
+                connection_setup_metrics
+                    .as_mut()
+                    .unwrap()
+                    .set_accepted_ws_connection();
                 debug!("Accepted WebSocket connection");
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
@@ -133,6 +241,7 @@ impl ClientConnectionHandler {
                             match self.handle_incoming_ws_message(
                                 ws_message,
                                 is_first_message,
+                                connection_setup_metrics,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
                             ).await {
@@ -148,7 +257,9 @@ impl ClientConnectionHandler {
                                     break;
                                 }
                             }
-
+                            // after the first time 'handle_incoming_ws_message' is called, we do not need to collect connection setup metrics anymore
+                            // so we always pass None
+                            connection_setup_metrics = None;
                         }
                     }
                 }
@@ -168,6 +279,7 @@ impl ClientConnectionHandler {
         &self,
         ws_message: Result<Option<Message>, Error>,
         is_first_message: bool,
+        mut connection_setup_metrics: Option<ConnectionSetupMetrics>,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     ) -> WsConnectionState {
@@ -185,6 +297,10 @@ impl ClientConnectionHandler {
                 }
                 // check if it is the first message being sent by the client via WebSocket
                 if is_first_message {
+                    connection_setup_metrics
+                        .as_mut()
+                        .expect("must have connection setup metrics for first message")
+                        .set_received_first_message();
                     // check if client followed the IC WebSocket connection establishment protocol
                     match canister_methods::check_canister_init(&self.agent, message.clone()).await
                     {
@@ -195,6 +311,10 @@ impl ClientConnectionHandler {
                             // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                             nonce,
                         }) => {
+                            connection_setup_metrics
+                                .as_mut()
+                                .expect("must have connection setup metrics for first message")
+                                .set_validated_first_message();
                             // prevent adding a new client to the gateway state while shutting down
                             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
                             // is already executing
@@ -219,6 +339,16 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
+                                connection_setup_metrics
+                                    .as_mut()
+                                    .expect("must have connection setup metrics for first message")
+                                    .set_established_ws_connection();
+                                self.metrics_channel_tx
+                                    .send(Box::new(connection_setup_metrics.expect(
+                                        "must have connection setup metrics for first message",
+                                    )))
+                                    .await
+                                    .expect("analyzer's side of the channel dropped");
                                 WsConnectionState::Established(gateway_session)
                             } else {
                                 // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting

@@ -238,6 +238,7 @@ impl WsListener {
     ) {
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        let metrics_channel_tx = self.metrics_channel_tx.clone();
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
@@ -245,6 +246,7 @@ impl WsListener {
                     client_id,
                     agent,
                     client_connection_handler_tx,
+                    metrics_channel_tx,
                     token,
                 );
                 debug!("Spawned new connection handler");

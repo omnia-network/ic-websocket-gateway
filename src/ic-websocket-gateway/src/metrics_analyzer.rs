@@ -90,7 +90,7 @@ impl MetricsAnalyzer {
                         aggregated_deltas.push(deltas);
                     }
                     *previous = metrics;
-                    if aggregated_deltas.len() > 5 {
+                    if aggregated_deltas.len() > 10 {
                         let intervals =
                             aggregated_deltas
                                 .iter()
