@@ -16,10 +16,11 @@ use tracing::{debug, error, info, span, warn, Level};
 use crate::{
     canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
     canister_poller::{
-        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerMetrics,
-        PollerToClientChannelData, TerminationInfo,
+        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
+        TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
+    metrics_analyzer::Metrics,
     ws_listener::{TlsConfig, WsListener},
 };
 
@@ -143,7 +144,7 @@ impl GatewayServer {
         &mut self,
         polling_interval: u64,
         send_status_interval: u64,
-        metrics_channel_tx: Sender<PollerMetrics>,
+        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
     ) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
@@ -290,7 +291,7 @@ impl GatewayState {
         &mut self,
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
-        metrics_channel_tx: Sender<PollerMetrics>,
+        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
         polling_interval: u64,
         send_status_interval: u64,
         agent: Arc<Agent>,

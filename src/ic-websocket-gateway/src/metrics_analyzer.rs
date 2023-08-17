@@ -3,11 +3,8 @@ use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::info;
 
 /// trait implemented by the structs containing the relevant events of each component
-pub trait Metrics<S = Self> {
-    // bound ReturnType to implementors of the Deltas trait
-    type ReturnType: Deltas;
-
-    fn compute_deltas(&self, previous: S) -> Option<Self::ReturnType>;
+pub trait Metrics {
+    fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>>;
 }
 
 /// trait implemented by the structs containing the analytics of each component
@@ -44,13 +41,13 @@ impl Timeable {
 }
 
 /// metrics analyzer receives metrics from different components of the WS Gateway
-pub struct MetricsAnalyzer<T: Metrics> {
+pub struct MetricsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
-    metrics_channel_rx: Receiver<T>,
+    metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>,
 }
 
-impl<T: Metrics> MetricsAnalyzer<T> {
-    pub fn new(metrics_channel_rx: Receiver<T>) -> Self {
+impl MetricsAnalyzer {
+    pub fn new(metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>) -> Self {
         Self { metrics_channel_rx }
     }
 

@@ -37,14 +37,14 @@ pub struct CertifiedMessage {
 pub struct PollerChannelsPollerEnds {
     main_to_poller: Receiver<PollerToClientChannelData>,
     poller_to_main: Sender<TerminationInfo>,
-    poller_to_analyzer: Sender<PollerMetrics>,
+    poller_to_analyzer: Sender<Box<dyn Metrics + Send>>,
 }
 
 impl PollerChannelsPollerEnds {
     pub fn new(
         main_to_poller: Receiver<PollerToClientChannelData>,
         poller_to_main: Sender<TerminationInfo>,
-        poller_to_analyzer: Sender<PollerMetrics>,
+        poller_to_analyzer: Sender<Box<dyn Metrics + Send>>,
     ) -> Self {
         Self {
             main_to_poller,
@@ -111,9 +111,7 @@ impl PollerMetrics {
 }
 
 impl Metrics for PollerMetrics {
-    type ReturnType = PollerDeltas;
-
-    fn compute_deltas(&self, previous: PollerMetrics) -> Option<Self::ReturnType> {
+    fn compute_deltas(&self, _previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>> {
         let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
             .start_relaying_messages
@@ -126,16 +124,16 @@ impl Metrics for PollerMetrics {
                 deltas
             },
         );
-        let time_to_previous = self
-            .start_relaying_messages
-            .duration_since(&previous.start_relaying_messages)?;
+        // let time_to_previous = self
+        //     .start_relaying_messages
+        //     .duration_since(&previous.start_relaying_messages)?;
 
-        Some(PollerDeltas::new(
+        Some(Box::new(PollerDeltas::new(
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
-            time_to_previous,
-        ))
+            // time_to_previous,
+        )))
     }
 }
 
@@ -144,7 +142,7 @@ pub struct PollerDeltas {
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     times_to_relay: Vec<Option<Duration>>,
-    time_to_previous: Duration,
+    // time_to_previous: Duration,
 }
 
 impl PollerDeltas {
@@ -152,13 +150,13 @@ impl PollerDeltas {
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
         times_to_relay: Vec<Option<Duration>>,
-        time_to_previous: Duration,
+        // time_to_previous: Duration,
     ) -> Self {
         Self {
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
-            time_to_previous,
+            // time_to_previous,
         }
     }
 }
@@ -166,15 +164,16 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
+            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}",
+            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay
         );
     }
 
     fn get_interval(&self) -> Duration {
         // interval: time between two consecutive polling iterations - time to receive the messages from canister
         // this gives an idea of the time "wasted" compared to desidered polling interval
-        self.time_to_previous - self.time_to_receive
+        // self.time_to_previous - self.time_to_receive
+        Duration::from_millis(100)
     }
 }
 
@@ -302,7 +301,7 @@ impl CanisterPoller {
                             }
                         }
 
-                        poller_channels.poller_to_analyzer.send(poller_metrics).await.expect("analyzer's side of the channel dropped");
+                        poller_channels.poller_to_analyzer.send(Box::new(poller_metrics)).await.expect("analyzer's side of the channel dropped");
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
