@@ -72,22 +72,29 @@ impl GatewaySession {
 
 /// WS Gateway
 pub struct GatewayServer {
-    // agent used to interact with the canisters
+    /// agent used to interact with the canisters
     agent: Arc<Agent>,
-    // gateway address:
+    /// gateway address:
     address: String,
-    // sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
+    /// sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
     client_connection_handler_tx: Sender<WsConnectionState>,
-    // receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
+    /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
     client_connection_handler_rx: Receiver<WsConnectionState>,
-    // state of the WS Gateway
+    /// sender side of the channel used to send metrics from different components to the analyzer
+    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+    /// state of the WS Gateway
     state: GatewayState,
-    // cancellation token used to signal other tasks when it's time to shut down
+    /// cancellation token used to signal other tasks when it's time to shut down
     token: CancellationToken,
 }
 
 impl GatewayServer {
-    pub async fn new(gateway_address: String, subnet_url: String, identity: BasicIdentity) -> Self {
+    pub async fn new(
+        gateway_address: String,
+        subnet_url: String,
+        identity: BasicIdentity,
+        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+    ) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
         let agent = canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key)
@@ -114,6 +121,7 @@ impl GatewayServer {
             address: gateway_address,
             client_connection_handler_tx,
             client_connection_handler_rx,
+            metrics_channel_tx,
             state: GatewayState::default(),
             token,
         };
@@ -124,12 +132,14 @@ impl GatewayServer {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        let metrics_channel_tx = self.metrics_channel_tx.clone();
         let token = self.token.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 client_connection_handler_tx,
+                metrics_channel_tx,
                 tls_config,
             )
             .await;
@@ -140,12 +150,7 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(
-        &mut self,
-        polling_interval: u64,
-        send_status_interval: u64,
-        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
-    ) {
+    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -167,7 +172,7 @@ impl GatewayServer {
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
-                        metrics_channel_tx.clone(),
+                        self.metrics_channel_tx.clone(),
                         polling_interval,
                         send_status_interval,
                         self.agent.clone()

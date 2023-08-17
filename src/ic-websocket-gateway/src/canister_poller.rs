@@ -72,7 +72,7 @@ pub enum TerminationInfo {
 }
 
 #[derive(Debug)]
-pub struct PollerMetrics {
+struct PollerMetrics {
     start_polling: TimeableEvent,
     received_messages: TimeableEvent,
     start_relaying_messages: TimeableEvent,
@@ -111,8 +111,8 @@ impl PollerMetrics {
 }
 
 impl Metrics for PollerMetrics {
-    fn get_value_for_interval(&self) -> TimeableEvent {
-        self.start_relaying_messages.clone()
+    fn get_value_for_interval(&self) -> &TimeableEvent {
+        &self.start_relaying_messages
     }
 
     fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>> {
@@ -132,7 +132,7 @@ impl Metrics for PollerMetrics {
         // returns the value we want to use to compute the interval from the current poller metric
         let time_to_previous = self
             .start_relaying_messages
-            .duration_since(&previous.get_value_for_interval())?;
+            .duration_since(previous.get_value_for_interval())?;
 
         Some(Box::new(PollerDeltas::new(
             time_to_receive,
@@ -144,7 +144,7 @@ impl Metrics for PollerMetrics {
 }
 
 #[derive(Debug)]
-pub struct PollerDeltas {
+struct PollerDeltas {
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     times_to_relay: Vec<Option<Duration>>,
@@ -169,7 +169,7 @@ impl PollerDeltas {
 
 impl Deltas for PollerDeltas {
     fn display(&self) {
-        info!(
+        debug!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
             self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
         );

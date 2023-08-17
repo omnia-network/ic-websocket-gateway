@@ -97,10 +97,13 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    let (metrics_channel_tx, metrics_channel_rx) = mpsc::channel(100);
+
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
         deployment_info.subnet_url,
         identity,
+        metrics_channel_tx,
     )
     .await;
 
@@ -115,7 +118,6 @@ async fn main() -> Result<(), String> {
         None
     };
 
-    let (metrics_channel_tx, metrics_channel_rx) = mpsc::channel(100);
     tokio::spawn(async move {
         let mut metrics_analyzer = MetricsAnalyzer::new(metrics_channel_rx);
         metrics_analyzer.start_processing().await;
@@ -129,7 +131,6 @@ async fn main() -> Result<(), String> {
         .manage_state(
             deployment_info.polling_interval,
             deployment_info.send_status_interval,
-            metrics_channel_tx,
         )
         .await;
     info!("Terminated state manager");

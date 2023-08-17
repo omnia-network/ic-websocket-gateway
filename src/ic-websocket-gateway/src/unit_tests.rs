@@ -8,6 +8,7 @@ mod tests {
     use serde_cbor::Serializer;
     use std::net::TcpStream;
     use std::time::Duration;
+    use tokio::sync::mpsc;
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
@@ -75,7 +76,15 @@ mod tests {
         let key_pair = load_key_pair("./data/key_pair").unwrap();
         let identity = get_identity_from_key_pair(key_pair);
 
-        let gateway_server = GatewayServer::new(gateway_addr.clone(), subnet_addr, identity).await;
+        let (metrics_channel_tx, _metrics_channel_rx) = mpsc::channel(100);
+
+        let gateway_server = GatewayServer::new(
+            gateway_addr.clone(),
+            subnet_addr,
+            identity,
+            metrics_channel_tx,
+        )
+        .await;
         gateway_server.start_accepting_incoming_connections(None);
         // delay the client connection in order to give the server time to start listening for incoming connections
         tokio::time::sleep(Duration::from_millis(100)).await;

@@ -1,8 +1,11 @@
-use crate::client_connection_handler::{ClientConnectionHandler, WsConnectionState};
+use crate::{
+    client_connection_handler::{ClientConnectionHandler, WsConnectionState},
+    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
+};
 
 use ic_agent::Agent;
 use native_tls::Identity;
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -23,12 +26,106 @@ pub struct TlsConfig {
     pub certificate_key_pem_path: String,
 }
 
+struct ListenerMetrics {
+    received_request: TimeableEvent,
+    accepted_with_tls: TimeableEvent,
+    accepted_without_tls: TimeableEvent,
+    started_handler: TimeableEvent,
+}
+
+impl ListenerMetrics {
+    fn default() -> Self {
+        Self {
+            received_request: TimeableEvent::default(),
+            accepted_with_tls: TimeableEvent::default(),
+            accepted_without_tls: TimeableEvent::default(),
+            started_handler: TimeableEvent::default(),
+        }
+    }
+
+    fn set_received_request(&mut self) {
+        self.received_request.set_now()
+    }
+
+    fn set_accepted_with_tls(&mut self) {
+        self.accepted_with_tls.set_now()
+    }
+
+    fn set_accepted_without_tls(&mut self) {
+        self.accepted_without_tls.set_now()
+    }
+
+    fn set_started_handler(&mut self) {
+        self.started_handler.set_now()
+    }
+}
+
+impl Metrics for ListenerMetrics {
+    fn get_value_for_interval(&self) -> &TimeableEvent {
+        &self.received_request
+    }
+
+    fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>> {
+        let accepted = {
+            if self.accepted_with_tls.is_set() {
+                self.accepted_with_tls.clone()
+            } else {
+                self.accepted_without_tls.clone()
+            }
+        };
+        let time_to_accept = accepted.duration_since(&self.received_request)?;
+        let time_to_start_handling = self.started_handler.duration_since(&accepted)?;
+        let time_to_previous = self
+            .received_request
+            .duration_since(previous.get_value_for_interval())?;
+
+        Some(Box::new(ListenerDeltas::new(
+            time_to_accept,
+            time_to_start_handling,
+            time_to_previous,
+        )))
+    }
+}
+
+struct ListenerDeltas {
+    time_to_accept: Duration,
+    time_to_start_handling: Duration,
+    time_to_previous: Duration,
+}
+
+impl ListenerDeltas {
+    fn new(
+        time_to_accept: Duration,
+        time_to_start_handling: Duration,
+        time_to_previous: Duration,
+    ) -> Self {
+        Self {
+            time_to_accept,
+            time_to_start_handling,
+            time_to_previous,
+        }
+    }
+}
+
+impl Deltas for ListenerDeltas {
+    fn display(&self) {
+        info!(
+            "\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}",
+            self.time_to_accept, self.time_to_start_handling, self.time_to_previous
+        );
+    }
+
+    fn get_interval(&self) -> Duration {
+        self.time_to_previous
+    }
+}
 pub struct WsListener {
     // listener of incoming TCP connections
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
+    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
     // needed to know which gateway_session to delete in case of error or WS closed
     next_client_id: u64,
 }
@@ -38,6 +135,7 @@ impl WsListener {
         gateway_address: &str,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
+        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
         tls_config: Option<TlsConfig>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
@@ -65,6 +163,7 @@ impl WsListener {
             tls_acceptor,
             agent,
             client_connection_handler_tx,
+            metrics_channel_tx,
             next_client_id: 0,
         }
     }
@@ -86,6 +185,8 @@ impl WsListener {
                     break;
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
+                    let mut listener_metrics = ListenerMetrics::default();
+                    listener_metrics.set_received_request();
                     let current_client_id = self.next_client_id;
                     let span = span!(
                         Level::INFO,
@@ -101,6 +202,7 @@ impl WsListener {
                             match tls_stream {
                                 Ok(tls_stream) => {
                                     debug!("TLS handshake successful");
+                                    listener_metrics.set_accepted_with_tls();
                                     CustomStream::TcpWithTls(tls_stream)
                                 },
                                 Err(e) => {
@@ -110,13 +212,16 @@ impl WsListener {
                             }
                         },
                         None => {
+                            listener_metrics.set_accepted_without_tls();
                             CustomStream::Tcp(stream)
                         },
                     };
 
                     self.start_connection_handler(stream, current_client_id, child_token.clone(), span.clone());
-
                     self.next_client_id += 1;
+
+                    listener_metrics.set_started_handler();
+                    self.metrics_channel_tx.send(Box::new(listener_metrics)).await.expect("analyzer's side of the channel dropped")
                 },
             }
         }
