@@ -4,25 +4,29 @@ use tracing::info;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Metrics {
-    fn get_value_for_interval(&self) -> Timeable;
+    /// returns the value used to compute the time interval between two metrics
+    fn get_value_for_interval(&self) -> TimeableEvent;
 
+    /// returns the time deltas between the evets in the current metric and the time interval from the previous one
     fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>>;
 }
 
 /// trait implemented by the structs containing the analytics of each component
 pub trait Deltas {
+    /// displays all the deltas of a metric
     fn display(&self);
 
+    /// returns the time interval between two metrics
     fn get_interval(&self) -> Duration;
 }
 
 #[derive(Debug, Clone)]
 /// struct containing the instant of an event and helper methods to calculate duration between events
-pub struct Timeable {
+pub struct TimeableEvent {
     instant: Option<Instant>,
 }
 
-impl Timeable {
+impl TimeableEvent {
     pub fn default() -> Self {
         Self { instant: None }
     }
@@ -33,11 +37,13 @@ impl Timeable {
         }
     }
 
+    /// sets to current instant
     pub fn set_now(&mut self) {
         self.instant = Some(Instant::now());
     }
 
-    pub fn duration_since(&self, other: &Timeable) -> Option<Duration> {
+    /// measures the time between two events
+    pub fn duration_since(&self, other: &TimeableEvent) -> Option<Duration> {
         Some(self.instant?.duration_since(other.instant?))
     }
 }

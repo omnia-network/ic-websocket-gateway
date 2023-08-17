@@ -14,7 +14,7 @@ use crate::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
-    metrics_analyzer::{Deltas, Metrics, Timeable},
+    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
 };
 
 type CanisterGetMessagesWithMetrics = (CanisterOutputCertifiedMessages, PollerMetrics);
@@ -73,18 +73,18 @@ pub enum TerminationInfo {
 
 #[derive(Debug)]
 pub struct PollerMetrics {
-    start_polling: Timeable,
-    received_messages: Timeable,
-    start_relaying_messages: Timeable,
-    messages_relayed: Vec<Timeable>,
+    start_polling: TimeableEvent,
+    received_messages: TimeableEvent,
+    start_relaying_messages: TimeableEvent,
+    messages_relayed: Vec<TimeableEvent>,
 }
 
 impl PollerMetrics {
     fn default() -> Self {
         Self {
-            start_polling: Timeable::default(),
-            received_messages: Timeable::default(),
-            start_relaying_messages: Timeable::default(),
+            start_polling: TimeableEvent::default(),
+            received_messages: TimeableEvent::default(),
+            start_relaying_messages: TimeableEvent::default(),
             messages_relayed: Vec::new(),
         }
     }
@@ -102,16 +102,16 @@ impl PollerMetrics {
     }
 
     fn set_message_relayed(&mut self) {
-        self.messages_relayed.push(Timeable::now());
+        self.messages_relayed.push(TimeableEvent::now());
     }
 
     fn set_no_message_relayed(&mut self) {
-        self.messages_relayed.push(Timeable::default());
+        self.messages_relayed.push(TimeableEvent::default());
     }
 }
 
 impl Metrics for PollerMetrics {
-    fn get_value_for_interval(&self) -> Timeable {
+    fn get_value_for_interval(&self) -> TimeableEvent {
         self.start_relaying_messages.clone()
     }
 
@@ -128,8 +128,10 @@ impl Metrics for PollerMetrics {
                 deltas
             },
         );
+        // as 'previous' can be any type implementing Metrics, we must implement a method which for each of these types
+        // returns the value we want to use to compute the interval from the current poller metric
         let time_to_previous = self
-            .get_value_for_interval()
+            .start_relaying_messages
             .duration_since(&previous.get_value_for_interval())?;
 
         Some(Box::new(PollerDeltas::new(
