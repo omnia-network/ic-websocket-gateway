@@ -4,6 +4,8 @@ use tracing::info;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Metrics {
+    fn get_value_for_interval(&self) -> Timeable;
+
     fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>>;
 }
 
@@ -14,7 +16,7 @@ pub trait Deltas {
     fn get_interval(&self) -> Duration;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// struct containing the instant of an event and helper methods to calculate duration between events
 pub struct Timeable {
     instant: Option<Instant>,
