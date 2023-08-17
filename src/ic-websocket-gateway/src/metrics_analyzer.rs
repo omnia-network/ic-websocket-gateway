@@ -1,17 +1,28 @@
-use std::time::Duration;
+use std::any::type_name;
+use std::fmt::Debug;
+use std::{collections::BTreeMap, time::Duration};
 use tokio::{sync::mpsc::Receiver, time::Instant};
+use tracing::info;
 
 /// trait implemented by the structs containing the relevant events of each component
-pub trait Metrics {
+pub trait Metrics: Debug {
+    fn get_type_name(&self) -> String {
+        let path: Vec<String> = type_name::<Self>()
+            .split("::")
+            .map(|s| s.to_string())
+            .collect();
+        path.last().expect("not a valid path").to_owned()
+    }
+
     /// returns the value used to compute the time interval between two metrics
     fn get_value_for_interval(&self) -> &TimeableEvent;
 
     /// returns the time deltas between the evets in the current metric and the time interval from the previous one
-    fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>>;
+    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>>;
 }
 
 /// trait implemented by the structs containing the analytics of each component
-pub trait Deltas {
+pub trait Deltas: Debug {
     /// displays all the deltas of a metric
     fn display(&self);
 
@@ -55,26 +66,47 @@ impl TimeableEvent {
 pub struct MetricsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>,
+    aggregated_deltas_map: BTreeMap<String, (Vec<Box<dyn Deltas + Send>>, Box<dyn Metrics + Send>)>,
 }
 
 impl MetricsAnalyzer {
     pub fn new(metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>) -> Self {
-        Self { metrics_channel_rx }
+        let aggregated_deltas_map = BTreeMap::default();
+        Self {
+            metrics_channel_rx,
+            aggregated_deltas_map,
+        }
     }
 
     // process the received metrics
     pub async fn start_processing(&mut self) {
-        let mut previous = None;
         loop {
             if let Some(metrics) = self.metrics_channel_rx.recv().await {
-                // skip the first metric as it does not have a previous one
-                if let Some(previous) = previous {
+                let metric_type_name = metrics.get_type_name();
+                if let Some((aggregated_deltas, previous)) =
+                    self.aggregated_deltas_map.get_mut(&metric_type_name)
+                {
                     if let Some(deltas) = metrics.compute_deltas(previous) {
-                        deltas.display();
-                        // TODO: aggregate metrics based on type
+                        aggregated_deltas.push(deltas);
                     }
+                    *previous = metrics;
+                    if aggregated_deltas.len() > 5 {
+                        let intervals =
+                            aggregated_deltas
+                                .iter()
+                                .fold(Vec::new(), |mut intervals, deltas| {
+                                    intervals.push(deltas.get_interval());
+                                    intervals
+                                });
+                        let sum: Duration = intervals.iter().sum();
+                        let avg = sum.div_f64(aggregated_deltas.len() as f64);
+                        info!("Average interval for {:?}: {:?}", metric_type_name, avg);
+                        *aggregated_deltas = Vec::new();
+                    }
+                } else {
+                    self.aggregated_deltas_map
+                        .insert(metric_type_name, (Vec::new(), metrics));
                 }
-                previous = Some(metrics);
             }
         }
     }

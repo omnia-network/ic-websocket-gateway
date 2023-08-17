@@ -115,7 +115,7 @@ impl Metrics for PollerMetrics {
         &self.start_relaying_messages
     }
 
-    fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>> {
+    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
         let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
             .start_relaying_messages

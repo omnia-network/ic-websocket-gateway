@@ -26,6 +26,7 @@ pub struct TlsConfig {
     pub certificate_key_pem_path: String,
 }
 
+#[derive(Debug)]
 struct ListenerMetrics {
     received_request: TimeableEvent,
     accepted_with_tls: TimeableEvent,
@@ -65,7 +66,7 @@ impl Metrics for ListenerMetrics {
         &self.received_request
     }
 
-    fn compute_deltas(&self, previous: Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas>> {
+    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
         let accepted = {
             if self.accepted_with_tls.is_set() {
                 self.accepted_with_tls.clone()
@@ -87,6 +88,7 @@ impl Metrics for ListenerMetrics {
     }
 }
 
+#[derive(Debug)]
 struct ListenerDeltas {
     time_to_accept: Duration,
     time_to_start_handling: Duration,
