@@ -73,7 +73,7 @@ impl Metrics for ListenerMetrics {
         &self.reference
     }
 
-    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let accepted = {
             if self.accepted_with_tls.is_set() {
                 self.accepted_with_tls.clone()
@@ -83,16 +83,12 @@ impl Metrics for ListenerMetrics {
         };
         let time_to_accept = accepted.duration_since(&self.received_request)?;
         let time_to_start_handling = self.started_handler.duration_since(&accepted)?;
-        let time_to_previous = self
-            .received_request
-            .duration_since(previous.get_value_for_interval())?;
         let latency = self.compute_latency()?;
 
         Some(Box::new(ListenerDeltas::new(
             self.reference.clone(),
             time_to_accept,
             time_to_start_handling,
-            time_to_previous,
             latency,
         )))
     }
@@ -107,7 +103,6 @@ struct ListenerDeltas {
     reference: Option<MetricsReference>,
     time_to_accept: Duration,
     time_to_start_handling: Duration,
-    time_to_previous: Duration,
     latency: Duration,
 }
 
@@ -116,14 +111,12 @@ impl ListenerDeltas {
         reference: Option<MetricsReference>,
         time_to_accept: Duration,
         time_to_start_handling: Duration,
-        time_to_previous: Duration,
         latency: Duration,
     ) -> Self {
         Self {
             reference,
             time_to_accept,
             time_to_start_handling,
-            time_to_previous,
             latency,
         }
     }
@@ -132,13 +125,9 @@ impl ListenerDeltas {
 impl Deltas for ListenerDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_accept, self.time_to_start_handling, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_accept, self.time_to_start_handling, self.latency
         );
-    }
-
-    fn get_interval(&self) -> Duration {
-        self.time_to_previous
     }
 
     fn get_latency(&self) -> Duration {

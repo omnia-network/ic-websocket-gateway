@@ -123,7 +123,7 @@ impl Metrics for PollerMetrics {
         &self.reference
     }
 
-    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
             .start_relaying_messages
@@ -131,21 +131,13 @@ impl Metrics for PollerMetrics {
         let time_to_relay = self
             .message_relayed
             .duration_since(&self.start_relaying_messages)?;
-        // as 'previous' can be any type implementing Metrics, we must implement a method which for each of these types
-        // returns the value we want to use to compute the interval from the current poller metric
-        let time_to_previous = self
-            .message_relayed
-            .duration_since(previous.get_value_for_interval())?;
-        // warn!("time_to_previous: {:?}", time_to_previous);
         let latency = self.compute_latency()?;
-        // warn!("latency: {:?}", latency);
 
         Some(Box::new(PollerDeltas::new(
             self.reference.clone(),
             time_to_receive,
             time_to_start_relaying,
             time_to_relay,
-            time_to_previous,
             latency,
         )))
     }
@@ -161,7 +153,6 @@ struct PollerDeltas {
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     time_to_relay: Duration,
-    time_to_previous: Duration,
     latency: Duration,
 }
 
@@ -171,7 +162,6 @@ impl PollerDeltas {
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
         time_to_relay: Duration,
-        time_to_previous: Duration,
         latency: Duration,
     ) -> Self {
         Self {
@@ -179,7 +169,6 @@ impl PollerDeltas {
             time_to_receive,
             time_to_start_relaying,
             time_to_relay,
-            time_to_previous,
             latency,
         }
     }
@@ -188,13 +177,9 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntime_to_relay: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_receive, self.time_to_start_relaying, self.time_to_relay, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_receive, self.time_to_start_relaying, self.time_to_relay, self.latency
         );
-    }
-
-    fn get_interval(&self) -> Duration {
-        self.time_to_previous
     }
 
     fn get_latency(&self) -> Duration {

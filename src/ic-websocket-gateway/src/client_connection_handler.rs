@@ -94,7 +94,7 @@ impl Metrics for ConnectionSetupMetrics {
         &self.reference
     }
 
-    fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let time_to_first_message = self
             .received_first_message
             .duration_since(&self.accepted_ws_connection)?;
@@ -104,9 +104,6 @@ impl Metrics for ConnectionSetupMetrics {
         let time_to_establishment = self
             .established_ws_connection
             .duration_since(&self.validated_first_message)?;
-        let time_to_previous = self
-            .established_ws_connection
-            .duration_since(previous.get_value_for_interval())?;
         let latency = self.compute_latency()?;
 
         Some(Box::new(ConnectionSetupDeltas::new(
@@ -114,7 +111,6 @@ impl Metrics for ConnectionSetupMetrics {
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
-            time_to_previous,
             latency,
         )))
     }
@@ -131,7 +127,6 @@ struct ConnectionSetupDeltas {
     time_to_first_message: Duration,
     time_to_validation: Duration,
     time_to_establishment: Duration,
-    time_to_previous: Duration,
     latency: Duration,
 }
 
@@ -141,7 +136,6 @@ impl ConnectionSetupDeltas {
         time_to_first_message: Duration,
         time_to_validation: Duration,
         time_to_establishment: Duration,
-        time_to_previous: Duration,
         latency: Duration,
     ) -> Self {
         Self {
@@ -149,7 +143,6 @@ impl ConnectionSetupDeltas {
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
-            time_to_previous,
             latency,
         }
     }
@@ -158,13 +151,9 @@ impl ConnectionSetupDeltas {
 impl Deltas for ConnectionSetupDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.latency
         );
-    }
-
-    fn get_interval(&self) -> Duration {
-        self.time_to_previous
     }
 
     fn get_latency(&self) -> Duration {
