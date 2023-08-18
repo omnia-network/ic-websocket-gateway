@@ -122,25 +122,36 @@ impl AggregatedMetrics {
     }
 }
 
+struct AggregatedData {
+    aggregated_metrics_map: BTreeMap<MetricsReference, AggregatedMetrics>,
+    previous: Box<dyn Metrics + Send>,
+}
+
+impl AggregatedData {
+    fn new(
+        aggregated_metrics_map: BTreeMap<MetricsReference, AggregatedMetrics>,
+        previous: Box<dyn Metrics + Send>,
+    ) -> Self {
+        Self {
+            aggregated_metrics_map,
+            previous,
+        }
+    }
+}
+
 /// metrics analyzer receives metrics from different components of the WS Gateway
 pub struct MetricsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>,
-    aggregated_data_map: BTreeMap<
-        String,
-        (
-            BTreeMap<MetricsReference, AggregatedMetrics>,
-            Box<dyn Metrics + Send>,
-        ),
-    >,
+    data_map: BTreeMap<String, AggregatedData>,
 }
 
 impl MetricsAnalyzer {
     pub fn new(metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>) -> Self {
-        let aggregated_data_map = BTreeMap::default();
+        let data_map = BTreeMap::default();
         Self {
             metrics_channel_rx,
-            aggregated_data_map,
+            data_map,
         }
     }
 
@@ -150,19 +161,20 @@ impl MetricsAnalyzer {
             if let Some(metrics) = self.metrics_channel_rx.recv().await {
                 let metric_type_name = metrics.get_type_name();
                 // first metrics received does not result in a delta as there is no previous metric for computing interval
-                if let Some((aggregated_data, previous)) =
-                    self.aggregated_data_map.get_mut(&metric_type_name)
-                {
+                if let Some(data) = self.data_map.get_mut(&metric_type_name) {
                     if let Some(deltas) = metrics.compute_deltas() {
                         deltas.display();
                         let reference = deltas.get_reference().clone();
-                        let aggregated_metrics =
-                            AggregatedMetrics::new(deltas, metrics.compute_interval(previous));
-                        aggregated_data.insert(reference, aggregated_metrics);
+                        let aggregated_metrics = AggregatedMetrics::new(
+                            deltas,
+                            metrics.compute_interval(&data.previous),
+                        );
+                        data.aggregated_metrics_map
+                            .insert(reference, aggregated_metrics);
                     }
-                    *previous = metrics;
-                    if aggregated_data.len() > 10 {
-                        let (latencies, intervals) = aggregated_data.iter().fold(
+                    data.previous = metrics;
+                    if data.aggregated_metrics_map.len() > 10 {
+                        let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
                             (Vec::new(), Vec::new()),
                             |(mut latencies, mut intervals), (_, aggregated_metrics)| {
                                 latencies.push(aggregated_metrics.deltas.get_latency());
@@ -182,11 +194,11 @@ impl MetricsAnalyzer {
                             "Average interval for {:?}: {:?}",
                             metric_type_name, avg_interval
                         );
-                        *aggregated_data = BTreeMap::default();
+                        data.aggregated_metrics_map = BTreeMap::default();
                     }
                 } else {
-                    self.aggregated_data_map
-                        .insert(metric_type_name, (BTreeMap::default(), metrics));
+                    let data = AggregatedData::new(BTreeMap::default(), metrics);
+                    self.data_map.insert(metric_type_name, data);
                 }
             }
         }
