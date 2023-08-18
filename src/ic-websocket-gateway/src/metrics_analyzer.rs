@@ -22,6 +22,11 @@ pub trait Metrics: Debug {
     /// returns the time deltas between the evets in the current metric and the time interval from the previous one
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>>;
 
+    fn compute_interval(&self, previous: Box<dyn Metrics + Send>) -> Option<Duration> {
+        self.get_value_for_interval()
+            .duration_since(&previous.get_value_for_interval())
+    }
+
     fn compute_latency(&self) -> Option<Duration>;
 }
 
@@ -76,7 +81,7 @@ pub enum MetricsReference {
 pub struct MetricsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     metrics_channel_rx: Receiver<Box<dyn Metrics + Send>>,
-    aggregated_deltas_map: BTreeMap<String, Vec<Box<dyn Deltas + Send>>>,
+    aggregated_deltas_map: BTreeMap<String, (Vec<Box<dyn Deltas + Send>>, Box<dyn Metrics + Send>)>,
 }
 
 impl MetricsAnalyzer {
@@ -94,13 +99,14 @@ impl MetricsAnalyzer {
             if let Some(metrics) = self.metrics_channel_rx.recv().await {
                 let metric_type_name = metrics.get_type_name();
                 // first metrics received does not result in a delta as there is no previous metric for computing interval
-                if let Some(aggregated_deltas) =
+                if let Some((aggregated_deltas, previous)) =
                     self.aggregated_deltas_map.get_mut(&metric_type_name)
                 {
                     if let Some(deltas) = metrics.compute_deltas() {
                         deltas.display();
                         aggregated_deltas.push(deltas);
                     }
+                    *previous = metrics;
                     if aggregated_deltas.len() > 10 {
                         let latencies =
                             aggregated_deltas
@@ -119,7 +125,7 @@ impl MetricsAnalyzer {
                     }
                 } else {
                     self.aggregated_deltas_map
-                        .insert(metric_type_name, Vec::new());
+                        .insert(metric_type_name, (Vec::new(), metrics));
                 }
             }
         }
