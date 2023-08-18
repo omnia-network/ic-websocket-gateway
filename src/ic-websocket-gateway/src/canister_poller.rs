@@ -14,7 +14,7 @@ use crate::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
-    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
+    metrics_analyzer::{Deltas, Metrics, MetricsReference, TimeableEvent},
 };
 
 type CanisterGetMessagesWithMetrics = (CanisterOutputCertifiedMessages, PollerMetrics);
@@ -71,21 +71,23 @@ pub enum TerminationInfo {
     CdkError(Principal),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PollerMetrics {
+    reference: Option<MetricsReference>,
     start_polling: TimeableEvent,
     received_messages: TimeableEvent,
     start_relaying_messages: TimeableEvent,
-    messages_relayed: Vec<TimeableEvent>,
+    message_relayed: TimeableEvent,
 }
 
 impl PollerMetrics {
     fn default() -> Self {
         Self {
+            reference: None,
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
             start_relaying_messages: TimeableEvent::default(),
-            messages_relayed: Vec::new(),
+            message_relayed: TimeableEvent::default(),
         }
     }
 
@@ -101,18 +103,24 @@ impl PollerMetrics {
         self.start_relaying_messages.set_now();
     }
 
-    fn set_message_relayed(&mut self) {
-        self.messages_relayed.push(TimeableEvent::now());
+    fn set_message_relayed(&mut self, nonce: u64) {
+        self.message_relayed = TimeableEvent::now();
+        self.reference = Some(MetricsReference::MessageNonce(nonce));
     }
 
-    fn set_no_message_relayed(&mut self) {
-        self.messages_relayed.push(TimeableEvent::default());
+    fn set_no_message_relayed(&mut self, nonce: u64) {
+        self.message_relayed = TimeableEvent::default();
+        self.reference = Some(MetricsReference::MessageNonce(nonce));
     }
 }
 
 impl Metrics for PollerMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.start_relaying_messages
+        &self.message_relayed
+    }
+
+    fn get_reference(&self) -> &Option<MetricsReference> {
+        &self.reference
     }
 
     fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
@@ -120,60 +128,57 @@ impl Metrics for PollerMetrics {
         let time_to_start_relaying = self
             .start_relaying_messages
             .duration_since(&self.received_messages)?;
-        let times_to_relay = self.messages_relayed.iter().fold(
-            Vec::<Option<Duration>>::new(),
-            |mut deltas, message_relayed| {
-                let delta = message_relayed.duration_since(&self.start_relaying_messages);
-                deltas.push(delta);
-                deltas
-            },
-        );
+        let time_to_relay = self
+            .message_relayed
+            .duration_since(&self.start_relaying_messages)?;
         // as 'previous' can be any type implementing Metrics, we must implement a method which for each of these types
         // returns the value we want to use to compute the interval from the current poller metric
         let time_to_previous = self
-            .start_relaying_messages
+            .message_relayed
             .duration_since(previous.get_value_for_interval())?;
+        // warn!("time_to_previous: {:?}", time_to_previous);
         let latency = self.compute_latency()?;
+        // warn!("latency: {:?}", latency);
 
         Some(Box::new(PollerDeltas::new(
+            self.reference.clone(),
             time_to_receive,
             time_to_start_relaying,
-            times_to_relay,
+            time_to_relay,
             time_to_previous,
             latency,
         )))
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.messages_relayed
-            .iter()
-            .filter_map(|m| if m.is_set() { Some(m) } else { None })
-            .last()?
-            .duration_since(&self.start_polling)
+        self.message_relayed.duration_since(&self.start_polling)
     }
 }
 
 #[derive(Debug)]
 struct PollerDeltas {
+    reference: Option<MetricsReference>,
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
-    times_to_relay: Vec<Option<Duration>>,
+    time_to_relay: Duration,
     time_to_previous: Duration,
     latency: Duration,
 }
 
 impl PollerDeltas {
     pub fn new(
+        reference: Option<MetricsReference>,
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
-        times_to_relay: Vec<Option<Duration>>,
+        time_to_relay: Duration,
         time_to_previous: Duration,
         latency: Duration,
     ) -> Self {
         Self {
+            reference,
             time_to_receive,
             time_to_start_relaying,
-            times_to_relay,
+            time_to_relay,
             time_to_previous,
             latency,
         }
@@ -183,15 +188,13 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntime_to_relay: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_receive, self.time_to_start_relaying, self.time_to_relay, self.time_to_previous, self.latency
         );
     }
 
     fn get_interval(&self) -> Duration {
-        // interval: time between two consecutive polling iterations - time to receive the messages from canister
-        // this gives an idea of the time "wasted" compared to desidered polling interval
-        self.time_to_previous - self.time_to_receive
+        self.time_to_previous
     }
 
     fn get_latency(&self) -> Duration {
@@ -283,6 +286,7 @@ impl CanisterPoller {
                     if let Some((msgs, mut poller_metrics)) = res {
                         poller_metrics.set_start_relaying_messages();
                         for encoded_message in msgs.messages {
+                            let mut poller_metrics = poller_metrics.clone();
                             let client_key = encoded_message.client_key;
                             let m = CertifiedMessage {
                                 key: encoded_message.key.clone(),
@@ -291,22 +295,24 @@ impl CanisterPoller {
                                 tree: msgs.tree.clone(),
                             };
 
-                            match client_channels.get(&client_key) {
-                                Some(client_channel_tx) => {
-                                    debug!("Received message with key: {:?} from canister", m.key);
-                                    if let Err(e) = client_channel_tx.send(Ok(m)).await {
-                                        error!("Client's thread terminated: {}", e);
-                                        poller_metrics.set_no_message_relayed();
-                                    }
-                                    else {
-                                        poller_metrics.set_message_relayed();
-                                    }
-                                },
-                                None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
-                            }
-
                             match get_nonce_from_message(encoded_message.key) {
-                                Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
+                                Ok(last_message_nonce) => {
+                                    match client_channels.get(&client_key) {
+                                        Some(client_channel_tx) => {
+                                            debug!("Received message with key: {:?} from canister", m.key);
+                                            if let Err(e) = client_channel_tx.send(Ok(m)).await {
+                                                error!("Client's thread terminated: {}", e);
+                                                poller_metrics.set_no_message_relayed(last_message_nonce);
+                                            }
+                                            else {
+                                                poller_metrics.set_message_relayed(last_message_nonce);
+                                            }
+                                            poller_channels.poller_to_analyzer.send(Box::new(poller_metrics)).await.expect("analyzer's side of the channel dropped");
+                                        },
+                                        None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
+                                    }
+                                    message_nonce = last_message_nonce + 1;
+                                },
                                 Err(cdk_err) => {
                                     // let the main task know that this poller will terminate due to a CDK error
                                     signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
@@ -322,8 +328,6 @@ impl CanisterPoller {
                                 }
                             }
                         }
-
-                        poller_channels.poller_to_analyzer.send(Box::new(poller_metrics)).await.expect("analyzer's side of the channel dropped");
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones

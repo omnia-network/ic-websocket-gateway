@@ -1,6 +1,6 @@
 use crate::{
     client_connection_handler::{ClientConnectionHandler, WsConnectionState},
-    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
+    metrics_analyzer::{Deltas, Metrics, MetricsReference, TimeableEvent},
 };
 
 use ic_agent::Agent;
@@ -28,6 +28,7 @@ pub struct TlsConfig {
 
 #[derive(Debug)]
 struct ListenerMetrics {
+    reference: Option<MetricsReference>,
     received_request: TimeableEvent,
     accepted_with_tls: TimeableEvent,
     accepted_without_tls: TimeableEvent,
@@ -35,8 +36,10 @@ struct ListenerMetrics {
 }
 
 impl ListenerMetrics {
-    fn default() -> Self {
+    fn new(id: u64) -> Self {
+        let reference = Some(MetricsReference::ClientId(id));
         Self {
+            reference,
             received_request: TimeableEvent::default(),
             accepted_with_tls: TimeableEvent::default(),
             accepted_without_tls: TimeableEvent::default(),
@@ -66,6 +69,10 @@ impl Metrics for ListenerMetrics {
         &self.received_request
     }
 
+    fn get_reference(&self) -> &Option<MetricsReference> {
+        &self.reference
+    }
+
     fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
         let accepted = {
             if self.accepted_with_tls.is_set() {
@@ -82,6 +89,7 @@ impl Metrics for ListenerMetrics {
         let latency = self.compute_latency()?;
 
         Some(Box::new(ListenerDeltas::new(
+            self.reference.clone(),
             time_to_accept,
             time_to_start_handling,
             time_to_previous,
@@ -96,6 +104,7 @@ impl Metrics for ListenerMetrics {
 
 #[derive(Debug)]
 struct ListenerDeltas {
+    reference: Option<MetricsReference>,
     time_to_accept: Duration,
     time_to_start_handling: Duration,
     time_to_previous: Duration,
@@ -104,12 +113,14 @@ struct ListenerDeltas {
 
 impl ListenerDeltas {
     fn new(
+        reference: Option<MetricsReference>,
         time_to_accept: Duration,
         time_to_start_handling: Duration,
         time_to_previous: Duration,
         latency: Duration,
     ) -> Self {
         Self {
+            reference,
             time_to_accept,
             time_to_start_handling,
             time_to_previous,
@@ -121,8 +132,8 @@ impl ListenerDeltas {
 impl Deltas for ListenerDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.time_to_accept, self.time_to_start_handling, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_accept, self.time_to_start_handling, self.time_to_previous, self.latency
         );
     }
 
@@ -200,9 +211,9 @@ impl WsListener {
                     break;
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
-                    let mut listener_metrics = ListenerMetrics::default();
-                    listener_metrics.set_received_request();
                     let current_client_id = self.next_client_id;
+                    let mut listener_metrics = ListenerMetrics::new(current_client_id);
+                    listener_metrics.set_received_request();
                     let span = span!(
                         Level::INFO,
                         "handle_client_connection",

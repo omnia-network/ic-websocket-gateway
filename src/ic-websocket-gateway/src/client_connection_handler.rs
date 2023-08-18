@@ -2,7 +2,7 @@ use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
     gateway_server::GatewaySession,
-    metrics_analyzer::{Deltas, Metrics, TimeableEvent},
+    metrics_analyzer::{Deltas, Metrics, MetricsReference, TimeableEvent},
 };
 
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
@@ -50,6 +50,7 @@ pub enum IcWsError {
 
 #[derive(Debug)]
 struct ConnectionSetupMetrics {
+    reference: Option<MetricsReference>,
     accepted_ws_connection: TimeableEvent,
     received_first_message: TimeableEvent,
     validated_first_message: TimeableEvent,
@@ -57,8 +58,10 @@ struct ConnectionSetupMetrics {
 }
 
 impl ConnectionSetupMetrics {
-    fn default() -> Self {
+    fn new(id: u64) -> Self {
+        let reference = Some(MetricsReference::ClientId(id));
         Self {
+            reference,
             accepted_ws_connection: TimeableEvent::default(),
             received_first_message: TimeableEvent::default(),
             validated_first_message: TimeableEvent::default(),
@@ -87,6 +90,10 @@ impl Metrics for ConnectionSetupMetrics {
         &self.established_ws_connection
     }
 
+    fn get_reference(&self) -> &Option<MetricsReference> {
+        &self.reference
+    }
+
     fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>> {
         let time_to_first_message = self
             .received_first_message
@@ -103,6 +110,7 @@ impl Metrics for ConnectionSetupMetrics {
         let latency = self.compute_latency()?;
 
         Some(Box::new(ConnectionSetupDeltas::new(
+            self.reference.clone(),
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
@@ -119,6 +127,7 @@ impl Metrics for ConnectionSetupMetrics {
 
 #[derive(Debug)]
 struct ConnectionSetupDeltas {
+    reference: Option<MetricsReference>,
     time_to_first_message: Duration,
     time_to_validation: Duration,
     time_to_establishment: Duration,
@@ -128,6 +137,7 @@ struct ConnectionSetupDeltas {
 
 impl ConnectionSetupDeltas {
     pub fn new(
+        reference: Option<MetricsReference>,
         time_to_first_message: Duration,
         time_to_validation: Duration,
         time_to_establishment: Duration,
@@ -135,6 +145,7 @@ impl ConnectionSetupDeltas {
         latency: Duration,
     ) -> Self {
         Self {
+            reference,
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
@@ -147,8 +158,8 @@ impl ConnectionSetupDeltas {
 impl Deltas for ConnectionSetupDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
-            self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous, self.latency
+            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous, self.latency
         );
     }
 
@@ -189,7 +200,7 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                let mut connection_setup_metrics = Some(ConnectionSetupMetrics::default());
+                let mut connection_setup_metrics = Some(ConnectionSetupMetrics::new(self.id));
                 connection_setup_metrics
                     .as_mut()
                     .unwrap()

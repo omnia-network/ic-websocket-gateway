@@ -17,6 +17,8 @@ pub trait Metrics: Debug {
     /// returns the value used to compute the time interval between two metrics
     fn get_value_for_interval(&self) -> &TimeableEvent;
 
+    fn get_reference(&self) -> &Option<MetricsReference>;
+
     /// returns the time deltas between the evets in the current metric and the time interval from the previous one
     fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>>;
 
@@ -67,6 +69,12 @@ impl TimeableEvent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum MetricsReference {
+    MessageNonce(u64),
+    ClientId(u64),
+}
+
 /// metrics analyzer receives metrics from different components of the WS Gateway
 pub struct MetricsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
@@ -88,6 +96,7 @@ impl MetricsAnalyzer {
         loop {
             if let Some(metrics) = self.metrics_channel_rx.recv().await {
                 let metric_type_name = metrics.get_type_name();
+                // first metrics received does not result in a delta as there is no previous metric for computing interval
                 if let Some((aggregated_deltas, previous)) =
                     self.aggregated_deltas_map.get_mut(&metric_type_name)
                 {
