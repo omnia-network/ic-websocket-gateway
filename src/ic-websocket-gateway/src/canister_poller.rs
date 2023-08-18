@@ -133,13 +133,23 @@ impl Metrics for PollerMetrics {
         let time_to_previous = self
             .start_relaying_messages
             .duration_since(previous.get_value_for_interval())?;
+        let latency = self.compute_latency()?;
 
         Some(Box::new(PollerDeltas::new(
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
             time_to_previous,
+            latency,
         )))
+    }
+
+    fn compute_latency(&self) -> Option<Duration> {
+        self.messages_relayed
+            .iter()
+            .filter_map(|m| if m.is_set() { Some(m) } else { None })
+            .last()?
+            .duration_since(&self.start_polling)
     }
 }
 
@@ -149,6 +159,7 @@ struct PollerDeltas {
     time_to_start_relaying: Duration,
     times_to_relay: Vec<Option<Duration>>,
     time_to_previous: Duration,
+    latency: Duration,
 }
 
 impl PollerDeltas {
@@ -157,12 +168,14 @@ impl PollerDeltas {
         time_to_start_relaying: Duration,
         times_to_relay: Vec<Option<Duration>>,
         time_to_previous: Duration,
+        latency: Duration,
     ) -> Self {
         Self {
             time_to_receive,
             time_to_start_relaying,
             times_to_relay,
             time_to_previous,
+            latency,
         }
     }
 }
@@ -170,8 +183,8 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous
+            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntimes_to_relay: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.time_to_receive, self.time_to_start_relaying, self.times_to_relay, self.time_to_previous, self.latency
         );
     }
 
@@ -179,6 +192,10 @@ impl Deltas for PollerDeltas {
         // interval: time between two consecutive polling iterations - time to receive the messages from canister
         // this gives an idea of the time "wasted" compared to desidered polling interval
         self.time_to_previous - self.time_to_receive
+    }
+
+    fn get_latency(&self) -> Duration {
+        self.latency
     }
 }
 

@@ -2,7 +2,7 @@ use std::any::type_name;
 use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::info;
+use tracing::{debug, info};
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Metrics: Debug {
@@ -19,6 +19,8 @@ pub trait Metrics: Debug {
 
     /// returns the time deltas between the evets in the current metric and the time interval from the previous one
     fn compute_deltas(&self, previous: &Box<dyn Metrics + Send>) -> Option<Box<dyn Deltas + Send>>;
+
+    fn compute_latency(&self) -> Option<Duration>;
 }
 
 /// trait implemented by the structs containing the analytics of each component
@@ -28,6 +30,9 @@ pub trait Deltas: Debug {
 
     /// returns the time interval between two metrics
     fn get_interval(&self) -> Duration;
+
+    /// returns the latency of the component
+    fn get_latency(&self) -> Duration;
 }
 
 #[derive(Debug, Clone)]
@@ -87,20 +92,31 @@ impl MetricsAnalyzer {
                     self.aggregated_deltas_map.get_mut(&metric_type_name)
                 {
                     if let Some(deltas) = metrics.compute_deltas(previous) {
+                        deltas.display();
                         aggregated_deltas.push(deltas);
                     }
                     *previous = metrics;
                     if aggregated_deltas.len() > 10 {
-                        let intervals =
-                            aggregated_deltas
-                                .iter()
-                                .fold(Vec::new(), |mut intervals, deltas| {
-                                    intervals.push(deltas.get_interval());
-                                    intervals
-                                });
-                        let sum: Duration = intervals.iter().sum();
-                        let avg = sum.div_f64(aggregated_deltas.len() as f64);
-                        info!("Average interval for {:?}: {:?}", metric_type_name, avg);
+                        let (intervals, latencies) = aggregated_deltas.iter().fold(
+                            (Vec::new(), Vec::new()),
+                            |(mut intervals, mut latencies), deltas| {
+                                intervals.push(deltas.get_interval());
+                                latencies.push(deltas.get_latency());
+                                (intervals, latencies)
+                            },
+                        );
+                        let sum_intervals: Duration = intervals.iter().sum();
+                        let avg_interval = sum_intervals.div_f64(aggregated_deltas.len() as f64);
+                        debug!(
+                            "Average interval for {:?}: {:?}",
+                            metric_type_name, avg_interval
+                        );
+                        let sum_latencies: Duration = latencies.iter().sum();
+                        let avg_latency = sum_latencies.div_f64(aggregated_deltas.len() as f64);
+                        info!(
+                            "Average latency for {:?}: {:?}",
+                            metric_type_name, avg_latency
+                        );
                         *aggregated_deltas = Vec::new();
                     }
                 } else {

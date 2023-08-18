@@ -79,12 +79,18 @@ impl Metrics for ListenerMetrics {
         let time_to_previous = self
             .received_request
             .duration_since(previous.get_value_for_interval())?;
+        let latency = self.compute_latency()?;
 
         Some(Box::new(ListenerDeltas::new(
             time_to_accept,
             time_to_start_handling,
             time_to_previous,
+            latency,
         )))
+    }
+
+    fn compute_latency(&self) -> Option<Duration> {
+        self.started_handler.duration_since(&self.received_request)
     }
 }
 
@@ -93,6 +99,7 @@ struct ListenerDeltas {
     time_to_accept: Duration,
     time_to_start_handling: Duration,
     time_to_previous: Duration,
+    latency: Duration,
 }
 
 impl ListenerDeltas {
@@ -100,25 +107,31 @@ impl ListenerDeltas {
         time_to_accept: Duration,
         time_to_start_handling: Duration,
         time_to_previous: Duration,
+        latency: Duration,
     ) -> Self {
         Self {
             time_to_accept,
             time_to_start_handling,
             time_to_previous,
+            latency,
         }
     }
 }
 
 impl Deltas for ListenerDeltas {
     fn display(&self) {
-        info!(
-            "\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}",
-            self.time_to_accept, self.time_to_start_handling, self.time_to_previous
+        debug!(
+            "\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.time_to_accept, self.time_to_start_handling, self.time_to_previous, self.latency
         );
     }
 
     fn get_interval(&self) -> Duration {
         self.time_to_previous
+    }
+
+    fn get_latency(&self) -> Duration {
+        self.latency
     }
 }
 pub struct WsListener {

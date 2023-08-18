@@ -100,13 +100,20 @@ impl Metrics for ConnectionSetupMetrics {
         let time_to_previous = self
             .established_ws_connection
             .duration_since(previous.get_value_for_interval())?;
+        let latency = self.compute_latency()?;
 
         Some(Box::new(ConnectionSetupDeltas::new(
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
             time_to_previous,
+            latency,
         )))
+    }
+
+    fn compute_latency(&self) -> Option<Duration> {
+        self.established_ws_connection
+            .duration_since(&self.accepted_ws_connection)
     }
 }
 
@@ -116,6 +123,7 @@ struct ConnectionSetupDeltas {
     time_to_validation: Duration,
     time_to_establishment: Duration,
     time_to_previous: Duration,
+    latency: Duration,
 }
 
 impl ConnectionSetupDeltas {
@@ -124,12 +132,14 @@ impl ConnectionSetupDeltas {
         time_to_validation: Duration,
         time_to_establishment: Duration,
         time_to_previous: Duration,
+        latency: Duration,
     ) -> Self {
         Self {
             time_to_first_message,
             time_to_validation,
             time_to_establishment,
             time_to_previous,
+            latency,
         }
     }
 }
@@ -137,13 +147,17 @@ impl ConnectionSetupDeltas {
 impl Deltas for ConnectionSetupDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}",
-            self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous
+            "\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\ntime_to_previous: {:?}\nlatency: {:?}",
+            self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.time_to_previous, self.latency
         );
     }
 
     fn get_interval(&self) -> Duration {
         self.time_to_previous
+    }
+
+    fn get_latency(&self) -> Duration {
+        self.latency
     }
 }
 
