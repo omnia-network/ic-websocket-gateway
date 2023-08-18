@@ -50,7 +50,7 @@ pub enum IcWsError {
 
 #[derive(Debug)]
 struct ConnectionSetupMetrics {
-    reference: Option<MetricsReference>,
+    reference: MetricsReference,
     accepted_ws_connection: TimeableEvent,
     received_first_message: TimeableEvent,
     validated_first_message: TimeableEvent,
@@ -59,7 +59,7 @@ struct ConnectionSetupMetrics {
 
 impl ConnectionSetupMetrics {
     fn new(id: u64) -> Self {
-        let reference = Some(MetricsReference::ClientId(id));
+        let reference = MetricsReference::ClientId(id);
         Self {
             reference,
             accepted_ws_connection: TimeableEvent::default(),
@@ -88,10 +88,6 @@ impl ConnectionSetupMetrics {
 impl Metrics for ConnectionSetupMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.established_ws_connection
-    }
-
-    fn get_reference(&self) -> &Option<MetricsReference> {
-        &self.reference
     }
 
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
@@ -123,7 +119,7 @@ impl Metrics for ConnectionSetupMetrics {
 
 #[derive(Debug)]
 struct ConnectionSetupDeltas {
-    reference: Option<MetricsReference>,
+    reference: MetricsReference,
     time_to_first_message: Duration,
     time_to_validation: Duration,
     time_to_establishment: Duration,
@@ -132,7 +128,7 @@ struct ConnectionSetupDeltas {
 
 impl ConnectionSetupDeltas {
     pub fn new(
-        reference: Option<MetricsReference>,
+        reference: MetricsReference,
         time_to_first_message: Duration,
         time_to_validation: Duration,
         time_to_establishment: Duration,
@@ -154,6 +150,10 @@ impl Deltas for ConnectionSetupDeltas {
             "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\nlatency: {:?}",
             self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.latency
         );
+    }
+
+    fn get_reference(&self) -> &MetricsReference {
+        &self.reference
     }
 
     fn get_latency(&self) -> Duration {

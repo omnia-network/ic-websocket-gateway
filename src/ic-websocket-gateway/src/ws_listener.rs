@@ -28,7 +28,7 @@ pub struct TlsConfig {
 
 #[derive(Debug)]
 struct ListenerMetrics {
-    reference: Option<MetricsReference>,
+    reference: MetricsReference,
     received_request: TimeableEvent,
     accepted_with_tls: TimeableEvent,
     accepted_without_tls: TimeableEvent,
@@ -37,7 +37,7 @@ struct ListenerMetrics {
 
 impl ListenerMetrics {
     fn new(id: u64) -> Self {
-        let reference = Some(MetricsReference::ClientId(id));
+        let reference = MetricsReference::ClientId(id);
         Self {
             reference,
             received_request: TimeableEvent::default(),
@@ -69,10 +69,6 @@ impl Metrics for ListenerMetrics {
         &self.received_request
     }
 
-    fn get_reference(&self) -> &Option<MetricsReference> {
-        &self.reference
-    }
-
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let accepted = {
             if self.accepted_with_tls.is_set() {
@@ -100,7 +96,7 @@ impl Metrics for ListenerMetrics {
 
 #[derive(Debug)]
 struct ListenerDeltas {
-    reference: Option<MetricsReference>,
+    reference: MetricsReference,
     time_to_accept: Duration,
     time_to_start_handling: Duration,
     latency: Duration,
@@ -108,7 +104,7 @@ struct ListenerDeltas {
 
 impl ListenerDeltas {
     fn new(
-        reference: Option<MetricsReference>,
+        reference: MetricsReference,
         time_to_accept: Duration,
         time_to_start_handling: Duration,
         latency: Duration,
@@ -128,6 +124,10 @@ impl Deltas for ListenerDeltas {
             "\nreference: {:?}\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\nlatency: {:?}",
             self.reference, self.time_to_accept, self.time_to_start_handling, self.latency
         );
+    }
+
+    fn get_reference(&self) -> &MetricsReference {
+        &self.reference
     }
 
     fn get_latency(&self) -> Duration {

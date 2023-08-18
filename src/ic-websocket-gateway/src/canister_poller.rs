@@ -3,7 +3,11 @@ use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
@@ -73,6 +77,7 @@ pub enum TerminationInfo {
 
 #[derive(Debug, Clone)]
 struct PollerMetrics {
+    reference: MetricsReference,
     start_polling: TimeableEvent,
     received_messages: TimeableEvent,
     start_relaying_messages: TimeableEvent,
@@ -81,6 +86,7 @@ struct PollerMetrics {
 impl PollerMetrics {
     fn default() -> Self {
         Self {
+            reference: MetricsReference::Timestamp(current_timestamp()),
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
             start_relaying_messages: TimeableEvent::default(),
@@ -105,10 +111,6 @@ impl Metrics for PollerMetrics {
         &self.received_messages
     }
 
-    fn get_reference(&self) -> &Option<MetricsReference> {
-        &None
-    }
-
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
         let time_to_start_relaying = self
@@ -117,6 +119,7 @@ impl Metrics for PollerMetrics {
         let latency = self.compute_latency()?;
 
         Some(Box::new(PollerDeltas::new(
+            self.reference.clone(),
             time_to_receive,
             time_to_start_relaying,
             latency,
@@ -165,10 +168,6 @@ impl Metrics for IncomingCanisterMessageMetrics {
         &self.message_relayed
     }
 
-    fn get_reference(&self) -> &Option<MetricsReference> {
-        &self.reference
-    }
-
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
         let time_to_relay = self
             .message_relayed
@@ -176,7 +175,7 @@ impl Metrics for IncomingCanisterMessageMetrics {
         let latency = self.compute_latency()?;
 
         Some(Box::new(IncomingCanisterMessageDeltas::new(
-            self.reference.clone(),
+            self.reference.clone().expect("must be set"),
             time_to_relay,
             latency,
         )))
@@ -190,17 +189,13 @@ impl Metrics for IncomingCanisterMessageMetrics {
 
 #[derive(Debug)]
 struct IncomingCanisterMessageDeltas {
-    reference: Option<MetricsReference>,
+    reference: MetricsReference,
     time_to_relay: Duration,
     latency: Duration,
 }
 
 impl IncomingCanisterMessageDeltas {
-    pub fn new(
-        reference: Option<MetricsReference>,
-        time_to_relay: Duration,
-        latency: Duration,
-    ) -> Self {
+    pub fn new(reference: MetricsReference, time_to_relay: Duration, latency: Duration) -> Self {
         Self {
             reference,
             time_to_relay,
@@ -217,6 +212,10 @@ impl Deltas for IncomingCanisterMessageDeltas {
         );
     }
 
+    fn get_reference(&self) -> &MetricsReference {
+        &self.reference
+    }
+
     fn get_latency(&self) -> Duration {
         self.latency
     }
@@ -224,6 +223,7 @@ impl Deltas for IncomingCanisterMessageDeltas {
 
 #[derive(Debug)]
 struct PollerDeltas {
+    reference: MetricsReference,
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
     latency: Duration,
@@ -231,11 +231,13 @@ struct PollerDeltas {
 
 impl PollerDeltas {
     pub fn new(
+        reference: MetricsReference,
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
         latency: Duration,
     ) -> Self {
         Self {
+            reference,
             time_to_receive,
             time_to_start_relaying,
             latency,
@@ -249,6 +251,10 @@ impl Deltas for PollerDeltas {
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\nlatency: {:?}",
             self.time_to_receive, self.time_to_start_relaying, self.latency
         );
+    }
+
+    fn get_reference(&self) -> &MetricsReference {
+        &self.reference
     }
 
     fn get_latency(&self) -> Duration {
@@ -465,4 +471,16 @@ async fn signal_poller_task_termination(
 
 async fn sleep(millis: u64) {
     tokio::time::sleep(Duration::from_millis(millis)).await;
+}
+
+fn current_timestamp() -> u64 {
+    let current_time = SystemTime::now();
+
+    // calculate the duration since the Unix epoch (January 1, 1970)
+    let duration_since_epoch = current_time
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards");
+
+    // convert the duration to a u64 value representing seconds since the epoch
+    duration_since_epoch.as_secs()
 }
