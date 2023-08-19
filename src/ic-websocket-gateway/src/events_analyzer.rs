@@ -2,12 +2,14 @@ use std::any::{type_name, Any};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
+use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::info;
 
+type EventsType = String;
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
-    fn get_type_name(&self) -> String {
+    fn get_type(&self) -> EventsType {
         let path: Vec<String> = type_name::<Self>()
             .split("::")
             .map(|s| s.to_string())
@@ -145,7 +147,7 @@ impl EventsData {
 pub struct EventsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
-    data_map: BTreeMap<String, EventsData>,
+    data_map: BTreeMap<EventsType, EventsData>,
 }
 
 impl EventsAnalyzer {
@@ -160,45 +162,46 @@ impl EventsAnalyzer {
     // process the received events
     pub async fn start_processing(&mut self) {
         loop {
-            if let Some(events) = self.events_channel_rx.recv().await {
-                let event_type_name = events.get_type_name();
-                // first events received does not result in a delta as there is no previous event for computing interval
-                if let Some(data) = self.data_map.get_mut(&event_type_name) {
+            select! {
+                Some(events) = self.events_channel_rx.recv() => {
+                    let events_type = events.get_type();
                     if let Some(deltas) = events.compute_deltas() {
                         deltas.display();
                         let reference = deltas.get_reference().clone();
-                        let aggregated_metrics =
-                            AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
-                        data.aggregated_metrics_map
-                            .insert(reference, aggregated_metrics);
+                        // first events received for each type is not processed further as there is no previous event for computing interval
+                        if let Some(data) = self.data_map.get_mut(&events_type) {
+                            let aggregated_metrics =
+                                AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
+                            data.aggregated_metrics_map
+                                .insert(reference.clone(), aggregated_metrics);
+                            data.previous = events;
+
+                            if data.aggregated_metrics_map.len() == 10 {
+                                let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
+                                    (Vec::new(), Vec::new()),
+                                    |(mut latencies, mut intervals), (_, aggregated_metrics)| {
+                                        latencies.push(aggregated_metrics.deltas.get_latency());
+                                        intervals.push(aggregated_metrics.interval);
+                                        (latencies, intervals)
+                                    },
+                                );
+
+                                let sum_latencies: Duration = latencies.iter().sum();
+                                let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
+                                info!("Average latency for {:?}: {:?}", events_type, avg_latency);
+
+                                let sum_intervals: Duration = intervals.iter().sum();
+                                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
+                                info!("Average interval for {:?}: {:?}", events_type, avg_interval);
+
+                                data.aggregated_metrics_map = BTreeMap::default();
+                            }
+                        }
+                        else {
+                            let data = EventsData::new(BTreeMap::default(), events);
+                            self.data_map.insert(events_type, data);
+                        }
                     }
-                    data.previous = events;
-                    if data.aggregated_metrics_map.len() > 10 {
-                        let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
-                            (Vec::new(), Vec::new()),
-                            |(mut latencies, mut intervals), (_, aggregated_metrics)| {
-                                latencies.push(aggregated_metrics.deltas.get_latency());
-                                intervals.push(aggregated_metrics.interval);
-                                (latencies, intervals)
-                            },
-                        );
-                        let sum_latencies: Duration = latencies.iter().sum();
-                        let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
-                        info!(
-                            "Average latency for {:?}: {:?}",
-                            event_type_name, avg_latency
-                        );
-                        let sum_intervals: Duration = intervals.iter().sum();
-                        let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
-                        info!(
-                            "Average interval for {:?}: {:?}",
-                            event_type_name, avg_interval
-                        );
-                        data.aggregated_metrics_map = BTreeMap::default();
-                    }
-                } else {
-                    let data = EventsData::new(BTreeMap::default(), events);
-                    self.data_map.insert(event_type_name, data);
                 }
             }
         }
