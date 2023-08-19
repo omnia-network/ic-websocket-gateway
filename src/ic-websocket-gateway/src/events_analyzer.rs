@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::info;
+use tracing::{debug, info};
 
 type EventsType = String;
 
@@ -177,6 +177,8 @@ impl EventsAnalyzer {
 
     // process the received events
     pub async fn start_processing(&mut self) {
+        let periodic_check_operation = periodic_check();
+        tokio::pin!(periodic_check_operation);
         loop {
             select! {
                 Some(events) = self.events_channel_rx.recv() => {
@@ -185,6 +187,10 @@ impl EventsAnalyzer {
                         self.add_latency_to_collection(&events, &deltas);
                         self.add_interval_to_events(events, deltas);
                     }
+                },
+                _ = &mut periodic_check_operation => {
+                    self.compute_average_intervals();
+                    periodic_check_operation.set(periodic_check());
                 }
             }
         }
@@ -233,30 +239,41 @@ impl EventsAnalyzer {
             data.aggregated_metrics_map
                 .insert(reference, aggregated_metrics);
             data.previous = events;
-
-            if data.aggregated_metrics_map.len() == 10 {
-                let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
-                    (Vec::new(), Vec::new()),
-                    |(mut latencies, mut intervals), (_, aggregated_metrics)| {
-                        latencies.push(aggregated_metrics.deltas.get_latency());
-                        intervals.push(aggregated_metrics.interval);
-                        (latencies, intervals)
-                    },
-                );
-
-                let sum_latencies: Duration = latencies.iter().sum();
-                let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
-                info!("Average latency for {:?}: {:?}", events_type, avg_latency);
-
-                let sum_intervals: Duration = intervals.iter().sum();
-                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
-                info!("Average interval for {:?}: {:?}", events_type, avg_interval);
-
-                data.aggregated_metrics_map = BTreeMap::default();
-            }
         } else {
             let data = EventsData::new(BTreeMap::default(), events);
             self.map_by_events_type.insert(events_type, data);
         }
     }
+
+    fn compute_average_intervals(&mut self) {
+        for (events_type, events_data) in self.map_by_events_type.iter_mut() {
+            if events_data.aggregated_metrics_map.len() > 10 {
+                let intervals = events_data.aggregated_metrics_map.iter().fold(
+                    Vec::new(),
+                    |mut intervals, (_, aggregated_metrics)| {
+                        debug!(
+                            "Deltas for {:?}: {:?}",
+                            events_type, aggregated_metrics.deltas
+                        );
+                        intervals.push(aggregated_metrics.interval);
+                        intervals
+                    },
+                );
+                let sum_intervals: Duration = intervals.iter().sum();
+                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
+                info!(
+                    "Average interval for {:?}: {:?} computed over: {:?} metrics",
+                    events_type,
+                    avg_interval,
+                    intervals.len()
+                );
+
+                events_data.aggregated_metrics_map = BTreeMap::default();
+            }
+        }
+    }
+}
+
+async fn periodic_check() {
+    tokio::time::sleep(Duration::from_secs(5)).await;
 }
