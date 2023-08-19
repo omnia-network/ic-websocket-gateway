@@ -16,7 +16,10 @@ pub trait Events: Debug {
             .split("::")
             .map(|s| s.to_string())
             .collect();
-        path.last().expect("not a valid path").to_owned()
+        let mut events_type = path.last().expect("not a valid path").to_owned();
+        // remove last character '>'
+        events_type.pop();
+        events_type
     }
 
     fn get_reference(&self) -> Option<EventsReference>;
@@ -172,13 +175,18 @@ pub enum EventsCollectionType {
 }
 
 impl EventsCollectionType {
-    /// returns the number of components whose latencies affect the relative collection
+    /// returns the events of the components whose latencies affect the relative collection
     /// returns None, if the latency of a collection is irrelevant
-    fn get_collection_size(&self) -> Option<usize> {
+    fn get_events_type_in_collection(&self) -> Option<Vec<EventsType>> {
         match self {
-            Self::NewClientConnection => Some(2), // should be 3 once we measure also the GW state events
-            Self::CanisterMessage => Some(1), // should be 2 once we measure also the handler events for outgoing messages
-            Self::PollerStatus => Some(1),
+            Self::NewClientConnection => Some(vec![
+                String::from("ListenerEventsMetrics"),
+                String::from("ConnectionSetupEventsMetrics"),
+            ]),
+            Self::CanisterMessage => {
+                Some(vec![String::from("IncomingCanisterMessageEventsMetrics")])
+            },
+            Self::PollerStatus => Some(vec![String::from("PollerEventsMetrics")]),
         }
     }
 }
@@ -211,7 +219,37 @@ impl EventsData {
     }
 }
 
-type EventsLatencies = BTreeSet<Duration>;
+struct EventsLatencies(BTreeSet<(EventsType, Duration)>);
+
+impl EventsLatencies {
+    fn default() -> Self {
+        Self(BTreeSet::default())
+    }
+
+    fn insert(&mut self, events_type: EventsType, latency: Duration) {
+        self.0.insert((events_type, latency));
+    }
+
+    fn received_all_events(&self, events_type_in_collection: &Vec<String>) -> bool {
+        let found_event_types: BTreeSet<&EventsType> =
+            self.0.iter().map(|(event_type, _)| event_type).collect();
+        for event_type in events_type_in_collection {
+            if !found_event_types.contains(event_type) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn sum(&self) -> Duration {
+        self.0.iter().map(|(_, latency)| latency).sum()
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 type CollectionData = BTreeMap<EventsReference, EventsLatencies>;
 
 /// events analyzer receives metrics from different components of the WS Gateway
@@ -260,21 +298,22 @@ impl EventsAnalyzer {
         events: &Box<dyn Events + Send>,
         deltas: &Box<dyn Deltas + Send>,
     ) {
+        let events_type = events.get_type();
         let collection_type = events.get_collection_type();
         let latency = deltas.get_latency();
         let reference = deltas.get_reference().clone();
 
         if let Some(collection_data) = self.map_by_collection_type.get_mut(&collection_type) {
             if let Some(latencies) = collection_data.get_mut(&reference) {
-                latencies.insert(latency);
+                latencies.insert(events_type, latency);
             } else {
                 let mut latencies = EventsLatencies::default();
-                latencies.insert(latency);
+                latencies.insert(events_type, latency);
                 collection_data.insert(reference, latencies);
             }
         } else {
             let mut latencies = EventsLatencies::default();
-            latencies.insert(latency);
+            latencies.insert(events_type, latency);
             let mut latencies_map = CollectionData::default();
             latencies_map.insert(reference, latencies);
             let collection_data = latencies_map;
@@ -338,10 +377,11 @@ impl EventsAnalyzer {
 
     fn compute_collections_latencies(&mut self) {
         for (collection_type, collection_data) in self.map_by_collection_type.iter_mut() {
-            if let Some(collection_size) = collection_type.get_collection_size() {
+            if let Some(events_type_in_collection) = collection_type.get_events_type_in_collection()
+            {
                 for (events_reference, latencies) in collection_data.iter_mut() {
-                    if latencies.len() == collection_size {
-                        let total_latency: Duration = latencies.iter().sum();
+                    if latencies.received_all_events(&events_type_in_collection) {
+                        let total_latency: Duration = latencies.sum();
                         info!("Total latency for events with reference {:?} for collection of type: {:?}: {:?}", events_reference, collection_type, total_latency);
                         latencies.clear();
                     }
