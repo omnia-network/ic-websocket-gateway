@@ -167,8 +167,8 @@ impl EventsData {
     }
 }
 
-#[derive(Debug)]
-struct CollectionData(BTreeMap<EventsReference, BTreeSet<Duration>>);
+type EventsLatencies = BTreeSet<Duration>;
+type CollectionData = BTreeMap<EventsReference, EventsLatencies>;
 
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
@@ -220,19 +220,19 @@ impl EventsAnalyzer {
         let reference = deltas.get_reference().clone();
 
         if let Some(collection_data) = self.map_by_collection_type.get_mut(&collection_type) {
-            if let Some(latencies) = collection_data.0.get_mut(&reference) {
+            if let Some(latencies) = collection_data.get_mut(&reference) {
                 latencies.insert(latency);
             } else {
-                let mut latencies = BTreeSet::default();
+                let mut latencies = EventsLatencies::default();
                 latencies.insert(latency);
-                collection_data.0.insert(reference, latencies);
+                collection_data.insert(reference, latencies);
             }
         } else {
-            let mut latencies = BTreeSet::default();
+            let mut latencies = EventsLatencies::default();
             latencies.insert(latency);
-            let mut latencies_map = BTreeMap::default();
+            let mut latencies_map = CollectionData::default();
             latencies_map.insert(reference, latencies);
-            let collection_data = CollectionData(latencies_map);
+            let collection_data = latencies_map;
             self.map_by_collection_type
                 .insert(collection_type, collection_data);
         }
@@ -290,7 +290,7 @@ impl EventsAnalyzer {
     fn compute_collections_latencies(&mut self) {
         for (collection_type, collection_data) in self.map_by_collection_type.iter_mut() {
             if let Some(collection_size) = collection_type.get_collection_size() {
-                for (events_reference, latencies) in collection_data.0.iter_mut() {
+                for (events_reference, latencies) in collection_data.iter_mut() {
                     if latencies.len() == collection_size {
                         let total_latency: Duration = latencies.iter().sum();
                         info!("Total latency for events with reference {:?} for collection of type: {:?}: {:?}", events_reference, collection_type, total_latency);
