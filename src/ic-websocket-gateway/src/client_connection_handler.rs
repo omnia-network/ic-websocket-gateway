@@ -90,7 +90,7 @@ impl Events for ConnectionSetupEvents {
         &self.established_ws_connection
     }
 
-    fn get_collection_name(&self) -> EventsCollectionType {
+    fn get_collection_type(&self) -> EventsCollectionType {
         EventsCollectionType::NewClientConnection
     }
 

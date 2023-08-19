@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::info;
 
 type EventsType = String;
 
@@ -20,7 +19,7 @@ pub trait Events: Debug {
     }
 
     /// returns the name of the collection which the events in the struct belong to
-    fn get_collection_name(&self) -> EventsCollectionType;
+    fn get_collection_type(&self) -> EventsCollectionType;
 
     /// returns the value used to compute the time interval between two structs implementing Events
     fn get_value_for_interval(&self) -> &TimeableEvent;
@@ -162,7 +161,7 @@ struct CollectionData(BTreeMap<EventsReference, BTreeSet<Duration>>);
 pub struct EventsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
-    map_by_event_type: BTreeMap<EventsType, EventsData>,
+    map_by_events_type: BTreeMap<EventsType, EventsData>,
     map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
 }
 
@@ -170,7 +169,7 @@ impl EventsAnalyzer {
     pub fn new(events_channel_rx: Receiver<Box<dyn Events + Send>>) -> Self {
         Self {
             events_channel_rx,
-            map_by_event_type: BTreeMap::default(),
+            map_by_events_type: BTreeMap::default(),
             map_by_collection_type: HashMap::default(),
         }
     }
@@ -182,24 +181,8 @@ impl EventsAnalyzer {
                 Some(events) = self.events_channel_rx.recv() => {
                     if let Some(deltas) = events.compute_deltas() {
                         deltas.display();
-                        let events_type = events.get_type();
-                        let collection_name = events.get_collection_name();
-                        let latency = deltas.get_latency();
-                        let reference = deltas.get_reference().clone();
-                        self.add_latency_to_collection(reference.clone(), collection_name, latency);
-                        info!("{:?}", self.map_by_collection_type);
-                        // first events received for each type is not processed further as there is no previous event for computing interval
-                        if let Some(data) = self.map_by_event_type.get_mut(&events_type) {
-                            let aggregated_metrics =
-                                AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
-                            data.aggregated_metrics_map
-                                .insert(reference, aggregated_metrics);
-                            data.previous = events;
-                        }
-                        else {
-                            let data = EventsData::new(BTreeMap::default(), events);
-                            self.map_by_event_type.insert(events_type, data);
-                        }
+                        self.add_latency_to_collection(&events, &deltas);
+                        self.add_interval_to_events(events, deltas);
                     }
                 }
             }
@@ -208,10 +191,13 @@ impl EventsAnalyzer {
 
     fn add_latency_to_collection(
         &mut self,
-        reference: EventsReference,
-        collection_type: EventsCollectionType,
-        latency: Duration,
+        events: &Box<dyn Events + Send>,
+        deltas: &Box<dyn Deltas + Send>,
     ) {
+        let collection_type = events.get_collection_type();
+        let latency = deltas.get_latency();
+        let reference = deltas.get_reference().clone();
+
         if let Some(collection_data) = self.map_by_collection_type.get_mut(&collection_type) {
             if let Some(latencies) = collection_data.0.get_mut(&reference) {
                 latencies.insert(latency);
@@ -228,6 +214,27 @@ impl EventsAnalyzer {
             let collection_data = CollectionData(latencies_map);
             self.map_by_collection_type
                 .insert(collection_type, collection_data);
+        }
+    }
+
+    fn add_interval_to_events(
+        &mut self,
+        events: Box<dyn Events + Send>,
+        deltas: Box<dyn Deltas + Send>,
+    ) {
+        let events_type = events.get_type();
+        let reference = deltas.get_reference().clone();
+
+        // first events received for each type is not processed further as there is no previous event for computing interval
+        if let Some(data) = self.map_by_events_type.get_mut(&events_type) {
+            let aggregated_metrics =
+                AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
+            data.aggregated_metrics_map
+                .insert(reference, aggregated_metrics);
+            data.previous = events;
+        } else {
+            let data = EventsData::new(BTreeMap::default(), events);
+            self.map_by_events_type.insert(events_type, data);
         }
     }
 }

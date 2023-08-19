@@ -107,7 +107,7 @@ impl Events for PollerEvents {
         &self.received_messages
     }
 
-    fn get_collection_name(&self) -> EventsCollectionType {
+    fn get_collection_type(&self) -> EventsCollectionType {
         EventsCollectionType::PollerStatus
     }
 
@@ -168,7 +168,7 @@ impl Events for IncomingCanisterMessageEvents {
         &self.message_relayed
     }
 
-    fn get_collection_name(&self) -> EventsCollectionType {
+    fn get_collection_type(&self) -> EventsCollectionType {
         EventsCollectionType::CanisterMessage
     }
 

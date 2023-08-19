@@ -69,7 +69,7 @@ impl Events for ListenerEvents {
         &self.received_request
     }
 
-    fn get_collection_name(&self) -> EventsCollectionType {
+    fn get_collection_type(&self) -> EventsCollectionType {
         EventsCollectionType::NewClientConnection
     }
 
