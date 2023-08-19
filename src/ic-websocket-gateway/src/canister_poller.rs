@@ -14,7 +14,10 @@ use crate::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
-    events_analyzer::{Deltas, Events, EventsCollectionType, EventsReference, TimeableEvent},
+    events_analyzer::{
+        Deltas, Events, EventsCollectionType, EventsImpl, EventsMetrics, EventsReference,
+        TimeableEvent,
+    },
 };
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
@@ -71,18 +74,18 @@ pub enum TerminationInfo {
     CdkError(Principal),
 }
 
+type PollerEvents = EventsImpl<PollerEventsMetrics>;
+
 #[derive(Debug, Clone)]
-struct PollerEvents {
-    reference: EventsReference,
+struct PollerEventsMetrics {
     start_polling: TimeableEvent,
     received_messages: TimeableEvent,
     start_relaying_messages: TimeableEvent,
 }
 
-impl PollerEvents {
-    fn new(polling_iteration: u64) -> Self {
+impl PollerEventsMetrics {
+    fn default() -> Self {
         Self {
-            reference: EventsReference::Iteration(polling_iteration),
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
             start_relaying_messages: TimeableEvent::default(),
@@ -102,28 +105,27 @@ impl PollerEvents {
     }
 }
 
-impl Events for PollerEvents {
+impl EventsMetrics for PollerEventsMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.received_messages
     }
 
-    fn get_collection_type(&self) -> EventsCollectionType {
-        EventsCollectionType::PollerStatus
-    }
+    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+        if let Some(reference) = reference {
+            let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
+            let time_to_start_relaying = self
+                .start_relaying_messages
+                .duration_since(&self.received_messages)?;
+            let latency = self.compute_latency()?;
 
-    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
-        let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
-        let time_to_start_relaying = self
-            .start_relaying_messages
-            .duration_since(&self.received_messages)?;
-        let latency = self.compute_latency()?;
-
-        Some(Box::new(PollerDeltas::new(
-            self.reference.clone(),
-            time_to_receive,
-            time_to_start_relaying,
-            latency,
-        )))
+            return Some(Box::new(PollerDeltas::new(
+                reference,
+                time_to_receive,
+                time_to_start_relaying,
+                latency,
+            )));
+        }
+        None
     }
 
     fn compute_latency(&self) -> Option<Duration> {
@@ -132,17 +134,17 @@ impl Events for PollerEvents {
     }
 }
 
+type IncomingCanisterMessageEvents = EventsImpl<IncomingCanisterMessageEventsMetrics>;
+
 #[derive(Debug, Clone)]
-struct IncomingCanisterMessageEvents {
-    reference: Option<EventsReference>,
+struct IncomingCanisterMessageEventsMetrics {
     start_relaying_message: TimeableEvent,
     message_relayed: TimeableEvent,
 }
 
-impl IncomingCanisterMessageEvents {
+impl IncomingCanisterMessageEventsMetrics {
     fn default() -> Self {
         Self {
-            reference: None,
             start_relaying_message: TimeableEvent::default(),
             message_relayed: TimeableEvent::default(),
         }
@@ -152,37 +154,34 @@ impl IncomingCanisterMessageEvents {
         self.start_relaying_message.set_now();
     }
 
-    fn set_message_relayed(&mut self, nonce: u64) {
+    fn set_message_relayed(&mut self) {
         self.message_relayed = TimeableEvent::now();
-        self.reference = Some(EventsReference::MessageNonce(nonce));
     }
 
-    fn set_no_message_relayed(&mut self, nonce: u64) {
+    fn set_no_message_relayed(&mut self) {
         self.message_relayed = TimeableEvent::default();
-        self.reference = Some(EventsReference::MessageNonce(nonce));
     }
 }
 
-impl Events for IncomingCanisterMessageEvents {
+impl EventsMetrics for IncomingCanisterMessageEventsMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.message_relayed
     }
 
-    fn get_collection_type(&self) -> EventsCollectionType {
-        EventsCollectionType::CanisterMessage
-    }
+    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+        if let Some(reference) = reference {
+            let time_to_relay = self
+                .message_relayed
+                .duration_since(&self.start_relaying_message)?;
+            let latency = self.compute_latency()?;
 
-    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
-        let time_to_relay = self
-            .message_relayed
-            .duration_since(&self.start_relaying_message)?;
-        let latency = self.compute_latency()?;
-
-        Some(Box::new(IncomingCanisterMessageDeltas::new(
-            self.reference.clone().expect("must be set"),
-            time_to_relay,
-            latency,
-        )))
+            return Some(Box::new(IncomingCanisterMessageDeltas::new(
+                reference,
+                time_to_relay,
+                latency,
+            )));
+        }
+        None
     }
 
     fn compute_latency(&self) -> Option<Duration> {
@@ -349,11 +348,11 @@ impl CanisterPoller {
                 //       a new call is not pinned again. We have to handle the error case
                 res = &mut get_messages_operation => {
                     if let Some((msgs, mut poller_events)) = res {
-                        poller_events.set_start_relaying_messages();
+                        poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
                         for encoded_message in msgs.messages {
-                            let mut incoming_canister_message_events = IncomingCanisterMessageEvents::default();
-                            incoming_canister_message_events.set_start_relaying_message();
+                            let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(None, EventsCollectionType::CanisterMessage, IncomingCanisterMessageEventsMetrics::default());
+                            incoming_canister_message_events.metrics.set_start_relaying_message();
                             let client_key = encoded_message.client_key;
                             let m = CertifiedMessage {
                                 key: encoded_message.key.clone(),
@@ -364,15 +363,16 @@ impl CanisterPoller {
 
                             match get_nonce_from_message(encoded_message.key) {
                                 Ok(last_message_nonce) => {
+                                    incoming_canister_message_events.reference = Some(EventsReference::MessageNonce(last_message_nonce));
                                     match client_channels.get(&client_key) {
                                         Some(client_channel_tx) => {
                                             debug!("Received message with key: {:?} from canister", m.key);
                                             if let Err(e) = client_channel_tx.send(Ok(m)).await {
                                                 error!("Client's thread terminated: {}", e);
-                                                incoming_canister_message_events.set_no_message_relayed(last_message_nonce);
+                                                incoming_canister_message_events.metrics.set_no_message_relayed();
                                             }
                                             else {
-                                                incoming_canister_message_events.set_message_relayed(last_message_nonce);
+                                                incoming_canister_message_events.metrics.set_message_relayed();
                                             }
                                             poller_channels.poller_to_analyzer.send(Box::new(incoming_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                         },
@@ -417,15 +417,19 @@ impl CanisterPoller {
         message_nonce: u64,
         polling_iteration: u64,
     ) -> Option<CanisterGetMessagesWithEvents> {
-        let mut poller_events = PollerEvents::new(polling_iteration);
-        poller_events.set_start_polling();
+        let mut poller_events = PollerEvents::new(
+            Some(EventsReference::Iteration(polling_iteration)),
+            EventsCollectionType::PollerStatus,
+            PollerEventsMetrics::default(),
+        );
+        poller_events.metrics.set_start_polling();
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
         let canister_result =
             canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce)
                 .await
                 .ok()?;
-        poller_events.set_received_messages();
+        poller_events.metrics.set_received_messages();
         if canister_result.messages.len() > 0 {
             return Some((canister_result, poller_events));
         }

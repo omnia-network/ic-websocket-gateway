@@ -19,17 +19,23 @@ pub trait Events: Debug {
         path.last().expect("not a valid path").to_owned()
     }
 
+    fn get_reference(&self) -> Option<EventsReference>;
+
     /// returns the name of the collection which the events in the struct belong to
     fn get_collection_type(&self) -> EventsCollectionType;
 
+    fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static>;
+}
+
+pub trait EventsMetrics: Debug {
     /// returns the value used to compute the time interval between two structs implementing Events
     fn get_value_for_interval(&self) -> &TimeableEvent;
 
     /// returns the time deltas between the events in the struct implementing Events
-    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>>;
+    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>>;
 
     /// computes the interval between two structs implementing Events
-    fn compute_interval(&self, previous: &Box<dyn Events + Send>) -> Duration {
+    fn compute_interval(&self, previous: &Box<dyn EventsMetrics + Send>) -> Duration {
         self.get_value_for_interval()
             .duration_since(previous.get_value_for_interval())
             .expect("previous event must exist")
@@ -44,11 +50,49 @@ pub trait Deltas: Debug {
     /// displays all the deltas of an event
     fn display(&self);
 
-    /// returns the latency of the component
-    fn get_latency(&self) -> Duration;
-
     /// returns the reference used to identify the event
     fn get_reference(&self) -> &EventsReference;
+
+    /// returns the latency of the component
+    fn get_latency(&self) -> Duration;
+}
+
+#[derive(Debug)]
+pub struct EventsImpl<T: EventsMetrics + Send> {
+    pub reference: Option<EventsReference>,
+    collection_type: EventsCollectionType,
+    pub metrics: T,
+}
+
+impl<T: EventsMetrics + Send> EventsImpl<T> {
+    pub fn new(
+        reference: Option<EventsReference>,
+        collection_type: EventsCollectionType,
+        metrics: T,
+    ) -> Self {
+        Self {
+            reference,
+            collection_type,
+            metrics,
+        }
+    }
+}
+
+impl<T: EventsMetrics + Send + Clone + 'static> Events for EventsImpl<T> {
+    fn get_collection_type(&self) -> EventsCollectionType {
+        self.collection_type.clone()
+    }
+
+    fn get_reference(&self) -> Option<EventsReference> {
+        if let Some(reference) = &self.reference {
+            return Some(reference.clone());
+        }
+        None
+    }
+
+    fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static> {
+        Box::new(self.metrics.clone())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +164,7 @@ impl PartialOrd for EventsReference {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum EventsCollectionType {
     NewClientConnection,
     CanisterMessage,
@@ -194,7 +238,8 @@ impl EventsAnalyzer {
         loop {
             select! {
                 Some(events) = self.events_channel_rx.recv() => {
-                    if let Some(deltas) = events.compute_deltas() {
+                    let reference = events.get_reference();
+                    if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
                         deltas.display();
                         self.add_latency_to_collection(&events, &deltas);
                         self.add_interval_to_events(events, deltas);
@@ -248,8 +293,12 @@ impl EventsAnalyzer {
 
         // first events received for each type is not processed further as there is no previous event for computing interval
         if let Some(data) = self.map_by_events_type.get_mut(&events_type) {
-            let aggregated_metrics =
-                AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
+            let aggregated_metrics = AggregatedMetrics::new(
+                deltas,
+                events
+                    .get_metrics()
+                    .compute_interval(&data.previous.get_metrics()),
+            );
             data.aggregated_metrics_map
                 .insert(reference, aggregated_metrics);
             data.previous = events;

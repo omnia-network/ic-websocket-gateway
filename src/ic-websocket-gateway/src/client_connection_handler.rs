@@ -1,7 +1,10 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
-    events_analyzer::{Deltas, Events, EventsCollectionType, EventsReference, TimeableEvent},
+    events_analyzer::{
+        Deltas, Events, EventsCollectionType, EventsImpl, EventsMetrics, EventsReference,
+        TimeableEvent,
+    },
     gateway_server::GatewaySession,
 };
 
@@ -48,20 +51,19 @@ pub enum IcWsError {
     NotImplemented(String),
 }
 
-#[derive(Debug)]
-struct ConnectionSetupEvents {
-    reference: EventsReference,
+type ConnectionSetupEvents = EventsImpl<ConnectionSetupEventsMetrics>;
+
+#[derive(Debug, Clone)]
+struct ConnectionSetupEventsMetrics {
     accepted_ws_connection: TimeableEvent,
     received_first_message: TimeableEvent,
     validated_first_message: TimeableEvent,
     established_ws_connection: TimeableEvent,
 }
 
-impl ConnectionSetupEvents {
-    fn new(id: u64) -> Self {
-        let reference = EventsReference::ClientId(id);
+impl ConnectionSetupEventsMetrics {
+    fn default() -> Self {
         Self {
-            reference,
             accepted_ws_connection: TimeableEvent::default(),
             received_first_message: TimeableEvent::default(),
             validated_first_message: TimeableEvent::default(),
@@ -85,34 +87,33 @@ impl ConnectionSetupEvents {
     }
 }
 
-impl Events for ConnectionSetupEvents {
+impl EventsMetrics for ConnectionSetupEventsMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.established_ws_connection
     }
 
-    fn get_collection_type(&self) -> EventsCollectionType {
-        EventsCollectionType::NewClientConnection
-    }
+    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+        if let Some(reference) = reference {
+            let time_to_first_message = self
+                .received_first_message
+                .duration_since(&self.accepted_ws_connection)?;
+            let time_to_validation = self
+                .validated_first_message
+                .duration_since(&self.received_first_message)?;
+            let time_to_establishment = self
+                .established_ws_connection
+                .duration_since(&self.validated_first_message)?;
+            let latency = self.compute_latency()?;
 
-    fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
-        let time_to_first_message = self
-            .received_first_message
-            .duration_since(&self.accepted_ws_connection)?;
-        let time_to_validation = self
-            .validated_first_message
-            .duration_since(&self.received_first_message)?;
-        let time_to_establishment = self
-            .established_ws_connection
-            .duration_since(&self.validated_first_message)?;
-        let latency = self.compute_latency()?;
-
-        Some(Box::new(ConnectionSetupDeltas::new(
-            self.reference.clone(),
-            time_to_first_message,
-            time_to_validation,
-            time_to_establishment,
-            latency,
-        )))
+            return Some(Box::new(ConnectionSetupDeltas::new(
+                reference,
+                time_to_first_message,
+                time_to_validation,
+                time_to_establishment,
+                latency,
+            )));
+        }
+        None
     }
 
     fn compute_latency(&self) -> Option<Duration> {
@@ -193,10 +194,16 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                let mut connection_setup_events = Some(ConnectionSetupEvents::new(self.id));
+                let mut connection_setup_events = Some(ConnectionSetupEvents::new(
+                    Some(EventsReference::ClientId(self.id)),
+                    EventsCollectionType::NewClientConnection,
+                    ConnectionSetupEventsMetrics::default(),
+                ));
+
                 connection_setup_events
                     .as_mut()
-                    .unwrap()
+                    .expect("must have connection setup events for first message")
+                    .metrics
                     .set_accepted_ws_connection();
                 debug!("Accepted WebSocket connection");
                 let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -318,6 +325,7 @@ impl ClientConnectionHandler {
                     connection_setup_events
                         .as_mut()
                         .expect("must have connection setup events for first message")
+                        .metrics
                         .set_received_first_message();
                     // check if client followed the IC WebSocket connection establishment protocol
                     match canister_methods::check_canister_init(&self.agent, message.clone()).await
@@ -332,6 +340,7 @@ impl ClientConnectionHandler {
                             connection_setup_events
                                 .as_mut()
                                 .expect("must have connection setup events for first message")
+                                .metrics
                                 .set_validated_first_message();
                             // prevent adding a new client to the gateway state while shutting down
                             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
@@ -360,6 +369,7 @@ impl ClientConnectionHandler {
                                 connection_setup_events
                                     .as_mut()
                                     .expect("must have connection setup events for first message")
+                                    .metrics
                                     .set_established_ws_connection();
                                 self.events_channel_tx
                                     .send(Box::new(connection_setup_events.expect(
