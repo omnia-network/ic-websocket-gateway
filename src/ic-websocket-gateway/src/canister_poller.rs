@@ -18,7 +18,7 @@ use crate::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
-    events_analyzer::{Deltas, Events, EventsReference, TimeableEvent},
+    events_analyzer::{Deltas, Events, EventsCollectionType, EventsReference, TimeableEvent},
 };
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
@@ -86,6 +86,8 @@ struct PollerEvents {
 impl PollerEvents {
     fn default() -> Self {
         Self {
+            // !!! the system returns the block timestamp so multiple poller events might get the same reference !!!
+            // TODO: replace timestamp with a counter of the polling iterations
             reference: EventsReference::Timestamp(current_timestamp()),
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
@@ -109,6 +111,10 @@ impl PollerEvents {
 impl Events for PollerEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.received_messages
+    }
+
+    fn get_collection_name(&self) -> EventsCollectionType {
+        EventsCollectionType::PollerStatus
     }
 
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {
@@ -166,6 +172,10 @@ impl IncomingCanisterMessageEvents {
 impl Events for IncomingCanisterMessageEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.message_relayed
+    }
+
+    fn get_collection_name(&self) -> EventsCollectionType {
+        EventsCollectionType::CanisterMessage
     }
 
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {

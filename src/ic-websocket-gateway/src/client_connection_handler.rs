@@ -1,7 +1,7 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
-    events_analyzer::{Deltas, Events, EventsReference, TimeableEvent},
+    events_analyzer::{Deltas, Events, EventsCollectionType, EventsReference, TimeableEvent},
     gateway_server::GatewaySession,
 };
 
@@ -88,6 +88,10 @@ impl ConnectionSetupEvents {
 impl Events for ConnectionSetupEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.established_ws_connection
+    }
+
+    fn get_collection_name(&self) -> EventsCollectionType {
+        EventsCollectionType::NewClientConnection
     }
 
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {

@@ -1,6 +1,6 @@
 use crate::{
     client_connection_handler::{ClientConnectionHandler, WsConnectionState},
-    events_analyzer::{Deltas, Events, EventsReference, TimeableEvent},
+    events_analyzer::{Deltas, Events, EventsCollectionType, EventsReference, TimeableEvent},
 };
 
 use ic_agent::Agent;
@@ -67,6 +67,10 @@ impl ListenerEvents {
 impl Events for ListenerEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.received_request
+    }
+
+    fn get_collection_name(&self) -> EventsCollectionType {
+        EventsCollectionType::NewClientConnection
     }
 
     fn compute_deltas(&self) -> Option<Box<dyn Deltas + Send>> {

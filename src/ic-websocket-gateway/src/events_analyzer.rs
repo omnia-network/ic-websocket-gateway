@@ -1,5 +1,6 @@
 use std::any::{type_name, Any};
 use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
@@ -7,6 +8,7 @@ use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::info;
 
 type EventsType = String;
+
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
     fn get_type(&self) -> EventsType {
@@ -16,6 +18,9 @@ pub trait Events: Debug {
             .collect();
         path.last().expect("not a valid path").to_owned()
     }
+
+    /// returns the name of the collection which the events in the struct belong to
+    fn get_collection_name(&self) -> EventsCollectionType;
 
     /// returns the value used to compute the time interval between two structs implementing Events
     fn get_value_for_interval(&self) -> &TimeableEvent;
@@ -115,6 +120,13 @@ impl PartialOrd for EventsReference {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum EventsCollectionType {
+    NewClientConnection,
+    CanisterMessage,
+    PollerStatus,
+}
+
 struct AggregatedMetrics {
     deltas: Box<dyn Deltas + Send>,
     interval: Duration,
@@ -143,19 +155,23 @@ impl EventsData {
     }
 }
 
+#[derive(Debug)]
+struct CollectionData(BTreeMap<EventsReference, BTreeSet<Duration>>);
+
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
-    data_map: BTreeMap<EventsType, EventsData>,
+    map_by_event_type: BTreeMap<EventsType, EventsData>,
+    map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
 }
 
 impl EventsAnalyzer {
     pub fn new(events_channel_rx: Receiver<Box<dyn Events + Send>>) -> Self {
-        let data_map = BTreeMap::default();
         Self {
             events_channel_rx,
-            data_map,
+            map_by_event_type: BTreeMap::default(),
+            map_by_collection_type: HashMap::default(),
         }
     }
 
@@ -164,46 +180,75 @@ impl EventsAnalyzer {
         loop {
             select! {
                 Some(events) = self.events_channel_rx.recv() => {
-                    let events_type = events.get_type();
                     if let Some(deltas) = events.compute_deltas() {
                         deltas.display();
+                        let events_type = events.get_type();
+                        let collection_name = events.get_collection_name();
+                        let latency = deltas.get_latency();
                         let reference = deltas.get_reference().clone();
+                        self.add_latency_to_collection(reference.clone(), collection_name, latency);
+                        info!("{:?}", self.map_by_collection_type);
                         // first events received for each type is not processed further as there is no previous event for computing interval
-                        if let Some(data) = self.data_map.get_mut(&events_type) {
+                        if let Some(data) = self.map_by_event_type.get_mut(&events_type) {
                             let aggregated_metrics =
                                 AggregatedMetrics::new(deltas, events.compute_interval(&data.previous));
                             data.aggregated_metrics_map
-                                .insert(reference.clone(), aggregated_metrics);
+                                .insert(reference, aggregated_metrics);
                             data.previous = events;
-
-                            if data.aggregated_metrics_map.len() == 10 {
-                                let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
-                                    (Vec::new(), Vec::new()),
-                                    |(mut latencies, mut intervals), (_, aggregated_metrics)| {
-                                        latencies.push(aggregated_metrics.deltas.get_latency());
-                                        intervals.push(aggregated_metrics.interval);
-                                        (latencies, intervals)
-                                    },
-                                );
-
-                                let sum_latencies: Duration = latencies.iter().sum();
-                                let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
-                                info!("Average latency for {:?}: {:?}", events_type, avg_latency);
-
-                                let sum_intervals: Duration = intervals.iter().sum();
-                                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
-                                info!("Average interval for {:?}: {:?}", events_type, avg_interval);
-
-                                data.aggregated_metrics_map = BTreeMap::default();
-                            }
                         }
                         else {
                             let data = EventsData::new(BTreeMap::default(), events);
-                            self.data_map.insert(events_type, data);
+                            self.map_by_event_type.insert(events_type, data);
                         }
                     }
                 }
             }
         }
     }
+
+    fn add_latency_to_collection(
+        &mut self,
+        reference: EventsReference,
+        collection_type: EventsCollectionType,
+        latency: Duration,
+    ) {
+        if let Some(collection_data) = self.map_by_collection_type.get_mut(&collection_type) {
+            if let Some(latencies) = collection_data.0.get_mut(&reference) {
+                latencies.insert(latency);
+            } else {
+                let mut latencies = BTreeSet::default();
+                latencies.insert(latency);
+                collection_data.0.insert(reference, latencies);
+            }
+        } else {
+            let mut latencies = BTreeSet::default();
+            latencies.insert(latency);
+            let mut latencies_map = BTreeMap::default();
+            latencies_map.insert(reference, latencies);
+            let collection_data = CollectionData(latencies_map);
+            self.map_by_collection_type
+                .insert(collection_type, collection_data);
+        }
+    }
 }
+
+// if data.aggregated_metrics_map.len() == 10 {
+//     let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
+//         (Vec::new(), Vec::new()),
+//         |(mut latencies, mut intervals), (_, aggregated_metrics)| {
+//             latencies.push(aggregated_metrics.deltas.get_latency());
+//             intervals.push(aggregated_metrics.interval);
+//             (latencies, intervals)
+//         },
+//     );
+
+//     let sum_latencies: Duration = latencies.iter().sum();
+//     let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
+//     info!("Average latency for {:?}: {:?}", events_type, avg_latency);
+
+//     let sum_intervals: Duration = intervals.iter().sum();
+//     let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
+//     info!("Average interval for {:?}: {:?}", events_type, avg_interval);
+
+//     data.aggregated_metrics_map = BTreeMap::default();
+// }
