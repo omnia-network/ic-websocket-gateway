@@ -1,5 +1,5 @@
 use crate::ws_listener::TlsConfig;
-use crate::{gateway_server::GatewayServer, metrics_analyzer::MetricsAnalyzer};
+use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self, File},
@@ -15,8 +15,8 @@ use tracing_subscriber::{filter, prelude::*, EnvFilter};
 mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
+mod events_analyzer;
 mod gateway_server;
-mod metrics_analyzer;
 mod unit_tests;
 mod ws_listener;
 
@@ -97,13 +97,13 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
-    let (metrics_channel_tx, metrics_channel_rx) = mpsc::channel(100);
+    let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
         deployment_info.subnet_url,
         identity,
-        metrics_channel_tx,
+        events_channel_tx,
     )
     .await;
 
@@ -119,8 +119,8 @@ async fn main() -> Result<(), String> {
     };
 
     tokio::spawn(async move {
-        let mut metrics_analyzer = MetricsAnalyzer::new(metrics_channel_rx);
-        metrics_analyzer.start_processing().await;
+        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx);
+        events_analyzer.start_processing().await;
     });
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients

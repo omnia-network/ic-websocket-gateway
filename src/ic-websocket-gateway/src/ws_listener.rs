@@ -1,6 +1,6 @@
 use crate::{
     client_connection_handler::{ClientConnectionHandler, WsConnectionState},
-    metrics_analyzer::{Deltas, Metrics, MetricsReference, TimeableEvent},
+    events_analyzer::{Deltas, Events, EventsReference, TimeableEvent},
 };
 
 use ic_agent::Agent;
@@ -27,17 +27,17 @@ pub struct TlsConfig {
 }
 
 #[derive(Debug)]
-struct ListenerMetrics {
-    reference: MetricsReference,
+struct ListenerEvents {
+    reference: EventsReference,
     received_request: TimeableEvent,
     accepted_with_tls: TimeableEvent,
     accepted_without_tls: TimeableEvent,
     started_handler: TimeableEvent,
 }
 
-impl ListenerMetrics {
+impl ListenerEvents {
     fn new(id: u64) -> Self {
-        let reference = MetricsReference::ClientId(id);
+        let reference = EventsReference::ClientId(id);
         Self {
             reference,
             received_request: TimeableEvent::default(),
@@ -64,7 +64,7 @@ impl ListenerMetrics {
     }
 }
 
-impl Metrics for ListenerMetrics {
+impl Events for ListenerEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.received_request
     }
@@ -96,7 +96,7 @@ impl Metrics for ListenerMetrics {
 
 #[derive(Debug)]
 struct ListenerDeltas {
-    reference: MetricsReference,
+    reference: EventsReference,
     time_to_accept: Duration,
     time_to_start_handling: Duration,
     latency: Duration,
@@ -104,7 +104,7 @@ struct ListenerDeltas {
 
 impl ListenerDeltas {
     fn new(
-        reference: MetricsReference,
+        reference: EventsReference,
         time_to_accept: Duration,
         time_to_start_handling: Duration,
         latency: Duration,
@@ -126,7 +126,7 @@ impl Deltas for ListenerDeltas {
         );
     }
 
-    fn get_reference(&self) -> &MetricsReference {
+    fn get_reference(&self) -> &EventsReference {
         &self.reference
     }
 
@@ -140,7 +140,7 @@ pub struct WsListener {
     tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
-    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+    events_channel_tx: Sender<Box<dyn Events + Send>>,
     // needed to know which gateway_session to delete in case of error or WS closed
     next_client_id: u64,
 }
@@ -150,7 +150,7 @@ impl WsListener {
         gateway_address: &str,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
-        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
         tls_config: Option<TlsConfig>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
@@ -178,7 +178,7 @@ impl WsListener {
             tls_acceptor,
             agent,
             client_connection_handler_tx,
-            metrics_channel_tx,
+            events_channel_tx,
             next_client_id: 0,
         }
     }
@@ -201,8 +201,8 @@ impl WsListener {
                 },
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     let current_client_id = self.next_client_id;
-                    let mut listener_metrics = ListenerMetrics::new(current_client_id);
-                    listener_metrics.set_received_request();
+                    let mut listener_events = ListenerEvents::new(current_client_id);
+                    listener_events.set_received_request();
                     let span = span!(
                         Level::INFO,
                         "handle_client_connection",
@@ -217,7 +217,7 @@ impl WsListener {
                             match tls_stream {
                                 Ok(tls_stream) => {
                                     debug!("TLS handshake successful");
-                                    listener_metrics.set_accepted_with_tls();
+                                    listener_events.set_accepted_with_tls();
                                     CustomStream::TcpWithTls(tls_stream)
                                 },
                                 Err(e) => {
@@ -227,7 +227,7 @@ impl WsListener {
                             }
                         },
                         None => {
-                            listener_metrics.set_accepted_without_tls();
+                            listener_events.set_accepted_without_tls();
                             CustomStream::Tcp(stream)
                         },
                     };
@@ -235,8 +235,8 @@ impl WsListener {
                     self.start_connection_handler(stream, current_client_id, child_token.clone(), span.clone());
                     self.next_client_id += 1;
 
-                    listener_metrics.set_started_handler();
-                    self.metrics_channel_tx.send(Box::new(listener_metrics)).await.expect("analyzer's side of the channel dropped")
+                    listener_events.set_started_handler();
+                    self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped")
                 },
             }
         }
@@ -251,7 +251,7 @@ impl WsListener {
     ) {
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        let metrics_channel_tx = self.metrics_channel_tx.clone();
+        let events_channel_tx = self.events_channel_tx.clone();
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
@@ -259,7 +259,7 @@ impl WsListener {
                     client_id,
                     agent,
                     client_connection_handler_tx,
-                    metrics_channel_tx,
+                    events_channel_tx,
                     token,
                 );
                 debug!("Spawned new connection handler");

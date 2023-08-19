@@ -1,8 +1,8 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
+    events_analyzer::{Deltas, Events, EventsReference, TimeableEvent},
     gateway_server::GatewaySession,
-    metrics_analyzer::{Deltas, Metrics, MetricsReference, TimeableEvent},
 };
 
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
@@ -49,17 +49,17 @@ pub enum IcWsError {
 }
 
 #[derive(Debug)]
-struct ConnectionSetupMetrics {
-    reference: MetricsReference,
+struct ConnectionSetupEvents {
+    reference: EventsReference,
     accepted_ws_connection: TimeableEvent,
     received_first_message: TimeableEvent,
     validated_first_message: TimeableEvent,
     established_ws_connection: TimeableEvent,
 }
 
-impl ConnectionSetupMetrics {
+impl ConnectionSetupEvents {
     fn new(id: u64) -> Self {
-        let reference = MetricsReference::ClientId(id);
+        let reference = EventsReference::ClientId(id);
         Self {
             reference,
             accepted_ws_connection: TimeableEvent::default(),
@@ -85,7 +85,7 @@ impl ConnectionSetupMetrics {
     }
 }
 
-impl Metrics for ConnectionSetupMetrics {
+impl Events for ConnectionSetupEvents {
     fn get_value_for_interval(&self) -> &TimeableEvent {
         &self.established_ws_connection
     }
@@ -119,7 +119,7 @@ impl Metrics for ConnectionSetupMetrics {
 
 #[derive(Debug)]
 struct ConnectionSetupDeltas {
-    reference: MetricsReference,
+    reference: EventsReference,
     time_to_first_message: Duration,
     time_to_validation: Duration,
     time_to_establishment: Duration,
@@ -128,7 +128,7 @@ struct ConnectionSetupDeltas {
 
 impl ConnectionSetupDeltas {
     pub fn new(
-        reference: MetricsReference,
+        reference: EventsReference,
         time_to_first_message: Duration,
         time_to_validation: Duration,
         time_to_establishment: Duration,
@@ -152,7 +152,7 @@ impl Deltas for ConnectionSetupDeltas {
         );
     }
 
-    fn get_reference(&self) -> &MetricsReference {
+    fn get_reference(&self) -> &EventsReference {
         &self.reference
     }
 
@@ -165,7 +165,7 @@ pub struct ClientConnectionHandler {
     id: u64,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<WsConnectionState>,
-    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+    events_channel_tx: Sender<Box<dyn Events + Send>>,
     token: CancellationToken,
 }
 
@@ -174,14 +174,14 @@ impl ClientConnectionHandler {
         id: u64,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<WsConnectionState>,
-        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
         token: CancellationToken,
     ) -> Self {
         Self {
             id,
             agent,
             client_connection_handler_tx,
-            metrics_channel_tx,
+            events_channel_tx,
             token,
         }
     }
@@ -189,8 +189,8 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                let mut connection_setup_metrics = Some(ConnectionSetupMetrics::new(self.id));
-                connection_setup_metrics
+                let mut connection_setup_events = Some(ConnectionSetupEvents::new(self.id));
+                connection_setup_events
                     .as_mut()
                     .unwrap()
                     .set_accepted_ws_connection();
@@ -255,7 +255,7 @@ impl ClientConnectionHandler {
                             match self.handle_incoming_ws_message(
                                 ws_message,
                                 is_first_message,
-                                connection_setup_metrics,
+                                connection_setup_events,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
                             ).await {
@@ -271,9 +271,9 @@ impl ClientConnectionHandler {
                                     break;
                                 }
                             }
-                            // after the first time 'handle_incoming_ws_message' is called, we do not need to collect connection setup metrics anymore
+                            // after the first time 'handle_incoming_ws_message' is called, we do not need to collect connection setup events anymore
                             // so we always pass None
-                            connection_setup_metrics = None;
+                            connection_setup_events = None;
                         }
                     }
                 }
@@ -293,7 +293,7 @@ impl ClientConnectionHandler {
         &self,
         ws_message: Result<Option<Message>, Error>,
         is_first_message: bool,
-        mut connection_setup_metrics: Option<ConnectionSetupMetrics>,
+        mut connection_setup_events: Option<ConnectionSetupEvents>,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
     ) -> WsConnectionState {
@@ -311,9 +311,9 @@ impl ClientConnectionHandler {
                 }
                 // check if it is the first message being sent by the client via WebSocket
                 if is_first_message {
-                    connection_setup_metrics
+                    connection_setup_events
                         .as_mut()
-                        .expect("must have connection setup metrics for first message")
+                        .expect("must have connection setup events for first message")
                         .set_received_first_message();
                     // check if client followed the IC WebSocket connection establishment protocol
                     match canister_methods::check_canister_init(&self.agent, message.clone()).await
@@ -325,9 +325,9 @@ impl ClientConnectionHandler {
                             // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                             nonce,
                         }) => {
-                            connection_setup_metrics
+                            connection_setup_events
                                 .as_mut()
-                                .expect("must have connection setup metrics for first message")
+                                .expect("must have connection setup events for first message")
                                 .set_validated_first_message();
                             // prevent adding a new client to the gateway state while shutting down
                             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
@@ -353,13 +353,13 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
-                                connection_setup_metrics
+                                connection_setup_events
                                     .as_mut()
-                                    .expect("must have connection setup metrics for first message")
+                                    .expect("must have connection setup events for first message")
                                     .set_established_ws_connection();
-                                self.metrics_channel_tx
-                                    .send(Box::new(connection_setup_metrics.expect(
-                                        "must have connection setup metrics for first message",
+                                self.events_channel_tx
+                                    .send(Box::new(connection_setup_events.expect(
+                                        "must have connection setup events for first message",
                                     )))
                                     .await
                                     .expect("analyzer's side of the channel dropped");

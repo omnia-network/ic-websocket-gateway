@@ -20,7 +20,7 @@ use crate::{
         TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
-    metrics_analyzer::Metrics,
+    events_analyzer::Events,
     ws_listener::{TlsConfig, WsListener},
 };
 
@@ -80,8 +80,8 @@ pub struct GatewayServer {
     client_connection_handler_tx: Sender<WsConnectionState>,
     /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
     client_connection_handler_rx: Receiver<WsConnectionState>,
-    /// sender side of the channel used to send metrics from different components to the analyzer
-    metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+    /// sender side of the channel used to send events from different components to the analyzer
+    events_channel_tx: Sender<Box<dyn Events + Send>>,
     /// state of the WS Gateway
     state: GatewayState,
     /// cancellation token used to signal other tasks when it's time to shut down
@@ -93,7 +93,7 @@ impl GatewayServer {
         gateway_address: String,
         subnet_url: String,
         identity: BasicIdentity,
-        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
@@ -121,7 +121,7 @@ impl GatewayServer {
             address: gateway_address,
             client_connection_handler_tx,
             client_connection_handler_rx,
-            metrics_channel_tx,
+            events_channel_tx,
             state: GatewayState::default(),
             token,
         };
@@ -132,14 +132,14 @@ impl GatewayServer {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        let metrics_channel_tx = self.metrics_channel_tx.clone();
+        let events_channel_tx = self.events_channel_tx.clone();
         let token = self.token.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 client_connection_handler_tx,
-                metrics_channel_tx,
+                events_channel_tx,
                 tls_config,
             )
             .await;
@@ -172,7 +172,7 @@ impl GatewayServer {
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
-                        self.metrics_channel_tx.clone(),
+                        self.events_channel_tx.clone(),
                         polling_interval,
                         send_status_interval,
                         self.agent.clone()
@@ -296,7 +296,7 @@ impl GatewayState {
         &mut self,
         connection_state: WsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
-        metrics_channel_tx: Sender<Box<dyn Metrics + Send>>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval: u64,
         send_status_interval: u64,
         agent: Arc<Agent>,
@@ -352,7 +352,7 @@ impl GatewayState {
                     let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
-                        metrics_channel_tx,
+                        events_channel_tx,
                     );
                     let agent = Arc::clone(&agent);
 
