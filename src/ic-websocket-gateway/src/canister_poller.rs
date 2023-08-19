@@ -3,11 +3,7 @@ use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
@@ -84,11 +80,9 @@ struct PollerEvents {
 }
 
 impl PollerEvents {
-    fn default() -> Self {
+    fn new(polling_iteration: u64) -> Self {
         Self {
-            // !!! the system returns the block timestamp so multiple poller events might get the same reference !!!
-            // TODO: replace timestamp with a counter of the polling iterations
-            reference: EventsReference::Timestamp(current_timestamp()),
+            reference: EventsReference::Iteration(polling_iteration),
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
             start_relaying_messages: TimeableEvent::default(),
@@ -317,7 +311,8 @@ impl CanisterPoller {
             Sender<Result<CertifiedMessage, String>>,
         > = HashMap::new();
 
-        let get_messages_operation = self.get_canister_updates(message_nonce);
+        let mut polling_iteration = 0;
+        let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
@@ -400,10 +395,12 @@ impl CanisterPoller {
                                 }
                             }
                         }
+                        // counting only iterations which return at least one canister message
+                        polling_iteration += 1;
                     }
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-                    get_messages_operation.set(self.get_canister_updates(message_nonce));
+                    get_messages_operation.set(self.get_canister_updates(message_nonce, polling_iteration));
                 },
                 _ = &mut gateway_status_operation => {
                     gateway_status_index += 1;
@@ -418,8 +415,9 @@ impl CanisterPoller {
     async fn get_canister_updates(
         &self,
         message_nonce: u64,
+        polling_iteration: u64,
     ) -> Option<CanisterGetMessagesWithEvents> {
-        let mut poller_events = PollerEvents::default();
+        let mut poller_events = PollerEvents::new(polling_iteration);
         poller_events.set_start_polling();
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
@@ -481,16 +479,4 @@ async fn signal_poller_task_termination(
 
 async fn sleep(millis: u64) {
     tokio::time::sleep(Duration::from_millis(millis)).await;
-}
-
-fn current_timestamp() -> u64 {
-    let current_time = SystemTime::now();
-
-    // calculate the duration since the Unix epoch (January 1, 1970)
-    let duration_since_epoch = current_time
-        .duration_since(UNIX_EPOCH)
-        .expect("time went backwards");
-
-    // convert the duration to a u64 value representing seconds since the epoch
-    duration_since_epoch.as_secs()
 }

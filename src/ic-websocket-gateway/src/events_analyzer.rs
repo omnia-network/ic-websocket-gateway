@@ -87,7 +87,7 @@ impl TimeableEvent {
 pub enum EventsReference {
     MessageNonce(u64),
     ClientId(u64),
-    Timestamp(u64),
+    Iteration(u64),
 }
 
 impl EventsReference {
@@ -95,7 +95,7 @@ impl EventsReference {
         match self {
             EventsReference::MessageNonce(nonce) => Some(nonce as &dyn Any),
             EventsReference::ClientId(id) => Some(id as &dyn Any),
-            EventsReference::Timestamp(id) => Some(id as &dyn Any),
+            EventsReference::Iteration(id) => Some(id as &dyn Any),
         }
     }
 }
