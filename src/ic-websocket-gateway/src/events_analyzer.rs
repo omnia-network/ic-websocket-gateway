@@ -93,9 +93,9 @@ pub enum EventsReference {
 impl EventsReference {
     fn get_inner_value(&self) -> Option<&dyn Any> {
         match self {
-            EventsReference::MessageNonce(nonce) => Some(nonce as &dyn Any),
-            EventsReference::ClientId(id) => Some(id as &dyn Any),
-            EventsReference::Iteration(id) => Some(id as &dyn Any),
+            Self::MessageNonce(nonce) => Some(nonce as &dyn Any),
+            Self::ClientId(id) => Some(id as &dyn Any),
+            Self::Iteration(id) => Some(id as &dyn Any),
         }
     }
 }
@@ -125,6 +125,18 @@ pub enum EventsCollectionType {
     NewClientConnection,
     CanisterMessage,
     PollerStatus,
+}
+
+impl EventsCollectionType {
+    /// returns the number of components whose latencies affect the relative collection
+    /// returns None, if the latency of a collection is irrelevant
+    fn get_collection_size(&self) -> Option<usize> {
+        match self {
+            Self::NewClientConnection => Some(2), // should be 3 once we measure also the GW state events
+            Self::CanisterMessage => Some(1), // should be 2 once we measure also the handler events for outgoing messages
+            Self::PollerStatus => Some(1),
+        }
+    }
 }
 
 struct AggregatedMetrics {
@@ -190,6 +202,8 @@ impl EventsAnalyzer {
                 },
                 _ = &mut periodic_check_operation => {
                     self.compute_average_intervals();
+                    self.compute_collections_latencies();
+
                     periodic_check_operation.set(periodic_check());
                 }
             }
@@ -269,6 +283,20 @@ impl EventsAnalyzer {
                 );
 
                 events_data.aggregated_metrics_map = BTreeMap::default();
+            }
+        }
+    }
+
+    fn compute_collections_latencies(&mut self) {
+        for (collection_type, collection_data) in self.map_by_collection_type.iter_mut() {
+            if let Some(collection_size) = collection_type.get_collection_size() {
+                for (events_reference, latencies) in collection_data.0.iter_mut() {
+                    if latencies.len() == collection_size {
+                        let total_latency: Duration = latencies.iter().sum();
+                        info!("Total latency for events with reference {:?} for collection of type: {:?}: {:?}", events_reference, collection_type, total_latency);
+                        latencies.clear();
+                    }
+                }
             }
         }
     }
