@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
+use tracing::info;
 
 type EventsType = String;
 
@@ -232,30 +233,30 @@ impl EventsAnalyzer {
             data.aggregated_metrics_map
                 .insert(reference, aggregated_metrics);
             data.previous = events;
+
+            if data.aggregated_metrics_map.len() == 10 {
+                let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
+                    (Vec::new(), Vec::new()),
+                    |(mut latencies, mut intervals), (_, aggregated_metrics)| {
+                        latencies.push(aggregated_metrics.deltas.get_latency());
+                        intervals.push(aggregated_metrics.interval);
+                        (latencies, intervals)
+                    },
+                );
+
+                let sum_latencies: Duration = latencies.iter().sum();
+                let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
+                info!("Average latency for {:?}: {:?}", events_type, avg_latency);
+
+                let sum_intervals: Duration = intervals.iter().sum();
+                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
+                info!("Average interval for {:?}: {:?}", events_type, avg_interval);
+
+                data.aggregated_metrics_map = BTreeMap::default();
+            }
         } else {
             let data = EventsData::new(BTreeMap::default(), events);
             self.map_by_events_type.insert(events_type, data);
         }
     }
 }
-
-// if data.aggregated_metrics_map.len() == 10 {
-//     let (latencies, intervals) = data.aggregated_metrics_map.iter().fold(
-//         (Vec::new(), Vec::new()),
-//         |(mut latencies, mut intervals), (_, aggregated_metrics)| {
-//             latencies.push(aggregated_metrics.deltas.get_latency());
-//             intervals.push(aggregated_metrics.interval);
-//             (latencies, intervals)
-//         },
-//     );
-
-//     let sum_latencies: Duration = latencies.iter().sum();
-//     let avg_latency = sum_latencies.div_f64(latencies.len() as f64);
-//     info!("Average latency for {:?}: {:?}", events_type, avg_latency);
-
-//     let sum_intervals: Duration = intervals.iter().sum();
-//     let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
-//     info!("Average interval for {:?}: {:?}", events_type, avg_interval);
-
-//     data.aggregated_metrics_map = BTreeMap::default();
-// }
