@@ -419,6 +419,7 @@ impl GatewayState {
                 connection_establishment_events
                     .metrics
                     .set_sent_client_key_to_canister();
+
                 events_channel_tx
                     .send(Box::new(connection_establishment_events))
                     .await

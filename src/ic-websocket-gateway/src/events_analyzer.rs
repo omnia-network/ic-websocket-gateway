@@ -269,6 +269,7 @@ pub struct EventsAnalyzer {
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
     map_by_events_type: BTreeMap<EventsType, EventsData>,
     map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
+    aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
 }
 
 impl EventsAnalyzer {
@@ -277,6 +278,7 @@ impl EventsAnalyzer {
             events_channel_rx,
             map_by_events_type: BTreeMap::default(),
             map_by_collection_type: HashMap::default(),
+            aggregated_latencies_map: HashMap::default(),
         }
     }
 
@@ -390,11 +392,31 @@ impl EventsAnalyzer {
         for (collection_type, collection_data) in self.map_by_collection_type.iter_mut() {
             if let Some(events_type_in_collection) = collection_type.get_events_type_in_collection()
             {
-                for (events_reference, latencies) in collection_data.iter_mut() {
+                for (_events_reference, latencies) in collection_data.iter_mut() {
                     if latencies.has_received_all_events(&events_type_in_collection) {
                         let total_latency: Duration = latencies.sum();
-                        info!("Total latency for events with reference {:?} for collection of type: {:?}: {:?}", events_reference, collection_type, total_latency);
                         latencies.clear();
+                        if let Some(aggregated_latencies) =
+                            self.aggregated_latencies_map.get_mut(collection_type)
+                        {
+                            if aggregated_latencies.len() == 10 {
+                                let sum_latencies: Duration = aggregated_latencies.iter().sum();
+                                let avg_latencies =
+                                    sum_latencies.div_f64(aggregated_latencies.len() as f64);
+                                info!(
+                                    "Average total latency of events in collection: {:?}: {:?}",
+                                    collection_type, avg_latencies
+                                );
+                                aggregated_latencies.clear();
+                            } else {
+                                aggregated_latencies.insert(total_latency);
+                            }
+                        } else {
+                            let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
+                            aggregated_latencies.insert(total_latency);
+                            self.aggregated_latencies_map
+                                .insert(collection_type.clone(), aggregated_latencies);
+                        }
                     }
                 }
             }
