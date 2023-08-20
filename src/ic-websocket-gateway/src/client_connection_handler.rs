@@ -1,10 +1,11 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
-    canister_poller::CertifiedMessage,
+    canister_poller::{get_nonce_from_message, CertifiedMessage},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
     metrics::client_connection_handler_metrics::{
-        ConnectionSetupEvents, ConnectionSetupEventsMetrics,
+        ConnectionSetupEvents, ConnectionSetupEventsMetrics, OutgoingCanisterMessageEvents,
+        OutgoingCanisterMessageEventsMetrics,
     },
 };
 
@@ -127,15 +128,23 @@ impl ClientConnectionHandler {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
                                 Ok(canister_message) => {
+                                    let message_nonce = get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted");
+                                    let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageNonce(message_nonce)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
+                                    outgoing_canister_message_events.metrics.set_received_canister_message();
                                     debug!("Sending message with key: {:?} to client", canister_message.key);
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
                                         Ok(bytes) => {
                                             send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
+                                            outgoing_canister_message_events.metrics.set_message_sent_to_client();
                                             debug!("Message with key: {:?} sent to client", canister_message.key);
                                         },
-                                        Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
+                                        Err(e) => {
+                                            outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
+                                            error!("Could not serialize canister message. Error: {:?}", e);
+                                        }
                                     }
+                                    self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                 }
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 Err(e) => {

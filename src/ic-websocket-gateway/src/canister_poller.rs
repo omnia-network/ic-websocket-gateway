@@ -171,7 +171,7 @@ impl CanisterPoller {
                                 tree: msgs.tree.clone(),
                             };
 
-                            match get_nonce_from_message(encoded_message.key) {
+                            match get_nonce_from_message(&encoded_message.key) {
                                 Ok(last_message_nonce) => {
                                     incoming_canister_message_events.reference = Some(EventsReference::MessageNonce(last_message_nonce));
                                     match client_channels.get(&client_key) {
@@ -267,7 +267,7 @@ impl CanisterPoller {
     }
 }
 
-fn get_nonce_from_message(key: String) -> Result<u64, String> {
+pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
     if let Some(message_nonce_str) = key.split('_').last() {
         let message_nonce = message_nonce_str
             .parse()

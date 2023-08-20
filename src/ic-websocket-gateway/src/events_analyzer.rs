@@ -1,3 +1,10 @@
+use crate::metrics::canister_poller_metrics::{
+    IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
+};
+use crate::metrics::client_connection_handler_metrics::{
+    ConnectionSetupEventsMetrics, OutgoingCanisterMessageEventsMetrics,
+};
+use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
 use std::any::{type_name, Any};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
@@ -6,12 +13,6 @@ use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::{debug, info};
-
-use crate::metrics::canister_poller_metrics::{
-    IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
-};
-use crate::metrics::client_connection_handler_metrics::ConnectionSetupEventsMetrics;
-use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
 
 type EventsType = String;
 
@@ -27,44 +28,6 @@ pub trait Events: Debug {
     fn get_collection_type(&self) -> EventsCollectionType;
 
     fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static>;
-}
-
-pub trait EventsMetrics: Debug {
-    fn get_struct_name(&self) -> EventsType {
-        let path: Vec<String> = type_name::<Self>()
-            .split("::")
-            .map(|s| s.to_string())
-            .collect();
-        path.last().expect("not a valid path").to_owned()
-    }
-
-    /// returns the value used to compute the time interval between two structs implementing Events
-    fn get_value_for_interval(&self) -> &TimeableEvent;
-
-    /// returns the time deltas between the events in the struct implementing Events
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>>;
-
-    /// computes the interval between two structs implementing Events
-    fn compute_interval(&self, previous: &Box<dyn EventsMetrics + Send>) -> Duration {
-        self.get_value_for_interval()
-            .duration_since(previous.get_value_for_interval())
-            .expect("previous event must exist")
-    }
-
-    /// computes the latency of a component
-    fn compute_latency(&self) -> Option<Duration>;
-}
-
-/// trait implemented by the structs containing the deltas computed within each component
-pub trait Deltas: Debug {
-    /// displays all the deltas of an event
-    fn display(&self);
-
-    /// returns the reference used to identify the event
-    fn get_reference(&self) -> &EventsReference;
-
-    /// returns the latency of the component
-    fn get_latency(&self) -> Duration;
 }
 
 #[derive(Debug)]
@@ -103,6 +66,44 @@ impl<T: EventsMetrics + Send + Clone + 'static> Events for EventsImpl<T> {
     fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static> {
         Box::new(self.metrics.clone())
     }
+}
+
+pub trait EventsMetrics: Debug {
+    fn get_struct_name(&self) -> EventsType {
+        let path: Vec<String> = type_name::<Self>()
+            .split("::")
+            .map(|s| s.to_string())
+            .collect();
+        path.last().expect("not a valid path").to_owned()
+    }
+
+    /// returns the value used to compute the time interval between two structs implementing Events
+    fn get_value_for_interval(&self) -> &TimeableEvent;
+
+    /// returns the time deltas between the events in the struct implementing Events
+    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>>;
+
+    /// computes the interval between two structs implementing Events
+    fn compute_interval(&self, previous: &Box<dyn EventsMetrics + Send>) -> Duration {
+        self.get_value_for_interval()
+            .duration_since(previous.get_value_for_interval())
+            .expect("previous event must exist")
+    }
+
+    /// computes the latency of a component
+    fn compute_latency(&self) -> Option<Duration>;
+}
+
+/// trait implemented by the structs containing the deltas computed within each component
+pub trait Deltas: Debug {
+    /// displays all the deltas of an event
+    fn display(&self);
+
+    /// returns the reference used to identify the event
+    fn get_reference(&self) -> &EventsReference;
+
+    /// returns the latency of the component
+    fn get_latency(&self) -> Duration;
 }
 
 #[derive(Debug, Clone)]
@@ -191,7 +192,8 @@ impl EventsCollectionType {
                 ConnectionSetupEventsMetrics::default().get_struct_name(),
             ]),
             Self::CanisterMessage => Some(vec![
-                IncomingCanisterMessageEventsMetrics::default().get_struct_name()
+                IncomingCanisterMessageEventsMetrics::default().get_struct_name(),
+                OutgoingCanisterMessageEventsMetrics::default().get_struct_name(),
             ]),
             Self::PollerStatus => Some(vec![PollerEventsMetrics::default().get_struct_name()]),
         }
