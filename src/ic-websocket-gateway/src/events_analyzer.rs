@@ -7,19 +7,18 @@ use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::{debug, info};
 
+use crate::metrics::canister_poller_metrics::{
+    IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
+};
+use crate::metrics::client_connection_handler_metrics::ConnectionSetupEventsMetrics;
+use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
+
 type EventsType = String;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
-    fn get_type(&self) -> EventsType {
-        let path: Vec<String> = type_name::<Self>()
-            .split("::")
-            .map(|s| s.to_string())
-            .collect();
-        let mut events_type = path.last().expect("not a valid path").to_owned();
-        // remove last character '>'
-        events_type.pop();
-        events_type
+    fn get_metrics_type(&self) -> EventsType {
+        self.get_metrics().get_struct_name()
     }
 
     fn get_reference(&self) -> Option<EventsReference>;
@@ -31,6 +30,14 @@ pub trait Events: Debug {
 }
 
 pub trait EventsMetrics: Debug {
+    fn get_struct_name(&self) -> EventsType {
+        let path: Vec<String> = type_name::<Self>()
+            .split("::")
+            .map(|s| s.to_string())
+            .collect();
+        path.last().expect("not a valid path").to_owned()
+    }
+
     /// returns the value used to compute the time interval between two structs implementing Events
     fn get_value_for_interval(&self) -> &TimeableEvent;
 
@@ -180,13 +187,13 @@ impl EventsCollectionType {
     fn get_events_type_in_collection(&self) -> Option<Vec<EventsType>> {
         match self {
             Self::NewClientConnection => Some(vec![
-                String::from("ListenerEventsMetrics"),
-                String::from("ConnectionSetupEventsMetrics"),
+                ListenerEventsMetrics::default().get_struct_name(),
+                ConnectionSetupEventsMetrics::default().get_struct_name(),
             ]),
-            Self::CanisterMessage => {
-                Some(vec![String::from("IncomingCanisterMessageEventsMetrics")])
-            },
-            Self::PollerStatus => Some(vec![String::from("PollerEventsMetrics")]),
+            Self::CanisterMessage => Some(vec![
+                IncomingCanisterMessageEventsMetrics::default().get_struct_name()
+            ]),
+            Self::PollerStatus => Some(vec![PollerEventsMetrics::default().get_struct_name()]),
         }
     }
 }
@@ -230,7 +237,7 @@ impl EventsLatencies {
         self.0.insert((events_type, latency));
     }
 
-    fn received_all_events(&self, events_type_in_collection: &Vec<String>) -> bool {
+    fn has_received_all_events(&self, events_type_in_collection: &Vec<String>) -> bool {
         let found_event_types: BTreeSet<&EventsType> =
             self.0.iter().map(|(event_type, _)| event_type).collect();
         for event_type in events_type_in_collection {
@@ -298,7 +305,7 @@ impl EventsAnalyzer {
         events: &Box<dyn Events + Send>,
         deltas: &Box<dyn Deltas + Send>,
     ) {
-        let events_type = events.get_type();
+        let events_type = events.get_metrics_type();
         let collection_type = events.get_collection_type();
         let latency = deltas.get_latency();
         let reference = deltas.get_reference().clone();
@@ -327,7 +334,7 @@ impl EventsAnalyzer {
         events: Box<dyn Events + Send>,
         deltas: Box<dyn Deltas + Send>,
     ) {
-        let events_type = events.get_type();
+        let events_type = events.get_metrics_type();
         let reference = deltas.get_reference().clone();
 
         // first events received for each type is not processed further as there is no previous event for computing interval
@@ -380,7 +387,7 @@ impl EventsAnalyzer {
             if let Some(events_type_in_collection) = collection_type.get_events_type_in_collection()
             {
                 for (events_reference, latencies) in collection_data.iter_mut() {
-                    if latencies.received_all_events(&events_type_in_collection) {
+                    if latencies.has_received_all_events(&events_type_in_collection) {
                         let total_latency: Duration = latencies.sum();
                         info!("Total latency for events with reference {:?} for collection of type: {:?}: {:?}", events_reference, collection_type, total_latency);
                         latencies.clear();
