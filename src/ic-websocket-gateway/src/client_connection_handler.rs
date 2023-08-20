@@ -260,11 +260,15 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
+                                // it is important to measure the instant of the establishment of the WS connection after sending the gateway session via the channel
+                                // so that we can take into account eventual delays due to the channel being over capacity
+                                // however, we still have to measure the latency of adding the client to the gateway state and eventually starting a new poller
+                                // but this will be done in the gateway server component
                                 connection_setup_events
                                     .as_mut()
                                     .expect("must have connection setup events for first message")
                                     .metrics
-                                    .set_established_ws_connection();
+                                    .set_ws_connection_setup();
                                 self.events_channel_tx
                                     .send(Box::new(connection_setup_events.expect(
                                         "must have connection setup events for first message",

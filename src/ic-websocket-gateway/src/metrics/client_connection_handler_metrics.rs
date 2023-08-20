@@ -9,7 +9,7 @@ pub struct ConnectionSetupEventsMetrics {
     accepted_ws_connection: TimeableEvent,
     received_first_message: TimeableEvent,
     validated_first_message: TimeableEvent,
-    established_ws_connection: TimeableEvent,
+    ws_connection_setup: TimeableEvent,
 }
 
 impl ConnectionSetupEventsMetrics {
@@ -18,7 +18,7 @@ impl ConnectionSetupEventsMetrics {
             accepted_ws_connection: TimeableEvent::default(),
             received_first_message: TimeableEvent::default(),
             validated_first_message: TimeableEvent::default(),
-            established_ws_connection: TimeableEvent::default(),
+            ws_connection_setup: TimeableEvent::default(),
         }
     }
 
@@ -34,14 +34,14 @@ impl ConnectionSetupEventsMetrics {
         self.validated_first_message.set_now();
     }
 
-    pub fn set_established_ws_connection(&mut self) {
-        self.established_ws_connection.set_now();
+    pub fn set_ws_connection_setup(&mut self) {
+        self.ws_connection_setup.set_now();
     }
 }
 
 impl EventsMetrics for ConnectionSetupEventsMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.established_ws_connection
+        &self.ws_connection_setup
     }
 
     fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
@@ -52,8 +52,8 @@ impl EventsMetrics for ConnectionSetupEventsMetrics {
             let time_to_validation = self
                 .validated_first_message
                 .duration_since(&self.received_first_message)?;
-            let time_to_establishment = self
-                .established_ws_connection
+            let time_to_setup = self
+                .ws_connection_setup
                 .duration_since(&self.validated_first_message)?;
             let latency = self.compute_latency()?;
 
@@ -61,7 +61,7 @@ impl EventsMetrics for ConnectionSetupEventsMetrics {
                 reference,
                 time_to_first_message,
                 time_to_validation,
-                time_to_establishment,
+                time_to_setup,
                 latency,
             )));
         }
@@ -69,7 +69,7 @@ impl EventsMetrics for ConnectionSetupEventsMetrics {
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.established_ws_connection
+        self.ws_connection_setup
             .duration_since(&self.accepted_ws_connection)
     }
 }
@@ -79,7 +79,7 @@ struct ConnectionSetupDeltas {
     reference: EventsReference,
     time_to_first_message: Duration,
     time_to_validation: Duration,
-    time_to_establishment: Duration,
+    time_to_setup: Duration,
     latency: Duration,
 }
 
@@ -88,14 +88,14 @@ impl ConnectionSetupDeltas {
         reference: EventsReference,
         time_to_first_message: Duration,
         time_to_validation: Duration,
-        time_to_establishment: Duration,
+        time_to_setup: Duration,
         latency: Duration,
     ) -> Self {
         Self {
             reference,
             time_to_first_message,
             time_to_validation,
-            time_to_establishment,
+            time_to_setup,
             latency,
         }
     }
@@ -104,8 +104,8 @@ impl ConnectionSetupDeltas {
 impl Deltas for ConnectionSetupDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.latency
+            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_setup: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_setup, self.latency
         );
     }
 
