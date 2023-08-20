@@ -1,17 +1,17 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
     canister_poller::CertifiedMessage,
-    events_analyzer::{
-        Deltas, Events, EventsCollectionType, EventsImpl, EventsMetrics, EventsReference,
-        TimeableEvent,
-    },
+    events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
+    metrics::client_connection_handler_metrics::{
+        ConnectionSetupEvents, ConnectionSetupEventsMetrics,
+    },
 };
 
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::Agent;
 use serde_cbor::to_vec;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
@@ -49,121 +49,6 @@ pub enum IcWsError {
     WebSocket(String),
     /// IC WS method not implemented yet
     NotImplemented(String),
-}
-
-type ConnectionSetupEvents = EventsImpl<ConnectionSetupEventsMetrics>;
-
-#[derive(Debug, Clone)]
-struct ConnectionSetupEventsMetrics {
-    accepted_ws_connection: TimeableEvent,
-    received_first_message: TimeableEvent,
-    validated_first_message: TimeableEvent,
-    established_ws_connection: TimeableEvent,
-}
-
-impl ConnectionSetupEventsMetrics {
-    fn default() -> Self {
-        Self {
-            accepted_ws_connection: TimeableEvent::default(),
-            received_first_message: TimeableEvent::default(),
-            validated_first_message: TimeableEvent::default(),
-            established_ws_connection: TimeableEvent::default(),
-        }
-    }
-    fn set_accepted_ws_connection(&mut self) {
-        self.accepted_ws_connection.set_now();
-    }
-
-    fn set_received_first_message(&mut self) {
-        self.received_first_message.set_now();
-    }
-
-    fn set_validated_first_message(&mut self) {
-        self.validated_first_message.set_now();
-    }
-
-    fn set_established_ws_connection(&mut self) {
-        self.established_ws_connection.set_now();
-    }
-}
-
-impl EventsMetrics for ConnectionSetupEventsMetrics {
-    fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.established_ws_connection
-    }
-
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
-        if let Some(reference) = reference {
-            let time_to_first_message = self
-                .received_first_message
-                .duration_since(&self.accepted_ws_connection)?;
-            let time_to_validation = self
-                .validated_first_message
-                .duration_since(&self.received_first_message)?;
-            let time_to_establishment = self
-                .established_ws_connection
-                .duration_since(&self.validated_first_message)?;
-            let latency = self.compute_latency()?;
-
-            return Some(Box::new(ConnectionSetupDeltas::new(
-                reference,
-                time_to_first_message,
-                time_to_validation,
-                time_to_establishment,
-                latency,
-            )));
-        }
-        None
-    }
-
-    fn compute_latency(&self) -> Option<Duration> {
-        self.established_ws_connection
-            .duration_since(&self.accepted_ws_connection)
-    }
-}
-
-#[derive(Debug)]
-struct ConnectionSetupDeltas {
-    reference: EventsReference,
-    time_to_first_message: Duration,
-    time_to_validation: Duration,
-    time_to_establishment: Duration,
-    latency: Duration,
-}
-
-impl ConnectionSetupDeltas {
-    pub fn new(
-        reference: EventsReference,
-        time_to_first_message: Duration,
-        time_to_validation: Duration,
-        time_to_establishment: Duration,
-        latency: Duration,
-    ) -> Self {
-        Self {
-            reference,
-            time_to_first_message,
-            time_to_validation,
-            time_to_establishment,
-            latency,
-        }
-    }
-}
-
-impl Deltas for ConnectionSetupDeltas {
-    fn display(&self) {
-        debug!(
-            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_establishment: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_establishment, self.latency
-        );
-    }
-
-    fn get_reference(&self) -> &EventsReference {
-        &self.reference
-    }
-
-    fn get_latency(&self) -> Duration {
-        self.latency
-    }
 }
 
 pub struct ClientConnectionHandler {

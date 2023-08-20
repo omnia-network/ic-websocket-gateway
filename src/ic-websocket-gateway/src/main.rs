@@ -19,6 +19,11 @@ mod events_analyzer;
 mod gateway_server;
 mod unit_tests;
 mod ws_listener;
+mod metrics {
+    pub mod canister_poller_metrics;
+    pub mod client_connection_handler_metrics;
+    pub mod ws_listener_metrics;
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
