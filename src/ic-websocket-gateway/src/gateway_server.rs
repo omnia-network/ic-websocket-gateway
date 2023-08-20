@@ -20,7 +20,10 @@ use crate::{
         TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
-    events_analyzer::Events,
+    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    metrics::gateway_server_metrics::{
+        ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
+    },
     ws_listener::{TlsConfig, WsListener},
 };
 
@@ -303,11 +306,19 @@ impl GatewayState {
     ) {
         match connection_state {
             WsConnectionState::Established(gateway_session) => {
+                let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
+                    Some(EventsReference::ClientId(gateway_session.client_id)),
+                    EventsCollectionType::NewClientConnection,
+                    ConnectionEstablishmentEventsMetrics::default(),
+                );
                 let client_key = gateway_session.client_key.clone();
                 let canister_id = gateway_session.canister_id;
 
                 // add client's session state to the WS Gateway state
                 self.add_client(gateway_session.clone());
+                connection_establishment_events
+                    .metrics
+                    .set_added_client_to_state();
 
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
@@ -352,7 +363,7 @@ impl GatewayState {
                     let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
-                        events_channel_tx,
+                        events_channel_tx.clone(),
                     );
                     let agent = Arc::clone(&agent);
 
@@ -373,6 +384,9 @@ impl GatewayState {
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
                     });
+                    connection_establishment_events
+                        .metrics
+                        .set_started_new_poller();
 
                     // send channel data to poller
                     if let Err(e) = poller_channel_for_client_channel_sender_tx
@@ -385,6 +399,9 @@ impl GatewayState {
                         )
                     }
                 }
+                connection_establishment_events
+                    .metrics
+                    .set_sent_client_channel_to_poller();
 
                 // notify canister that it can now send messages for the client corresponding to client_key
                 let agent = Arc::clone(&agent);
@@ -398,6 +415,14 @@ impl GatewayState {
                         // TODO: try again or report failure to client
                     }
                 });
+                // !!! does not wait for the canister to receive the client key
+                connection_establishment_events
+                    .metrics
+                    .set_sent_client_key_to_canister();
+                events_channel_tx
+                    .send(Box::new(connection_establishment_events))
+                    .await
+                    .expect("analyzer's side of the channel dropped");
             },
             WsConnectionState::Closed(client_id) => {
                 // cleanup client's session from WS Gateway state
