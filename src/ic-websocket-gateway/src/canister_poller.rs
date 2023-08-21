@@ -1,7 +1,7 @@
 use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -146,8 +146,8 @@ impl CanisterPoller {
                             debug!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
-                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
                                 info!("Terminating poller task as no clients are connected");
+                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
                                 break;
                             }
                         }
@@ -202,11 +202,20 @@ impl CanisterPoller {
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
                     get_messages_operation.set(self.get_canister_updates(message_nonce, polling_iteration));
                 },
-                _ = &mut gateway_status_operation => {
-                    gateway_status_index += 1;
-                    gateway_status_operation.set(
-                        self.send_status_message_to_canister(gateway_status_index)
-                    );
+                res = &mut gateway_status_operation => {
+                    match res {
+                        Ok(_) => {
+                            gateway_status_index += 1;
+                            gateway_status_operation.set(
+                                self.send_status_message_to_canister(gateway_status_index)
+                            );
+                        }
+                        Err(e) => {
+                            error!("Terminating poller task due to error: {}", e);
+                            signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, e).await;
+                            break 'poller_loop;
+                        }
+                    }
                 }
             }
         }
@@ -237,23 +246,41 @@ impl CanisterPoller {
     }
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
+        let max_retries = 3;
+        let retry_delay = Duration::from_secs(3);
         let message = CanisterIncomingMessage::IcWebSocketGatewayStatus(GatewayStatusMessage {
             status_index,
         });
 
-        let res = canister_methods::ws_message(&self.agent, &self.canister_id, message).await;
-
-        match res.clone() {
-            Ok(_) => info!("Sent gateway status update: {}", status_index),
-            Err(e) => {
-                error!("Calling ws_message on canister failed: {}", e);
-                // TODO: try again or report failure
-            },
+        // the first gateway status is sent immediately. The following ones are sent at an interval of 'self.send_status_interval_ms'
+        // this is not done at the end of the retries because, in case all retries failed, we want to return the error immediately so that the poller can be terminated
+        if status_index > 0 {
+            sleep(self.send_status_interval_ms).await;
         }
 
-        sleep(self.send_status_interval_ms).await;
-
-        res
+        // this logic is performed here, instead of in the branch corresponding to the current future, in order to not slow down the select! loop while waiting for the retries
+        // (as once a future is selected, the corresponding branch "blocks" all the futures until the next iteration of select!)
+        for attempt in 1..=max_retries {
+            match canister_methods::ws_message(&self.agent, &self.canister_id, message.clone())
+                .await
+            {
+                Ok(_) => {
+                    info!("Sent gateway status update: {}", status_index);
+                    return Ok(());
+                },
+                Err(e) => {
+                    warn!(
+                        "Attempt {}: calling ws_message on canister failed: {}",
+                        attempt, e
+                    );
+                    warn!("Retrying in {} seconds...", retry_delay.as_secs());
+                    tokio::time::sleep(retry_delay).await;
+                },
+            }
+        }
+        Err(String::from(
+            "Max retries for sending gateway status update reached",
+        ))
     }
 }
 
@@ -273,7 +300,7 @@ async fn signal_termination_and_cleanup(
     poller_to_main_channel: &mut Sender<TerminationInfo>,
     canister_id: Principal,
     client_channels: &HashMap<ClientPublicKey, Sender<Result<CertifiedMessage, String>>>,
-    cdk_err: String,
+    e: String,
 ) {
     // let the main task know that this poller will terminate due to a CDK error
     signal_poller_task_termination(
@@ -285,10 +312,7 @@ async fn signal_termination_and_cleanup(
     // and thus they also have to close the WebSocket connection and terminate
     for client_channel_tx in client_channels.values() {
         if let Err(channel_err) = client_channel_tx
-            .send(Err(format!(
-                "Terminating poller task due to CDK error: {}",
-                cdk_err
-            )))
+            .send(Err(format!("Terminating poller task due to error: {}", e)))
             .await
         {
             error!("Client's thread terminated: {}", channel_err);
