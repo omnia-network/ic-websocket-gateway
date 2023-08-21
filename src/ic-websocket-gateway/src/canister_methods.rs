@@ -205,7 +205,7 @@ pub async fn check_canister_init(_agent: &Agent, message: Message) -> CanisterWs
     }
 }
 
-#[cfg(not(test))] // only compile and run the following block during tests
+#[cfg(not(test))] // only compile and run the following block when not testing
 pub async fn ws_open(
     agent: &Agent,
     canister_id: &Principal,

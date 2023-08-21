@@ -154,8 +154,6 @@ impl CanisterPoller {
                     }
                 }
                 // poll canister for updates across multiple select! iterations
-                // TODO: in the current implementation, if this call fails,
-                //       a new call is not pinned again. We have to handle the error case
                 res = &mut get_messages_operation => {
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
@@ -191,16 +189,8 @@ impl CanisterPoller {
                                     message_nonce = last_message_nonce + 1;
                                 },
                                 Err(cdk_err) => {
-                                    // let the main task know that this poller will terminate due to a CDK error
-                                    signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::CdkError(self.canister_id)).await;
-                                    // let each client connection handler task connected to this poller know that the poller will terminate
-                                    // and thus they also have to close the WebSocket connection and terminate
-                                    for client_channel_tx in client_channels.values() {
-                                        if let Err(channel_err) = client_channel_tx.send(Err(format!("Terminating poller task due to CDK error: {}", cdk_err))).await {
-                                            error!("Client's thread terminated: {}", channel_err);
-                                        }
-                                    }
                                     error!("Terminating poller task due to CDK error: {}", cdk_err);
+                                    signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, cdk_err).await;
                                     break 'poller_loop;
                                 }
                             }
@@ -277,6 +267,33 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
     Err(String::from(
         "Key in canister message is not formatted correctly",
     ))
+}
+
+async fn signal_termination_and_cleanup(
+    poller_to_main_channel: &mut Sender<TerminationInfo>,
+    canister_id: Principal,
+    client_channels: &HashMap<ClientPublicKey, Sender<Result<CertifiedMessage, String>>>,
+    cdk_err: String,
+) {
+    // let the main task know that this poller will terminate due to a CDK error
+    signal_poller_task_termination(
+        poller_to_main_channel,
+        TerminationInfo::CdkError(canister_id),
+    )
+    .await;
+    // let each client connection handler task connected to this poller know that the poller will terminate
+    // and thus they also have to close the WebSocket connection and terminate
+    for client_channel_tx in client_channels.values() {
+        if let Err(channel_err) = client_channel_tx
+            .send(Err(format!(
+                "Terminating poller task due to CDK error: {}",
+                cdk_err
+            )))
+            .await
+        {
+            error!("Client's thread terminated: {}", channel_err);
+        }
+    }
 }
 
 async fn signal_poller_task_termination(
