@@ -247,16 +247,10 @@ impl CanisterPoller {
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
         let max_retries = 3;
-        let retry_delay = Duration::from_secs(3);
+        let retry_delay_ms = 3;
         let message = CanisterIncomingMessage::IcWebSocketGatewayStatus(GatewayStatusMessage {
             status_index,
         });
-
-        // the first gateway status is sent immediately. The following ones are sent at an interval of 'self.send_status_interval_ms'
-        // this is not done at the end of the retries because, in case all retries failed, we want to return the error immediately so that the poller can be terminated
-        if status_index > 0 {
-            sleep(self.send_status_interval_ms).await;
-        }
 
         // this logic is performed here, instead of in the branch corresponding to the current future, in order to not slow down the select! loop while waiting for the retries
         // (as once a future is selected, the corresponding branch "blocks" all the futures until the next iteration of select!)
@@ -266,21 +260,25 @@ impl CanisterPoller {
             {
                 Ok(_) => {
                     info!("Sent gateway status update: {}", status_index);
-                    return Ok(());
+                    break;
                 },
                 Err(e) => {
                     warn!(
-                        "Attempt {}: calling ws_message on canister failed: {}",
+                        "Attempt {}: called ws_message on canister failed: {}",
                         attempt, e
                     );
-                    warn!("Retrying in {} seconds...", retry_delay.as_secs());
-                    tokio::time::sleep(retry_delay).await;
+                    if attempt == max_retries {
+                        return Err(String::from(
+                            "Max retries for sending gateway status update reached",
+                        ));
+                    }
+                    warn!("Retrying in {} milliseconds...", retry_delay_ms);
+                    sleep(retry_delay_ms).await;
                 },
             }
         }
-        Err(String::from(
-            "Max retries for sending gateway status update reached",
-        ))
+        sleep(self.send_status_interval_ms).await;
+        Ok(())
     }
 }
 
