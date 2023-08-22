@@ -1,8 +1,10 @@
 use crate::metrics::canister_poller_metrics::{
-    IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
+    IcWsEstablishmentNotificationEventsMetrics, IncomingCanisterMessageEventsMetrics,
+    PollerEventsMetrics,
 };
 use crate::metrics::client_connection_handler_metrics::{
-    ConnectionSetupEventsMetrics, OutgoingCanisterMessageEventsMetrics,
+    ConfirmedConnectionSetupEventsMetrics, OutgoingCanisterMessageEventsMetrics,
+    RequestConnectionSetupEventsMetrics,
 };
 use crate::metrics::gateway_server_metrics::ConnectionEstablishmentEventsMetrics;
 use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
@@ -190,8 +192,10 @@ impl EventsCollectionType {
         match self {
             Self::NewClientConnection => Some(vec![
                 ListenerEventsMetrics::default().get_struct_name(),
-                ConnectionSetupEventsMetrics::default().get_struct_name(),
+                RequestConnectionSetupEventsMetrics::default().get_struct_name(),
                 ConnectionEstablishmentEventsMetrics::default().get_struct_name(),
+                IcWsEstablishmentNotificationEventsMetrics::default().get_struct_name(),
+                ConfirmedConnectionSetupEventsMetrics::default().get_struct_name(),
             ]),
             Self::CanisterMessage => Some(vec![
                 IncomingCanisterMessageEventsMetrics::default().get_struct_name(),

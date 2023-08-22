@@ -4,8 +4,9 @@ use crate::{
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
     metrics::client_connection_handler_metrics::{
-        ConnectionSetupEvents, ConnectionSetupEventsMetrics, OutgoingCanisterMessageEvents,
-        OutgoingCanisterMessageEventsMetrics,
+        ConfirmedConnectionSetupEvents, ConfirmedConnectionSetupEventsMetrics,
+        OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
+        RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
 };
 
@@ -80,13 +81,13 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                let mut connection_setup_events = Some(ConnectionSetupEvents::new(
+                let mut request_connection_setup_events = Some(RequestConnectionSetupEvents::new(
                     Some(EventsReference::ClientId(self.id)),
                     EventsCollectionType::NewClientConnection,
-                    ConnectionSetupEventsMetrics::default(),
+                    RequestConnectionSetupEventsMetrics::default(),
                 ));
 
-                connection_setup_events
+                request_connection_setup_events
                     .as_mut()
                     .expect("must have connection setup events for first message")
                     .metrics
@@ -147,6 +148,12 @@ impl ClientConnectionHandler {
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                 },
                                 IcWsConnectionUpdate::Established => {
+                                    let mut confirmed_connection_setup_events = ConfirmedConnectionSetupEvents::new(
+                                        Some(EventsReference::ClientId(self.id)),
+                                        EventsCollectionType::NewClientConnection,
+                                        ConfirmedConnectionSetupEventsMetrics::default(),
+                                    );
+                                    confirmed_connection_setup_events.metrics.set_received_confirmation_from_poller();
                                     debug!("Client established IC WebSocket connection");
                                     // let the client know that the IC WS connection is setup correctly
                                     send_ws_message_to_client(
@@ -154,6 +161,11 @@ impl ClientConnectionHandler {
                                         Message::Text("1".to_string()),
                                     )
                                     .await;
+                                    confirmed_connection_setup_events.metrics.set_confirmation_sent_to_client();
+                                    self.events_channel_tx
+                                        .send(Box::new(confirmed_connection_setup_events))
+                                        .await
+                                        .expect("analyzer's side of the channel dropped");
                                 }
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 IcWsConnectionUpdate::Error(e) => {
@@ -169,7 +181,7 @@ impl ClientConnectionHandler {
                             match self.handle_incoming_ws_message(
                                 ws_message,
                                 is_first_message,
-                                connection_setup_events,
+                                request_connection_setup_events,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
                             ).await {
@@ -187,7 +199,7 @@ impl ClientConnectionHandler {
                             }
                             // after the first time 'handle_incoming_ws_message' is called, we do not need to collect connection setup events anymore
                             // so we always pass None
-                            connection_setup_events = None;
+                            request_connection_setup_events = None;
                         }
                     }
                 }
@@ -207,7 +219,7 @@ impl ClientConnectionHandler {
         &self,
         ws_message: Result<Option<Message>, Error>,
         is_first_message: bool,
-        mut connection_setup_events: Option<ConnectionSetupEvents>,
+        mut request_connection_setup_events: Option<RequestConnectionSetupEvents>,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) -> WsConnectionState {
@@ -225,7 +237,7 @@ impl ClientConnectionHandler {
                 }
                 // check if it is the first message being sent by the client via WebSocket
                 if is_first_message {
-                    connection_setup_events
+                    request_connection_setup_events
                         .as_mut()
                         .expect("must have connection setup events for first message")
                         .metrics
@@ -240,7 +252,7 @@ impl ClientConnectionHandler {
                             // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
                             nonce,
                         }) => {
-                            connection_setup_events
+                            request_connection_setup_events
                                 .as_mut()
                                 .expect("must have connection setup events for first message")
                                 .metrics
@@ -267,13 +279,13 @@ impl ClientConnectionHandler {
                                 // so that we can take into account eventual delays due to the channel being over capacity
                                 // however, we still have to measure the latency of adding the client to the gateway state and eventually starting a new poller
                                 // but this will be done in the gateway server component
-                                connection_setup_events
+                                request_connection_setup_events
                                     .as_mut()
                                     .expect("must have connection setup events for first message")
                                     .metrics
                                     .set_ws_connection_setup();
                                 self.events_channel_tx
-                                    .send(Box::new(connection_setup_events.expect(
+                                    .send(Box::new(request_connection_setup_events.expect(
                                         "must have connection setup events for first message",
                                     )))
                                     .await

@@ -323,6 +323,7 @@ impl GatewayState {
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
+                    gateway_session.client_id,
                     client_key.clone(),
                     gateway_session.message_for_client_tx.clone(),
                 );
@@ -402,11 +403,6 @@ impl GatewayState {
                 connection_establishment_events
                     .metrics
                     .set_sent_client_channel_to_poller();
-
-                // !!! does not wait for the canister to receive the client key
-                connection_establishment_events
-                    .metrics
-                    .set_sent_client_key_to_canister();
 
                 events_channel_tx
                     .send(Box::new(connection_establishment_events))

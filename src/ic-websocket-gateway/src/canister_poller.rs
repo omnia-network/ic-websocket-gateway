@@ -16,6 +16,7 @@ use crate::{
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
+        IcWsEstablishmentNotificationEvents, IcWsEstablishmentNotificationEventsMetrics,
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
         PollerEventsMetrics,
     },
@@ -69,7 +70,7 @@ pub enum IcWsConnectionUpdate {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(ClientPublicKey, Sender<IcWsConnectionUpdate>),
+    NewClientChannel(u64, ClientPublicKey, Sender<IcWsConnectionUpdate>),
     ClientDisconnected(ClientPublicKey),
 }
 
@@ -140,28 +141,37 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
+                        PollerToClientChannelData::NewClientChannel(client_id, client_key, client_channel) => {
+                            let mut ic_ws_establishment_notification_events = IcWsEstablishmentNotificationEvents::new(Some(EventsReference::ClientId(client_id)), EventsCollectionType::NewClientConnection, IcWsEstablishmentNotificationEventsMetrics::default());
+                            ic_ws_establishment_notification_events.metrics.set_received_client_channel();
                             // notify client handler that the IC WS connection establishment is completed
                             if let Err(e) = client_channel.send(IcWsConnectionUpdate::Established).await {
                                 error!("Client's thread terminated: {}", e);
                             }
                             else {
+                                ic_ws_establishment_notification_events.metrics.set_sent_client_notification();
                                 debug!("Added new channel to poller for client: {:?}", client_key);
                                 client_channels.insert(client_key.clone(), client_channel);
+                                // notify canister that it can now send messages for the client corresponding to client_key
+                                let agent = Arc::clone(&self.agent);
+                                let canister_id = self.canister_id;
+                                tokio::spawn(async move {
+                                    let gateway_message =
+                                        CanisterIncomingMessage::IcWebSocketEstablished(client_key);
+                                    if let Err(e) =
+                                        canister_methods::ws_message(&agent, &canister_id, gateway_message).await
+                                    {
+                                        error!("Calling ws_message on canister failed: {}", e);
+                                        // TODO: try again or report failure to client
+                                    }
+                                });
+                                // !!! does not wait for the canister to receive the client key
+                                ic_ws_establishment_notification_events.metrics.set_sent_canister_notification();
+                                poller_channels.poller_to_analyzer
+                                    .send(Box::new(ic_ws_establishment_notification_events))
+                                    .await
+                                    .expect("analyzer's side of the channel dropped");
                             }
-                            // notify canister that it can now send messages for the client corresponding to client_key
-                            let agent = Arc::clone(&self.agent);
-                            let canister_id = self.canister_id;
-                            tokio::spawn(async move {
-                                let gateway_message =
-                                    CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                                if let Err(e) =
-                                    canister_methods::ws_message(&agent, &canister_id, gateway_message).await
-                                {
-                                    error!("Calling ws_message on canister failed: {}", e);
-                                    // TODO: try again or report failure to client
-                                }
-                            });
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
                             debug!("Removed client channel from poller for client {:?}", client_key);

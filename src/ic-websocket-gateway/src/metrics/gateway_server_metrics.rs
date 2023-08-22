@@ -9,7 +9,6 @@ pub struct ConnectionEstablishmentEventsMetrics {
     added_client_to_state: TimeableEvent,
     started_new_poller: TimeableEvent,
     sent_client_channel_to_poller: TimeableEvent,
-    sent_client_key_to_canister: TimeableEvent,
 }
 
 impl ConnectionEstablishmentEventsMetrics {
@@ -18,7 +17,6 @@ impl ConnectionEstablishmentEventsMetrics {
             added_client_to_state: TimeableEvent::default(),
             started_new_poller: TimeableEvent::default(),
             sent_client_channel_to_poller: TimeableEvent::default(),
-            sent_client_key_to_canister: TimeableEvent::default(),
         }
     }
 
@@ -32,10 +30,6 @@ impl ConnectionEstablishmentEventsMetrics {
 
     pub fn set_sent_client_channel_to_poller(&mut self) {
         self.sent_client_channel_to_poller.set_now();
-    }
-
-    pub fn set_sent_client_key_to_canister(&mut self) {
-        self.sent_client_key_to_canister.set_now();
     }
 }
 
@@ -60,16 +54,12 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
                         .duration_since(&self.sent_client_channel_to_poller)?
                 }
             };
-            let time_to_send_client_key = self
-                .sent_client_key_to_canister
-                .duration_since(&self.added_client_to_state)?;
             let latency = self.compute_latency()?;
 
             return Some(Box::new(ConnectionEstablishmentDeltas::new(
                 reference,
                 time_to_start_poller,
                 time_to_send_client_channel,
-                time_to_send_client_key,
                 latency,
             )));
         }
@@ -77,7 +67,7 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.sent_client_key_to_canister
+        self.sent_client_channel_to_poller
             .duration_since(&self.added_client_to_state)
     }
 }
@@ -87,7 +77,6 @@ struct ConnectionEstablishmentDeltas {
     reference: EventsReference,
     time_to_start_poller: Duration,
     time_to_send_client_channel: Duration,
-    time_to_send_client_key: Duration,
     latency: Duration,
 }
 
@@ -96,14 +85,12 @@ impl ConnectionEstablishmentDeltas {
         reference: EventsReference,
         time_to_start_poller: Duration,
         time_to_send_client_channel: Duration,
-        time_to_send_client_key: Duration,
         latency: Duration,
     ) -> Self {
         Self {
             reference,
             time_to_start_poller,
             time_to_send_client_channel,
-            time_to_send_client_key,
             latency,
         }
     }
@@ -112,8 +99,8 @@ impl ConnectionEstablishmentDeltas {
 impl Deltas for ConnectionEstablishmentDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_start_poller: {:?}\ntime_to_send_client_channel: {:?}\ntime_to_send_client_key: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_start_poller, self.time_to_send_client_channel, self.time_to_send_client_key, self.latency
+            "\nreference: {:?}\ntime_to_start_poller: {:?}\ntime_to_send_client_channel: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_start_poller, self.time_to_send_client_channel, self.latency
         );
     }
 
