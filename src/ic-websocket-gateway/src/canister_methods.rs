@@ -1,10 +1,8 @@
-use candid::CandidType;
-use candid::Decode;
+use candid::{decode_one, CandidType, Decode, Principal};
 use ed25519_compact::{PublicKey, Signature};
 use ic_agent::AgentError;
 use ic_agent::{
-    agent::http_transport::ReqwestHttpReplicaV2Transport, export::Principal,
-    identity::BasicIdentity, Agent,
+    agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
@@ -40,7 +38,7 @@ pub struct CanisterWsRegisterArguments {
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenArguments {
     #[serde(with = "serde_bytes")]
-    msg: Vec<u8>,
+    content: Vec<u8>,
     #[serde(with = "serde_bytes")]
     sig: Vec<u8>,
 }
@@ -49,24 +47,24 @@ pub struct CanisterWsOpenArguments {
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsCloseArguments {
     #[serde(with = "serde_bytes")]
-    client_key: ClientPublicKey,
+    pub client_key: ClientPublicKey,
 }
 
 /// The arguments for `ws_message`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsMessageArguments {
-    msg: CanisterIncomingMessage,
+    pub msg: CanisterIncomingMessage,
 }
 
 /// The arguments for `ws_get_messages`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsGetMessagesArguments {
-    nonce: u64,
+    pub nonce: u64,
 }
 
-/// The first message received by the canister in `ws_open`.
+/// The open message received by the canister in `ws_open`.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterFirstMessageContent {
+pub struct CanisterOpenMessageContent {
     #[serde(with = "serde_bytes")]
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
@@ -120,9 +118,9 @@ pub struct WebsocketMessage {
 pub struct CanisterOutputMessage {
     #[serde(with = "serde_bytes")]
     pub client_key: ClientPublicKey, // The client that the gateway will forward the message to.
-    pub key: String, // Key for certificate verification.
     #[serde(with = "serde_bytes")]
-    pub val: Vec<u8>, // Encoded WebsocketMessage.
+    pub content: Vec<u8>, // Encoded WebsocketMessage.
+    pub key: String, // Key for certificate verification.
 }
 
 /// List of messages returned to the polling gateway.
@@ -151,41 +149,63 @@ pub async fn get_new_agent(
     Ok(agent)
 }
 
-fn validate_first_message(
-    bytes: Vec<u8>,
-) -> Result<(RelayedClientMessage, CanisterFirstMessageContent), String> {
-    let m = from_slice::<RelayedClientMessage>(&bytes)
-        .map_err(|_| String::from("first message is not of type RelayedClientMessage"))?;
-    let content = from_slice::<CanisterFirstMessageContent>(&m.content).map_err(|_| {
-        String::from("content of first message is not of type CanisterFirstMessageContent")
-    })?;
-    let sig = Signature::from_slice(&m.sig)
-        .map_err(|_| String::from("first message does not contain a valid signature"))?;
-    let public_key = PublicKey::from_slice(&content.client_key)
-        .map_err(|_| String::from("first message does not contain a valid public key"))?;
+fn validate_received_open_message(
+    client_key: Vec<u8>,
+    message: &RelayedClientMessage,
+) -> Result<(), String> {
+    // verify the signature of the client
+    let sig = Signature::from_slice(&message.sig)
+        .map_err(|_| String::from("open message does not contain a valid signature"))?;
+    let public_key = PublicKey::from_slice(&client_key)
+        .map_err(|_| String::from("open message does not contain a valid public key"))?;
     public_key
-        .verify(&m.content, &sig)
+        .verify(&message.content, &sig)
         .map_err(|_| String::from("client's signature does not verify against public key"))?;
-    Ok((m, content))
+    Ok(())
+}
+
+fn deserialize_received_open_message(
+    bytes: Vec<u8>,
+) -> Result<(RelayedClientMessage, CanisterOpenMessageContent), String> {
+    // deserialize the open message using Candid
+    let open_message: RelayedClientMessage = decode_one(&bytes)
+        .map_err(|_| String::from("open message is not of type RelayedClientMessage"))?;
+    // deserialize the content of the open message using CBOR
+    let content: CanisterOpenMessageContent = from_slice(&open_message.content).map_err(|_| {
+        String::from("content of open message is not of type CanisterOpenMessageContent")
+    })?;
+    Ok((open_message, content))
 }
 
 #[cfg(not(test))] // only compile and run the following block when not running tests
 pub async fn check_canister_init(agent: &Agent, message: Message) -> CanisterWsOpenResult {
     if let Message::Binary(bytes) = message {
-        let (m, content) = validate_first_message(bytes)?;
+        let (open_message, content) = deserialize_received_open_message(bytes)?;
+        // verify the signature of the client
+        validate_received_open_message(content.client_key, &open_message)?;
         // if all checks pass, call the ws_open method of the canister which the WS Gateway has to poll from
-        ws_open(agent, &content.canister_id, m.content, m.sig).await
+        ws_open(
+            agent,
+            &content.canister_id,
+            CanisterWsOpenArguments {
+                content: open_message.content,
+                sig: open_message.sig,
+            },
+        )
+        .await
     } else {
         Err(String::from(
-            "first message from client should be binary encoded",
+            "open message from client should be binary encoded",
         ))
     }
 }
 
 #[cfg(test)] // only compile and run the following block during tests
-pub async fn check_canister_init(_agent: &Agent, message: Message) -> CanisterWsOpenResult {
+pub async fn check_canister_init(_: &Agent, message: Message) -> CanisterWsOpenResult {
     if let Message::Binary(bytes) = message {
-        let (_m, _content) = validate_first_message(bytes)?;
+        let (open_message, content) = deserialize_received_open_message(bytes)?;
+        // verify the signature of the client
+        validate_received_open_message(content.client_key, &open_message)?;
 
         // mock the result returned by a call to ws_open after the client registered its public key
         let valid_client_key = vec![
@@ -200,7 +220,7 @@ pub async fn check_canister_init(_agent: &Agent, message: Message) -> CanisterWs
         })
     } else {
         Err(String::from(
-            "first message from client should be binary encoded",
+            "open message from client should be binary encoded",
         ))
     }
 }
@@ -209,11 +229,9 @@ pub async fn check_canister_init(_agent: &Agent, message: Message) -> CanisterWs
 pub async fn ws_open(
     agent: &Agent,
     canister_id: &Principal,
-    content: Vec<u8>,
-    sig: Vec<u8>,
+    args: CanisterWsOpenArguments,
 ) -> CanisterWsOpenResult {
-    let args = candid::encode_args((CanisterWsOpenArguments { msg: content, sig },))
-        .map_err(|e| e.to_string())?;
+    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_open")
@@ -228,10 +246,9 @@ pub async fn ws_open(
 pub async fn ws_close(
     agent: &Agent,
     canister_id: &Principal,
-    client_key: ClientPublicKey,
+    args: CanisterWsCloseArguments,
 ) -> CanisterWsCloseResult {
-    let args = candid::encode_args((CanisterWsCloseArguments { client_key },))
-        .map_err(|e| e.to_string())?;
+    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_close")
@@ -246,10 +263,9 @@ pub async fn ws_close(
 pub async fn ws_message(
     agent: &Agent,
     canister_id: &Principal,
-    msg: CanisterIncomingMessage,
+    args: CanisterWsMessageArguments,
 ) -> CanisterWsMessageResult {
-    let args =
-        candid::encode_args((CanisterWsMessageArguments { msg },)).map_err(|e| e.to_string())?;
+    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
         .update(canister_id, "ws_message")
@@ -264,14 +280,13 @@ pub async fn ws_message(
 pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
-    nonce: u64,
+    args: CanisterWsGetMessagesArguments,
 ) -> CanisterWsGetMessagesResult {
-    let args = candid::encode_args((CanisterWsGetMessagesArguments { nonce },))
-        .map_err(|e| e.to_string())?;
+    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
         .query(canister_id, "ws_get_messages")
-        .with_arg(&args)
+        .with_arg(args)
         .call()
         .await
         .map_err(|e| e.to_string())?;

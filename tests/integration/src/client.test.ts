@@ -1,6 +1,7 @@
 import IcWebSocket from "ic-websocket-js";
 import environment from "./utils/environment";
 import { createActor } from "./utils/actors";
+import { deserializeAppMessage, serializeAppMessage } from "./utils/idl";
 import type { _SERVICE } from "../../test_canister/src/declarations/test_canister/test_canister.did";
 
 /// IcWebsocket parameters
@@ -86,23 +87,26 @@ describe("WS client", () => {
         reject(event.error);
       };
 
-      ws.onmessage = async (event: MessageEvent<{ text: string; timestamp: bigint; }>) => {
-        if (!(event.data.text === reconstructWsMessage(messageCounter))) {
+      ws.onmessage = async (event) => {
+        const message = deserializeAppMessage(event.data);
+        if (!(message.text === reconstructWsMessage(messageCounter))) {
           return reject("Received message does not match expected message");
         }
 
         messageCounter++;
-        const indices = getIndicesOf("ping", event.data.text);
+        const indices = getIndicesOf("ping", message.text);
         if (messageCounter === pingPongCount) {
           // close the test after the last message
           return resolve();
         }
         expect(indices.length).toBe(messageCounter);
 
-        await ws.send({
-          text: event.data.text + "-pong",
-          timestamp: Date.now(),
+        const pongMessage = serializeAppMessage({
+          text: message.text + "-pong",
+          timestamp: BigInt(Date.now()),
         });
+
+        await ws.send(pongMessage);
       };
     });
 

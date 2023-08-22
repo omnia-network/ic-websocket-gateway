@@ -14,10 +14,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
+    canister_methods::{
+        self, CanisterIncomingMessage, CanisterWsCloseArguments, CanisterWsMessageArguments,
+        ClientPublicKey,
+    },
     canister_poller::{
-        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
-        TerminationInfo,
+        CanisterPoller, CanisterToClientMessage, PollerChannelsPollerEnds,
+        PollerToClientChannelData, TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
     ws_listener::{TlsConfig, WsListener},
@@ -35,7 +38,7 @@ pub struct GatewaySession {
     client_id: u64,
     client_key: ClientPublicKey,
     canister_id: Principal,
-    message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+    message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
     nonce: u64,
 }
 
@@ -47,7 +50,7 @@ pub struct GatewaySession {
     pub client_id: u64,
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
-    pub message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+    pub message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
     pub nonce: u64,
 }
 
@@ -56,7 +59,7 @@ impl GatewaySession {
         client_id: u64,
         client_key: Vec<u8>,
         canister_id: Principal,
-        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+        message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
         nonce: u64,
     ) -> Self {
         Self {
@@ -377,8 +380,14 @@ impl GatewayState {
                 tokio::spawn(async move {
                     let gateway_message =
                         CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                    if let Err(e) =
-                        canister_methods::ws_message(&agent, &canister_id, gateway_message).await
+                    if let Err(e) = canister_methods::ws_message(
+                        &agent,
+                        &canister_id,
+                        CanisterWsMessageArguments {
+                            msg: gateway_message,
+                        },
+                    )
+                    .await
                     {
                         error!("Calling ws_message on canister failed: {}", e);
                         // TODO: try again or report failure to client
@@ -524,7 +533,14 @@ fn call_ws_close_in_background(
     // therefore this is done in a separate task
     // in order to not slow down the main task
     tokio::spawn(async move {
-        if let Err(e) = canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
+        if let Err(e) = canister_methods::ws_close(
+            &agent_cl,
+            &canister_id_cl,
+            CanisterWsCloseArguments {
+                client_key: client_key_cl,
+            },
+        )
+        .await
         {
             error!("Calling ws_close on canister failed: {}", e);
         }

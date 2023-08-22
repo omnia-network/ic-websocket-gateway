@@ -9,4 +9,4 @@ default-members = [
 ]
 
 [workspace.dependencies]
-ic-agent = "0.24.1"
+ic-agent = "0.25.0"

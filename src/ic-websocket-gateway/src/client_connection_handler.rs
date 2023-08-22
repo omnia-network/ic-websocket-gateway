@@ -1,12 +1,12 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
-    canister_poller::CertifiedMessage,
+    canister_poller::CanisterToClientMessage,
     gateway_server::GatewaySession,
 };
 
+use candid::encode_one;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::Agent;
-use serde_cbor::to_vec;
 use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -81,13 +81,13 @@ impl ClientConnectionHandler {
                 // channel used by the poller task to send canister messages from the directly to this client connection handler task
                 // which will then forward it to the client via the WebSocket connection
                 let (message_for_client_tx, mut message_for_client_rx): (
-                    Sender<Result<CertifiedMessage, String>>,
-                    Receiver<Result<CertifiedMessage, String>>,
+                    Sender<Result<CanisterToClientMessage, String>>,
+                    Receiver<Result<CanisterToClientMessage, String>>,
                 ) = mpsc::channel(100);
 
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
-                let mut is_first_message = true;
+                let mut is_open_message = true;
                 loop {
                     select! {
                         // bias select! to check token cancellation first
@@ -108,13 +108,13 @@ impl ClientConnectionHandler {
                         Some(poller_message) = message_for_client_rx.recv() => {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
-                                Ok(canister_message) => {
-                                    debug!("Sending message with key: {:?} to client", canister_message.key);
-                                    // relay canister message to client, cbor encoded
-                                    match to_vec(&canister_message) {
+                                Ok(canister_to_client_message) => {
+                                    debug!("Sending message with key: {:?} to client", canister_to_client_message.key);
+                                    // relay canister message to client, Candid serialized
+                                    match encode_one(&canister_to_client_message) {
                                         Ok(bytes) => {
                                             send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
-                                            debug!("Message with key: {:?} sent to client", canister_message.key);
+                                            debug!("Message with key: {:?} sent to client", canister_to_client_message.key);
                                         },
                                         Err(e) => error!("Could not serialize canister message. Error: {:?}", e)
                                     }
@@ -132,12 +132,12 @@ impl ClientConnectionHandler {
                         ws_message = ws_read.try_next() => {
                             match self.handle_incoming_ws_message(
                                 ws_message,
-                                is_first_message,
+                                is_open_message,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
                             ).await {
-                                // if the connection is successfully established, the following messages are not the first
-                                WsConnectionState::Established(_) => is_first_message = false,
+                                // if the connection is successfully established, the following messages are not the first open message
+                                WsConnectionState::Established(_) => is_open_message = false,
                                 // if the client calls a method which is not implemented, we should only report it but we can keep the connection alive
                                 WsConnectionState::Error(IcWsError::NotImplemented(e)) => warn!(e),
                                 // if the client closes the WS connection, we terminate the connection handler task, without reporting any error
@@ -167,9 +167,9 @@ impl ClientConnectionHandler {
     async fn handle_incoming_ws_message<S: AsyncRead + AsyncWrite + Unpin>(
         &self,
         ws_message: Result<Option<Message>, Error>,
-        is_first_message: bool,
+        is_open_message: bool,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
-        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+        message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
     ) -> WsConnectionState {
         match ws_message {
             // handle message sent from client via WebSocket
@@ -183,8 +183,8 @@ impl ClientConnectionHandler {
                     .await;
                     return WsConnectionState::Closed(self.id);
                 }
-                // check if it is the first message being sent by the client via WebSocket
-                if is_first_message {
+                // check if it is the open message being sent by the client via WebSocket
+                if is_open_message {
                     // check if client followed the IC WebSocket connection establishment protocol
                     match canister_methods::check_canister_init(&self.agent, message.clone()).await
                     {
@@ -196,7 +196,7 @@ impl ClientConnectionHandler {
                             nonce,
                         }) => {
                             // prevent adding a new client to the gateway state while shutting down
-                            // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
+                            // needed because wait_for_cancellation might be ready while handle_incoming_ws_message
                             // is already executing
                             if !self.token.is_cancelled() {
                                 debug!("Client established IC WebSocket connection");
