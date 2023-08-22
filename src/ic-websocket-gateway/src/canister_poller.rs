@@ -1,14 +1,3 @@
-use candid::CandidType;
-use ic_agent::{export::Principal, Agent};
-use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
-
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::{
-    select,
-    sync::mpsc::{Receiver, Sender},
-};
-
 use crate::{
     canister_methods::{
         self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
@@ -21,6 +10,16 @@ use crate::{
         PollerEventsMetrics,
     },
 };
+use candid::CandidType;
+use ic_agent::{export::Principal, Agent};
+use rand::distributions::{Distribution, Uniform};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::{
+    select,
+    sync::mpsc::{Receiver, Sender},
+};
+use tracing::{debug, error, info, warn};
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
@@ -158,11 +157,10 @@ impl CanisterPoller {
                                 tokio::spawn(async move {
                                     let gateway_message =
                                         CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                                    if let Err(e) =
-                                        canister_methods::ws_message(&agent, &canister_id, gateway_message).await
-                                    {
-                                        error!("Calling ws_message on canister failed: {}", e);
-                                        // TODO: try again or report failure to client
+                                    if let Err(e) = ws_message_to_canister_with_retries(agent, canister_id, gateway_message).await {
+                                        error!("Failed to notify canister of client connection establishment: {:?}", e);
+                                        // TODO: report failure to client
+                                        //       no need to terminate poller as the canister might have intentionally prevented this client from connecting
                                     }
                                 });
                                 // !!! does not wait for the canister to receive the client key
@@ -244,7 +242,7 @@ impl CanisterPoller {
                             );
                         }
                         Err(e) => {
-                            error!("Terminating poller task due to error: {}", e);
+                            error!("Terminating poller task due to fail in sending gateway status update: {}", e);
                             signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, e).await;
                             break 'poller_loop;
                         }
@@ -279,40 +277,58 @@ impl CanisterPoller {
     }
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
-        let max_retries = 3;
-        let retry_delay_ms = 3;
         let message = CanisterIncomingMessage::IcWebSocketGatewayStatus(GatewayStatusMessage {
             status_index,
         });
 
         // this logic is performed here, instead of in the branch corresponding to the current future, in order to not slow down the select! loop while waiting for the retries
         // (as once a future is selected, the corresponding branch "blocks" all the futures until the next iteration of select!)
-        for attempt in 1..=max_retries {
-            match canister_methods::ws_message(&self.agent, &self.canister_id, message.clone())
+        if let Err(e) =
+            ws_message_to_canister_with_retries(Arc::clone(&self.agent), self.canister_id, message)
                 .await
-            {
-                Ok(_) => {
-                    info!("Sent gateway status update: {}", status_index);
-                    break;
-                },
-                Err(e) => {
-                    warn!(
-                        "Attempt {}: called ws_message on canister failed: {}",
-                        attempt, e
-                    );
-                    if attempt == max_retries {
-                        return Err(String::from(
-                            "Max retries for sending gateway status update reached",
-                        ));
-                    }
-                    warn!("Retrying in {} milliseconds...", retry_delay_ms);
-                    sleep(retry_delay_ms).await;
-                },
-            }
+        {
+            // in case of error, we report it immediately
+            return Err(e);
         }
+        info!("Sent gateway status update: {}", status_index);
+        // if the ws_message is successful, we wait the interval for the gateway status check before returning
         sleep(self.send_status_interval_ms).await;
         Ok(())
     }
+}
+
+async fn ws_message_to_canister_with_retries(
+    agent: Arc<Agent>,
+    canister_id: Principal,
+    message: CanisterIncomingMessage,
+) -> Result<(), String> {
+    let max_retries = 3;
+    for attempt in 1..=max_retries {
+        match canister_methods::ws_message(&agent, &canister_id, message.clone()).await {
+            Ok(_) => {
+                break;
+            },
+            Err(e) => {
+                warn!(
+                    "Attempt {}: called ws_message on canister failed: {}",
+                    attempt, e
+                );
+                if attempt == max_retries {
+                    return Err(String::from("Max retries for calling ws_message reached"));
+                }
+                let retry_delay_ms = sample_uniform(2, 5) as u64 * 1000;
+                warn!("Retrying in {} milliseconds...", retry_delay_ms);
+                sleep(retry_delay_ms).await;
+            },
+        }
+    }
+    Ok(())
+}
+
+fn sample_uniform(lower_bound: i32, upper_bound: i32) -> i32 {
+    let mut rng = rand::thread_rng();
+    let uniform = Uniform::new_inclusive(lower_bound, upper_bound);
+    uniform.sample(&mut rng)
 }
 
 pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {

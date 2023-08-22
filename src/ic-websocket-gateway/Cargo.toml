@@ -24,6 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.17", features = ["fmt", "std", "json", "env-filter"] }
 tracing-appender = "0.2"
 ic-identity = { version = "0.1.0", path = "../ic-identity" }
+rand = "0.8"
 
 [dev-dependencies]
 websocket = "0.26.5"
