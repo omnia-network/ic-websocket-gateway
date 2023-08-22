@@ -23,8 +23,8 @@ type CanisterIncomingMessage = variant {
 
 type CanisterOutputMessage = record {
   client_key : ClientPublicKey;
+  content : blob;
   key : text;
-  val : blob;
 };
 
 type CanisterOutputCertifiedMessages = record {
@@ -43,7 +43,7 @@ type CanisterWsRegisterResult = variant {
 };
 
 type CanisterWsOpenArguments = record {
-  msg : blob;
+  content : blob;
   sig : blob;
 };
 
