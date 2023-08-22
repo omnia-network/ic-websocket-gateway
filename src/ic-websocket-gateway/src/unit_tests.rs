@@ -2,7 +2,7 @@
 // !!! tests have to be run using "cargo test -- --test-threads=1" !!!
 // running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
-    use candid::Principal;
+    use candid::{encode_one, CandidType, Principal};
     use ic_identity::{get_identity_from_key_pair, load_key_pair};
     use serde::Serialize;
     use serde_cbor::Serializer;
@@ -11,7 +11,7 @@ mod tests {
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
-    use crate::canister_methods::CanisterFirstMessageContent;
+    use crate::canister_methods::CanisterOpenMessageContent;
     use crate::canister_methods::RelayedClientMessage;
     use crate::client_connection_handler::IcWsError;
     use crate::client_connection_handler::WsConnectionState;
@@ -26,12 +26,16 @@ mod tests {
             .expect("Error connecting to WebSocket server.")
     }
 
-    fn serialize<T: Serialize>(text: T) -> Vec<u8> {
+    fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
         let mut bytes = Vec::new();
         let mut serializer = Serializer::new(&mut bytes);
         serializer.self_describe().unwrap();
-        text.serialize(&mut serializer).unwrap();
+        m.serialize(&mut serializer).unwrap();
         bytes
+    }
+
+    fn candid_serialize<T: CandidType>(m: T) -> Vec<u8> {
+        encode_one(m).expect("Candid serialization should not fail")
     }
 
     fn get_valid_signature() -> Vec<u8> {
@@ -50,7 +54,7 @@ mod tests {
         ]
     }
 
-    fn get_valid_serialized_canister_first_message_content() -> Vec<u8> {
+    fn get_valid_serialized_canister_open_message_content() -> Vec<u8> {
         vec![
             217, 217, 247, 162, 107, 99, 97, 110, 105, 115, 116, 101, 114, 95, 105, 100, 74, 128,
             0, 0, 0, 0, 16, 0, 1, 1, 1, 106, 99, 108, 105, 101, 110, 116, 95, 107, 101, 121, 88,
@@ -61,10 +65,10 @@ mod tests {
 
     fn get_valid_serialized_relayed_client_message() -> Vec<u8> {
         let message = RelayedClientMessage {
-            content: get_valid_serialized_canister_first_message_content(),
+            content: get_valid_serialized_canister_open_message_content(),
             sig: get_valid_signature(),
         };
-        serialize(message)
+        candid_serialize(message)
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
@@ -84,14 +88,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn client_should_send_binary_first_message() {
+    async fn client_should_send_binary_open_message() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as text to the server right after connecting
+        // client sends the open message as text to the server right after connecting
         client
-            .send_message(&websocket::OwnedMessage::Text(String::from(
-                "first message",
-            )))
+            .send_message(&websocket::OwnedMessage::Text(String::from("open message")))
             .unwrap();
 
         let res = server.recv_from_client_connection_handler().await;
@@ -100,17 +102,17 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message from client should be binary encoded\"")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"open message from client should be binary encoded\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn client_should_send_binary_first_message_of_correct_type() {
+    async fn client_should_send_binary_open_message_of_correct_type() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting but serialized from a type which is not RelayedClientMessage
+        // client sends the open message as binary to the server right after connecting but serialized from a type which is not RelayedClientMessage
         client
             .send_message(&websocket::OwnedMessage::Binary(Vec::<u8>::new()))
             .unwrap();
@@ -121,23 +123,23 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message is not of type RelayedClientMessage\"")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"open message is not of type RelayedClientMessage\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_content_should_be_of_right_type() {
+    async fn open_message_content_should_be_of_right_type() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but with content not of type CanisterFirstMessageContent
+        // client sends the open message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // but with content not of type CanisterOpenMessageContent
         let message = RelayedClientMessage {
             content: Vec::new(),
             sig: Vec::new(),
         };
-        let serialized_message = serialize(message);
+        let serialized_message = candid_serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -149,29 +151,29 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"content of first message is not of type CanisterFirstMessageContent\"")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"content of open message is not of type CanisterOpenMessageContent\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_should_contain_valid_signature() {
+    async fn open_message_should_contain_valid_signature() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // client sends the open message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but with an invalid signature
-        let content = CanisterFirstMessageContent {
+        let content = CanisterOpenMessageContent {
             client_key: Vec::new(),
             canister_id: Principal::anonymous(),
         };
-        let serialized_content = serialize(content);
+        let serialized_content = cbor_serialize(content);
 
         let message = RelayedClientMessage {
             content: serialized_content,
             sig: Vec::new(),
         };
-        let serialized_message = serialize(message);
+        let serialized_message = candid_serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -183,23 +185,23 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid signature\"")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"open message does not contain a valid signature\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_should_contain_valid_public_key() {
+    async fn open_message_should_contain_valid_public_key() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // client sends the open message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but with an invalid public key (client_key)
-        let content = CanisterFirstMessageContent {
+        let content = CanisterOpenMessageContent {
             client_key: Vec::new(),
             canister_id: Principal::anonymous(),
         };
-        let serialized_content = serialize(content);
+        let serialized_content = cbor_serialize(content);
 
         let valid_signature = get_valid_signature();
 
@@ -207,7 +209,7 @@ mod tests {
             content: serialized_content,
             sig: valid_signature,
         };
-        let serialized_message = serialize(message);
+        let serialized_message = candid_serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -219,7 +221,7 @@ mod tests {
         if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
             return assert_eq!(
                 e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid public key\"")
+                String::from("Client did not follow IC WebSocket establishment protocol: \"open message does not contain a valid public key\"")
             );
         }
         panic!("ws_connection_state does not have the expected type");
@@ -229,14 +231,14 @@ mod tests {
     async fn signature_should_verify_against_public_key() {
         let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+        // client sends the open message as binary to the server right after connecting, serialized from the type RelayedClientMessage
         // but the client's signature does not verify the message against the public key
         let valid_client_key = get_valid_client_key();
-        let content = CanisterFirstMessageContent {
+        let content = CanisterOpenMessageContent {
             client_key: valid_client_key,
             canister_id: Principal::anonymous(),
         };
-        let serialized_content = serialize(content);
+        let serialized_content = cbor_serialize(content);
 
         let valid_signature = get_valid_signature();
 
@@ -244,7 +246,7 @@ mod tests {
             content: serialized_content,
             sig: valid_signature,
         };
-        let serialized_message = serialize(message);
+        let serialized_message = candid_serialize(message);
 
         client
             .send_message(&websocket::OwnedMessage::Binary(serialized_message))
@@ -312,7 +314,7 @@ mod tests {
             .send_message(&websocket::OwnedMessage::Binary(valid_serialized_message))
             .unwrap();
 
-        let _res = server.recv_from_client_connection_handler().await; // ignore gateway session returned after first message
+        let _res = server.recv_from_client_connection_handler().await; // ignore gateway session returned after open message
 
         // close client connection
         client.shutdown().expect("client should have been running");

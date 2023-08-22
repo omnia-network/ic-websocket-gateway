@@ -1,11 +1,16 @@
 import "./ws_types.did";
 
+type AppMessage = record {
+  text : text;
+  timestamp : nat64;
+};
+
 type CanisterWsSendResult = variant {
   Ok : null;
   Err : text;
 };
 
-service : (opt text) -> {
+service : (text) -> {
   "ws_register" : (CanisterWsRegisterArguments) -> (CanisterWsRegisterResult);
   "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
   "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
@@ -13,5 +18,5 @@ service : (opt text) -> {
   "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
 
   "ws_wipe" : () -> ();
-  "ws_send" : (ClientPublicKey, record { text : text; timestamp : nat }) -> (CanisterWsSendResult);
+  "ws_send" : (ClientPublicKey, blob) -> (CanisterWsSendResult);
 };

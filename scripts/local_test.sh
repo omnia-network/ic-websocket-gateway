@@ -4,8 +4,11 @@ dfx start --clean --background
 echo "Running unit tests for gateway"
 cargo test --workspace -- --test-threads=1
 
+echo "Building gateway"
+cargo build
+
 echo "Starting gateway in the background"
-cargo run -- --send-status-interval 5000 > scripts/gateway_test.log &
+RUST_LOG=ic_websocket_gateway=debug cargo run -- --send-status-interval 5000 > scripts/gateway_test.log &
 pid=$!
 
 echo "Deploying test canister"

@@ -1,6 +1,6 @@
-use ic_cdk::{api::time, export::candid::CandidType, print};
+use candid::{decode_one, encode_one, CandidType};
+use ic_cdk::{api::time, print};
 use serde::{Deserialize, Serialize};
-use serde_cbor::from_slice;
 
 use ic_websocket_cdk::{
     ws_send, ClientPublicKey, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
@@ -12,11 +12,16 @@ pub const GATEWAY_PRINCIPAL: &str =
     "sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae";
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-#[candid_path("ic_cdk::export::candid")]
 pub struct AppMessage {
     pub text: String,
     /// Used in load tests to measure latency from canister to client.
     pub timestamp: u64,
+}
+
+impl AppMessage {
+    fn candid_serialize(&self) -> Vec<u8> {
+        encode_one(&self).unwrap()
+    }
 }
 
 pub fn on_open(args: OnOpenCallbackArgs) {
@@ -40,7 +45,7 @@ pub fn on_open(args: OnOpenCallbackArgs) {
 }
 
 pub fn on_message(args: OnMessageCallbackArgs) {
-    let app_msg: AppMessage = from_slice(&args.message).unwrap();
+    let app_msg: AppMessage = decode_one(&args.message).unwrap();
     let new_msg = AppMessage {
         text: app_msg.clone().text + " ping",
         timestamp: time(),
@@ -51,7 +56,7 @@ pub fn on_message(args: OnMessageCallbackArgs) {
 
 fn send_app_message(client_key: ClientPublicKey, msg: AppMessage) {
     print(format!("Sending message"));
-    if let Err(e) = ws_send(client_key, msg) {
+    if let Err(e) = ws_send(client_key, msg.candid_serialize()) {
         print(format!("Could not send message: {}", e));
     }
 }

@@ -10,15 +10,15 @@ use tokio::{
 };
 
 use crate::canister_methods::{
-    self, CanisterIncomingMessage, CanisterWsGetMessagesResult, CanisterWsMessageResult,
-    ClientPublicKey, GatewayStatusMessage,
+    self, CanisterIncomingMessage, CanisterWsGetMessagesArguments, CanisterWsGetMessagesResult,
+    CanisterWsMessageArguments, CanisterWsMessageResult, ClientPublicKey, GatewayStatusMessage,
 };
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CertifiedMessage {
+pub struct CanisterToClientMessage {
     pub key: String,
     #[serde(with = "serde_bytes")]
-    pub val: Vec<u8>,
+    pub content: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub cert: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -51,7 +51,10 @@ impl PollerChannelsPollerEnds {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(ClientPublicKey, Sender<Result<CertifiedMessage, String>>),
+    NewClientChannel(
+        ClientPublicKey,
+        Sender<Result<CanisterToClientMessage, String>>,
+    ),
     ClientDisconnected(ClientPublicKey),
 }
 
@@ -105,7 +108,7 @@ impl CanisterPoller {
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<
             ClientPublicKey,
-            Sender<Result<CertifiedMessage, String>>,
+            Sender<Result<CanisterToClientMessage, String>>,
         > = HashMap::new();
 
         let get_messages_operation = self.get_canister_updates(message_nonce);
@@ -144,11 +147,11 @@ impl CanisterPoller {
                 // TODO: in the current implementation, if this call fails,
                 //       a new call is not pinned again. We have to handle the error case
                 Ok(msgs) = &mut get_messages_operation => {
-                    for encoded_message in msgs.messages {
-                        let client_key = encoded_message.client_key;
-                        let m = CertifiedMessage {
-                            key: encoded_message.key.clone(),
-                            val: encoded_message.val,
+                    for canister_output_messages in msgs.messages {
+                        let client_key = canister_output_messages.client_key;
+                        let m = CanisterToClientMessage {
+                            key: canister_output_messages.key.clone(),
+                            content: canister_output_messages.content,
                             cert: msgs.cert.clone(),
                             tree: msgs.tree.clone(),
                         };
@@ -163,7 +166,7 @@ impl CanisterPoller {
                             None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
                         }
 
-                        match get_nonce_from_message(encoded_message.key) {
+                        match get_nonce_from_message(canister_output_messages.key) {
                             Ok(last_message_nonce) => message_nonce = last_message_nonce + 1,
                             Err(cdk_err) => {
                                 // let the main task know that this poller will terminate due to a CDK error
@@ -197,7 +200,14 @@ impl CanisterPoller {
     async fn get_canister_updates(&self, message_nonce: u64) -> CanisterWsGetMessagesResult {
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce).await
+        canister_methods::ws_get_messages(
+            &self.agent,
+            &self.canister_id,
+            CanisterWsGetMessagesArguments {
+                nonce: message_nonce,
+            },
+        )
+        .await
     }
 
     async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
@@ -205,7 +215,12 @@ impl CanisterPoller {
             status_index,
         });
 
-        let res = canister_methods::ws_message(&self.agent, &self.canister_id, message).await;
+        let res = canister_methods::ws_message(
+            &self.agent,
+            &self.canister_id,
+            CanisterWsMessageArguments { msg: message },
+        )
+        .await;
 
         match res.clone() {
             Ok(_) => info!("Sent gateway status update: {}", status_index),

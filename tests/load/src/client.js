@@ -2,6 +2,7 @@ require('./prepare-environment.js');
 
 const IcWebsocket = require('ic-websocket-js/lib/cjs/index.js').default;
 const { createActor } = require('./helpers.js');
+const { deserializeAppMessage, serializeAppMessage } = require('./idl.js');
 
 const {
   WS_GATEWAY_URL,
@@ -68,17 +69,20 @@ async function sendMessages(userContext, events, next) {
           return resolve();
         }
 
+        const message = deserializeAppMessage(event.data);
+
         events.emit(
           'histogram',
           'receive_message_latency_ms',
-          Number(BigInt(Date.now()) - (BigInt(event.data.timestamp) / BigInt(10 ** 6)))
+          Number(BigInt(Date.now()) - (BigInt(message.timestamp) / BigInt(10 ** 6)))
         );
 
         try {
-          await ws.send({
-            text: event.data.text + "-pong",
+          const messageToSend = serializeAppMessage({
+            text: message.text + "-pong",
             timestamp: Date.now(),
           });
+          await ws.send(messageToSend);
 
           events.emit('counter', 'send_message_success', 1);
         } catch (err) {
