@@ -1,6 +1,6 @@
 use crate::{
     canister_methods::{self, CanisterWsOpenResultValue},
-    canister_poller::{get_nonce_from_message, CertifiedMessage},
+    canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
     metrics::client_connection_handler_metrics::{
@@ -100,8 +100,8 @@ impl ClientConnectionHandler {
                 // channel used by the poller task to send canister messages from the directly to this client connection handler task
                 // which will then forward it to the client via the WebSocket connection
                 let (message_for_client_tx, mut message_for_client_rx): (
-                    Sender<Result<CertifiedMessage, String>>,
-                    Receiver<Result<CertifiedMessage, String>>,
+                    Sender<IcWsConnectionUpdate>,
+                    Receiver<IcWsConnectionUpdate>,
                 ) = mpsc::channel(100);
 
                 let wait_for_cancellation = self.token.cancelled();
@@ -127,7 +127,7 @@ impl ClientConnectionHandler {
                         Some(poller_message) = message_for_client_rx.recv() => {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
-                                Ok(canister_message) => {
+                                IcWsConnectionUpdate::Message(canister_message) => {
                                     let message_nonce = get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted");
                                     let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageNonce(message_nonce)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
                                     outgoing_canister_message_events.metrics.set_received_canister_message();
@@ -145,9 +145,18 @@ impl ClientConnectionHandler {
                                         }
                                     }
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
+                                },
+                                IcWsConnectionUpdate::Established => {
+                                    debug!("Client established IC WebSocket connection");
+                                    // let the client know that the IC WS connection is setup correctly
+                                    send_ws_message_to_client(
+                                        &mut ws_write,
+                                        Message::Text("1".to_string()),
+                                    )
+                                    .await;
                                 }
                                 // the poller task terminates all the client connection tasks connected to that poller
-                                Err(e) => {
+                                IcWsConnectionUpdate::Error(e) => {
                                     // close the WebSocket connection
                                     ws_write.close().await.unwrap();
                                     error!("Terminating client connection handler task. Error: {}", e);
@@ -200,7 +209,7 @@ impl ClientConnectionHandler {
         is_first_message: bool,
         mut connection_setup_events: Option<ConnectionSetupEvents>,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
-        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) -> WsConnectionState {
         match ws_message {
             // handle message sent from client via WebSocket
@@ -240,14 +249,6 @@ impl ClientConnectionHandler {
                             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
                             // is already executing
                             if !self.token.is_cancelled() {
-                                debug!("Client established IC WebSocket connection");
-                                // let the client know that the IC WS connection is setup correctly
-                                send_ws_message_to_client(
-                                    &mut ws_write,
-                                    Message::Text("1".to_string()),
-                                )
-                                .await;
-
                                 let gateway_session = GatewaySession::new(
                                     self.id,
                                     client_key,
@@ -260,6 +261,8 @@ impl ClientConnectionHandler {
                                     WsConnectionState::Established(gateway_session.clone()),
                                 )
                                 .await;
+                                debug!("Created new client session");
+
                                 // it is important to measure the instant of the establishment of the WS connection after sending the gateway session via the channel
                                 // so that we can take into account eventual delays due to the channel being over capacity
                                 // however, we still have to measure the latency of adding the client to the gateway state and eventually starting a new poller

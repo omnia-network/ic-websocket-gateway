@@ -14,9 +14,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, CanisterIncomingMessage, ClientPublicKey},
+    canister_methods::{self, ClientPublicKey},
     canister_poller::{
-        CanisterPoller, CertifiedMessage, PollerChannelsPollerEnds, PollerToClientChannelData,
+        CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
     },
     client_connection_handler::WsConnectionState,
@@ -39,7 +39,7 @@ pub struct GatewaySession {
     client_id: u64,
     client_key: ClientPublicKey,
     canister_id: Principal,
-    message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+    message_for_client_tx: Sender<IcWsConnectionUpdate>,
     nonce: u64,
 }
 
@@ -51,7 +51,7 @@ pub struct GatewaySession {
     pub client_id: u64,
     pub client_key: ClientPublicKey,
     pub canister_id: Principal,
-    pub message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+    pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
     pub nonce: u64,
 }
 
@@ -60,7 +60,7 @@ impl GatewaySession {
         client_id: u64,
         client_key: Vec<u8>,
         canister_id: Principal,
-        message_for_client_tx: Sender<Result<CertifiedMessage, String>>,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
         nonce: u64,
     ) -> Self {
         Self {
@@ -403,18 +403,6 @@ impl GatewayState {
                     .metrics
                     .set_sent_client_channel_to_poller();
 
-                // notify canister that it can now send messages for the client corresponding to client_key
-                let agent = Arc::clone(&agent);
-                tokio::spawn(async move {
-                    let gateway_message =
-                        CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                    if let Err(e) =
-                        canister_methods::ws_message(&agent, &canister_id, gateway_message).await
-                    {
-                        error!("Calling ws_message on canister failed: {}", e);
-                        // TODO: try again or report failure to client
-                    }
-                });
                 // !!! does not wait for the canister to receive the client key
                 connection_establishment_events
                     .metrics

@@ -58,12 +58,18 @@ impl PollerChannelsPollerEnds {
     }
 }
 
+pub enum IcWsConnectionUpdate {
+    Message(CertifiedMessage),
+    Established,
+    Error(String),
+}
+
 /// contains the information that the main sends to the poller task:
 /// - NewClientChannel: sending side of the channel use by the poller to send messages to the client
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(ClientPublicKey, Sender<Result<CertifiedMessage, String>>),
+    NewClientChannel(ClientPublicKey, Sender<IcWsConnectionUpdate>),
     ClientDisconnected(ClientPublicKey),
 }
 
@@ -115,10 +121,8 @@ impl CanisterPoller {
         );
 
         // channels used to communicate with client's WebSocket task
-        let mut client_channels: HashMap<
-            ClientPublicKey,
-            Sender<Result<CertifiedMessage, String>>,
-        > = HashMap::new();
+        let mut client_channels: HashMap<ClientPublicKey, Sender<IcWsConnectionUpdate>> =
+            HashMap::new();
 
         let mut polling_iteration = 0;
         let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
@@ -137,8 +141,27 @@ impl CanisterPoller {
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
-                            debug!("Added new channel to poller for client: {:?}", client_key);
-                            client_channels.insert(client_key, client_channel);
+                            // notify client handler that the IC WS connection establishment is completed
+                            if let Err(e) = client_channel.send(IcWsConnectionUpdate::Established).await {
+                                error!("Client's thread terminated: {}", e);
+                            }
+                            else {
+                                debug!("Added new channel to poller for client: {:?}", client_key);
+                                client_channels.insert(client_key.clone(), client_channel);
+                            }
+                            // notify canister that it can now send messages for the client corresponding to client_key
+                            let agent = Arc::clone(&self.agent);
+                            let canister_id = self.canister_id;
+                            tokio::spawn(async move {
+                                let gateway_message =
+                                    CanisterIncomingMessage::IcWebSocketEstablished(client_key);
+                                if let Err(e) =
+                                    canister_methods::ws_message(&agent, &canister_id, gateway_message).await
+                                {
+                                    error!("Calling ws_message on canister failed: {}", e);
+                                    // TODO: try again or report failure to client
+                                }
+                            });
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
                             debug!("Removed client channel from poller for client {:?}", client_key);
@@ -175,7 +198,7 @@ impl CanisterPoller {
                                     match client_channels.get(&client_key) {
                                         Some(client_channel_tx) => {
                                             debug!("Received message with key: {:?} from canister", m.key);
-                                            if let Err(e) = client_channel_tx.send(Ok(m)).await {
+                                            if let Err(e) = client_channel_tx.send(IcWsConnectionUpdate::Message(m)).await {
                                                 error!("Client's thread terminated: {}", e);
                                                 incoming_canister_message_events.metrics.set_no_message_relayed();
                                             }
@@ -297,7 +320,7 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
 async fn signal_termination_and_cleanup(
     poller_to_main_channel: &mut Sender<TerminationInfo>,
     canister_id: Principal,
-    client_channels: &HashMap<ClientPublicKey, Sender<Result<CertifiedMessage, String>>>,
+    client_channels: &HashMap<ClientPublicKey, Sender<IcWsConnectionUpdate>>,
     e: String,
 ) {
     // let the main task know that this poller will terminate due to a CDK error
@@ -310,7 +333,10 @@ async fn signal_termination_and_cleanup(
     // and thus they also have to close the WebSocket connection and terminate
     for client_channel_tx in client_channels.values() {
         if let Err(channel_err) = client_channel_tx
-            .send(Err(format!("Terminating poller task due to error: {}", e)))
+            .send(IcWsConnectionUpdate::Error(format!(
+                "Terminating poller task due to error: {}",
+                e
+            )))
             .await
         {
             error!("Client's thread terminated: {}", channel_err);
