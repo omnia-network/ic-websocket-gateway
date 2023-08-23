@@ -162,13 +162,12 @@ impl CanisterPoller {
                                 if let Err(err) = ws_message_to_canister_with_retries(agent, canister_id, gateway_message).await {
                                     error!("Failed to notify canister of client connection establishment: {:?}", err);
                                     // no need to terminate poller as the canister might have intentionally prevented this client from connecting
-                                    // as we might have already sent the 'IcWsConnectionUpdate::Establishe' message to the client we now have to tell it that the connection failed
-                                    // we cannot first notify the canister and then the client as the canister might sent a message immediately after receiving the notification
+                                    // as we have already sent the 'IcWsConnectionUpdate::Established' message to the client we now have to tell it that the connection failed
+                                    // we cannot first notify the canister and then the client hanlder as the canister might send a message immediately after receiving the notification (and the client hanlder would miss it)
                                     if let Err(e) = client_channel_cl.send(IcWsConnectionUpdate::Error(err)).await {
                                         error!("Client's thread terminated: {}", e);
                                     }
                                 }
-                                // !!! does not wait for the canister to receive the client key
                                 ic_ws_establishment_notification_events.metrics.set_sent_canister_notification();
                                 poller_to_analyzer_channel
                                     .send(Box::new(ic_ws_establishment_notification_events))
