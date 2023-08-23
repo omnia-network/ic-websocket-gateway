@@ -161,12 +161,13 @@ impl CanisterPoller {
                                     CanisterIncomingMessage::IcWebSocketEstablished(client_key_cl);
                                 if let Err(err) = ws_message_to_canister_with_retries(agent, canister_id, gateway_message).await {
                                     error!("Failed to notify canister of client connection establishment: {:?}", err);
-                                    // no need to terminate poller as the canister might have intentionally prevented this client from connecting
                                     // as we have already sent the 'IcWsConnectionUpdate::Established' message to the client we now have to tell it that the connection failed
                                     // we cannot first notify the canister and then the client hanlder as the canister might send a message immediately after receiving the notification (and the client hanlder would miss it)
                                     if let Err(e) = client_channel_cl.send(IcWsConnectionUpdate::Error(err)).await {
                                         error!("Client's thread terminated: {}", e);
                                     }
+                                    // we do not terminate the poller as it would require notifying the poller state manager and all the client handlers for this poller (which we cannot do in this task as it would move 'poller_channels' and 'client_channels')
+                                    // the poller will be terminated in the next polling iteration (if it's still down)
                                 }
                                 ic_ws_establishment_notification_events.metrics.set_sent_canister_notification();
                                 poller_to_analyzer_channel
@@ -174,7 +175,10 @@ impl CanisterPoller {
                                     .await
                                     .expect("analyzer's side of the channel dropped");
                             });
-                            // TODO: should be done only after establishment succeeds
+                            // add the client channel even if it's not yet guaranteed that the IC WS establishment is successful
+                            // if it later turns out that it's not, there can be three reasons:
+                            // - client failed: when the WS connection closes, the client state manager will send 'PollerToClientChannelData::ClientDisconnected' to the poller and the channel will be removed
+                            // - canister failed: the poller will detect the failure in the next polling iteration and the poller will terminate
                             debug!("Added new channel to poller for client: {:?}", client_key);
                             client_channels.insert(client_key.clone(), client_channel);
                         },
