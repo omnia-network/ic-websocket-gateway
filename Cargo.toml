@@ -9,4 +9,4 @@ default-members = [
 ]
 
 [workspace.dependencies]
-ic-agent = "0.24.1"
+ic-agent = { git = "https://github.com/omnia-network/agent-rs", rev = "e3a94eda1ddf1e9adac56d935433a54877a39164" }

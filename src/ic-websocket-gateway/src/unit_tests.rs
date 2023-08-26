@@ -2,7 +2,7 @@
 // !!! tests have to be run using "cargo test -- --test-threads=1" !!!
 // running them cuncurrently results in an error as multiple instances of GatewayServer use the same address
 mod tests {
-    use candid::Principal;
+    use ic_agent::export::Principal;
     use ic_identity::{get_identity_from_key_pair, load_key_pair};
     use serde::Serialize;
     use serde_cbor::Serializer;

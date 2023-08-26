@@ -1,5 +1,4 @@
-use candid::CandidType;
-use candid::Decode;
+use candid::{CandidType, Decode};
 use ed25519_compact::{PublicKey, Signature};
 use ic_agent::AgentError;
 use ic_agent::{
@@ -271,7 +270,7 @@ pub async fn ws_get_messages(
 
     let res = agent
         .query(canister_id, "ws_get_messages")
-        .with_arg(&args)
+        .with_arg(args)
         .call()
         .await
         .map_err(|e| e.to_string())?;

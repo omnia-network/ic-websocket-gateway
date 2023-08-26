@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::{self, CanisterWsOpenResultValue},
+    canister_methods::{check_canister_init, CanisterWsOpenResultValue},
     canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
@@ -243,8 +243,7 @@ impl ClientConnectionHandler {
                         .metrics
                         .set_received_first_message();
                     // check if client followed the IC WebSocket connection establishment protocol
-                    match canister_methods::check_canister_init(&self.agent, message.clone()).await
-                    {
+                    match check_canister_init(&self.agent, message.clone()).await {
                         Ok(CanisterWsOpenResultValue {
                             client_key,
                             canister_id,
