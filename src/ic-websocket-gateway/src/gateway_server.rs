@@ -418,6 +418,7 @@ impl GatewayState {
                 error!("Connection handler terminated with an error: {:?}", e);
                 // TODO: make sure that cleaning up is not needed
             },
+            WsConnectionState::Setup => (),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();

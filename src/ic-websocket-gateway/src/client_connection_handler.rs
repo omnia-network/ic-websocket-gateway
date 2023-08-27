@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::{check_canister_init, CanisterWsOpenResultValue},
+    canister_methods::CanisterWsOpenResult,
     canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
@@ -9,10 +9,14 @@ use crate::{
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
 };
-
+use candid::{Decode, Principal};
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
-use ic_agent::Agent;
-use serde_cbor::to_vec;
+use ic_agent::{
+    agent::{Replied, RequestStatusResponse, CONTENT_TYPE},
+    Agent,
+};
+use serde::{Deserialize, Serialize};
+use serde_cbor::{from_slice, to_vec};
 use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -27,6 +31,24 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+/// message sent by the client using the custom @dfinity/agent
+#[derive(Serialize, Deserialize)]
+struct ClientMessage {
+    serialized_envelope: Vec<u8>,
+    canister_id: Principal,
+}
+
+/// A HTTP response from a replica
+#[derive(Serialize, Deserialize)]
+pub struct HttpResponsePayload {
+    /// The HTTP status code.
+    pub status: u16,
+    /// The MIME type of `content`.
+    pub content_type: Option<String>,
+    /// The body of the error.
+    pub content: Vec<u8>,
+}
+
 /// possible states of the WebSocket connection:
 /// - established
 /// - closed
@@ -36,6 +58,7 @@ pub enum WsConnectionState {
     /// WebSocket connection between client and WS Gateway established
     // does not imply that the IC WebSocket connection has also been established
     Established(GatewaySession),
+    Setup,
     /// WebSocket connection between client and WS Gateway closed
     Closed(u64),
     /// error while handling WebSocket connection
@@ -107,7 +130,7 @@ impl ClientConnectionHandler {
 
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
-                let mut is_first_message = true;
+                let mut ic_websocket_established = false;
                 loop {
                     select! {
                         // bias select! to check token cancellation first
@@ -180,13 +203,14 @@ impl ClientConnectionHandler {
                         ws_message = ws_read.try_next() => {
                             match self.handle_incoming_ws_message(
                                 ws_message,
-                                is_first_message,
+                                ic_websocket_established,
                                 request_connection_setup_events,
                                 &mut ws_write,
                                 message_for_client_tx.clone(),
                             ).await {
                                 // if the connection is successfully established, the following messages are not the first
-                                WsConnectionState::Established(_) => is_first_message = false,
+                                WsConnectionState::Established(_) => ic_websocket_established = true,
+                                WsConnectionState::Setup => ic_websocket_established = false,
                                 // if the client calls a method which is not implemented, we should only report it but we can keep the connection alive
                                 WsConnectionState::Error(IcWsError::NotImplemented(e)) => warn!(e),
                                 // if the client closes the WS connection, we terminate the connection handler task, without reporting any error
@@ -218,7 +242,7 @@ impl ClientConnectionHandler {
     async fn handle_incoming_ws_message<S: AsyncRead + AsyncWrite + Unpin>(
         &self,
         ws_message: Result<Option<Message>, Error>,
-        is_first_message: bool,
+        ic_websocket_established: bool,
         mut request_connection_setup_events: Option<RequestConnectionSetupEvents>,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
@@ -235,88 +259,153 @@ impl ClientConnectionHandler {
                     .await;
                     return WsConnectionState::Closed(self.id);
                 }
-                // check if it is the first message being sent by the client via WebSocket
-                if is_first_message {
-                    request_connection_setup_events
-                        .as_mut()
-                        .expect("must have connection setup events for first message")
-                        .metrics
-                        .set_received_first_message();
-                    // check if client followed the IC WebSocket connection establishment protocol
-                    match check_canister_init(&self.agent, message.clone()).await {
-                        Ok(CanisterWsOpenResultValue {
-                            client_key,
+                // check if the IC WebSocket connection hasn't been established yet
+                if !ic_websocket_established {
+                    if let Message::Binary(bytes) = message {
+                        if let Ok(ClientMessage {
+                            serialized_envelope,
                             canister_id,
-                            // nonce is used by a new poller to know which message nonce to start polling from (if needed)
-                            // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
-                            nonce,
-                        }) => {
-                            request_connection_setup_events
-                                .as_mut()
-                                .expect("must have connection setup events for first message")
-                                .metrics
-                                .set_validated_first_message();
-                            // prevent adding a new client to the gateway state while shutting down
-                            // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
-                            // is already executing
-                            if !self.token.is_cancelled() {
-                                let gateway_session = GatewaySession::new(
-                                    self.id,
-                                    client_key,
-                                    canister_id,
-                                    message_for_client_tx,
-                                    nonce,
-                                );
-                                // instantiate a new GatewaySession and send it to the main thread
-                                self.send_connection_state_to_clients_manager(
-                                    WsConnectionState::Established(gateway_session.clone()),
-                                )
-                                .await;
-                                debug!("Created new client session");
+                        }) = from_slice(&bytes)
+                        {
+                            // relay the envelope to the IC
+                            match self
+                                .agent
+                                .relay_envelope_to_canister(serialized_envelope, canister_id)
+                                .await
+                            {
+                                Ok((http_response, request_status_response)) => {
+                                    // send http response to client
+                                    let http_response = HttpResponsePayload {
+                                        status: http_response.status.into(),
+                                        content_type: http_response
+                                            .headers
+                                            .get(CONTENT_TYPE)
+                                            .and_then(|value| value.to_str().ok())
+                                            .map(|x| x.to_string()),
+                                        content: http_response.body,
+                                    };
 
-                                // it is important to measure the instant of the establishment of the WS connection after sending the gateway session via the channel
-                                // so that we can take into account eventual delays due to the channel being over capacity
-                                // however, we still have to measure the latency of adding the client to the gateway state and eventually starting a new poller
-                                // but this will be done in the gateway server component
-                                request_connection_setup_events
-                                    .as_mut()
-                                    .expect("must have connection setup events for first message")
-                                    .metrics
-                                    .set_ws_connection_setup();
-                                self.events_channel_tx
-                                    .send(Box::new(request_connection_setup_events.expect(
-                                        "must have connection setup events for first message",
-                                    )))
-                                    .await
-                                    .expect("analyzer's side of the channel dropped");
-                                WsConnectionState::Established(gateway_session)
-                            } else {
-                                // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
-                                WsConnectionState::Error(IcWsError::WebSocket(String::from("Preventing client connection handler task to establish new WS connection")))
+                                    let mut serialized_response = Vec::new();
+                                    let mut serializer =
+                                        serde_cbor::Serializer::new(&mut serialized_response);
+                                    serializer.self_describe().unwrap();
+                                    http_response.serialize(&mut serializer).unwrap();
+
+                                    send_ws_message_to_client(
+                                        &mut ws_write,
+                                        Message::Binary(serialized_response),
+                                    )
+                                    .await;
+
+                                    if let Some(RequestStatusResponse::Replied {
+                                        reply: Replied::CallReplied(result),
+                                    }) = request_status_response
+                                    {
+                                        // parse the body in order to get the nonce which will be needed in case it has to start a new poller
+                                        let parsed_body = Decode!(&result, CanisterWsOpenResult);
+                                        let nonce = 0; // TODO: change CanisterWsOpenResult so that it returns 'nonce'
+                                        println!("{:?}", parsed_body);
+                                        let gateway_session = GatewaySession::new(
+                                            self.id,
+                                            vec![], // TODO: determine if this is still needed or we can use client_id instead
+                                            canister_id,
+                                            message_for_client_tx,
+                                            nonce,
+                                        );
+                                        WsConnectionState::Established(gateway_session)
+                                    } else {
+                                        WsConnectionState::Setup
+                                    }
+                                },
+                                Err(e) => WsConnectionState::Error(IcWsError::Initialization(
+                                    e.to_string(),
+                                )),
                             }
-                        },
-                        Err(e) => {
-                            // tell the client that the setup of the IC WS connection failed
-                            send_ws_message_to_client(
-                                &mut ws_write,
-                                Message::Text("0".to_string()),
-                            )
-                            .await;
-                            // if this branch is executed, the Ok branch is never been executed, hence the WS Gateway state
-                            // does not contain any session for this client and therefore there is no cleanup needed
-                            self.send_connection_state_to_clients_manager(
-                                WsConnectionState::Error(IcWsError::Initialization(format!(
-                                    "Client did not follow IC WebSocket establishment protocol: {:?}",
-                                    e
-                                ))),
-                            )
-                            .await;
-                            WsConnectionState::Error(IcWsError::Initialization(format!(
-                                "Client did not follow IC WebSocket establishment protocol: {:?}",
-                                e
+                        } else {
+                            WsConnectionState::Error(IcWsError::Initialization(String::from(
+                                "message from client is not of type ClientMessage",
                             )))
-                        },
+                        }
+                    } else {
+                        WsConnectionState::Error(IcWsError::Initialization(String::from(
+                            "message from client is not binary encoded",
+                        )))
                     }
+                //     // check if client followed the IC WebSocket connection establishment protocol
+                //     match check_canister_init(&self.agent, message.clone()).await {
+                //         Ok(CanisterWsOpenResultValue {
+                //             client_key,
+                //             canister_id,
+                //             // nonce is used by a new poller to know which message nonce to start polling from (if needed)
+                //             // the nonce is obtained from the canister every time a client connects and the ws_open is called by the WS Gateway
+                //             nonce,
+                //         }) => {
+                //             request_connection_setup_events
+                //                 .as_mut()
+                //                 .expect("must have connection setup events for first message")
+                //                 .metrics
+                //                 .set_validated_first_message();
+                //             // prevent adding a new client to the gateway state while shutting down
+                //             // neeeded because wait_for_cancellation might be ready while handle_incoming_ws_message
+                //             // is already executing
+                //             if !self.token.is_cancelled() {
+                //                 let gateway_session = GatewaySession::new(
+                //                     self.id,
+                //                     client_key,
+                //                     canister_id,
+                //                     message_for_client_tx,
+                //                     nonce,
+                //                 );
+                //                 // instantiate a new GatewaySession and send it to the main thread
+                //                 self.send_connection_state_to_clients_manager(
+                //                     WsConnectionState::Established(gateway_session.clone()),
+                //                 )
+                //                 .await;
+                //                 debug!("Created new client session");
+
+                //                 // it is important to measure the instant of the establishment of the WS connection after sending the gateway session via the channel
+                //                 // so that we can take into account eventual delays due to the channel being over capacity
+                //                 // however, we still have to measure the latency of adding the client to the gateway state and eventually starting a new poller
+                //                 // but this will be done in the gateway server component
+                //                 request_connection_setup_events
+                //                     .as_mut()
+                //                     .expect("must have connection setup events for first message")
+                //                     .metrics
+                //                     .set_ws_connection_setup();
+                //                 self.events_channel_tx
+                //                     .send(Box::new(request_connection_setup_events.expect(
+                //                         "must have connection setup events for first message",
+                //                     )))
+                //                     .await
+                //                     .expect("analyzer's side of the channel dropped");
+                //                 WsConnectionState::Established(gateway_session)
+                //             } else {
+                //                 // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
+                //                 WsConnectionState::Error(IcWsError::WebSocket(String::from("Preventing client connection handler task to establish new WS connection")))
+                //             }
+                //         },
+                //         Err(e) => {
+                //             // tell the client that the setup of the IC WS connection failed
+                //             send_ws_message_to_client(
+                //                 &mut ws_write,
+                //                 Message::Text("0".to_string()),
+                //             )
+                //             .await;
+                //             // if this branch is executed, the Ok branch is never been executed, hence the WS Gateway state
+                //             // does not contain any session for this client and therefore there is no cleanup needed
+                //             self.send_connection_state_to_clients_manager(
+                //                 WsConnectionState::Error(IcWsError::Initialization(format!(
+                //                     "Client did not follow IC WebSocket establishment protocol: {:?}",
+                //                     e
+                //                 ))),
+                //             )
+                //             .await;
+                //             WsConnectionState::Error(IcWsError::Initialization(format!(
+                //                 "Client did not follow IC WebSocket establishment protocol: {:?}",
+                //                 e
+                //             )))
+                //         },
+                //     }
                 } else {
                     // TODO: handle incoming message from client
                     WsConnectionState::Error(IcWsError::NotImplemented(format!(
