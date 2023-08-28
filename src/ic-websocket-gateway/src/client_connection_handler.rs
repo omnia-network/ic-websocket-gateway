@@ -12,7 +12,7 @@ use crate::{
 use candid::{Decode, Principal};
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{
-    agent::{Replied, RequestStatusResponse, CONTENT_TYPE},
+    agent::{Envelope, Replied, RequestStatusResponse, CONTENT_TYPE},
     Agent,
 };
 use serde::{Deserialize, Serialize};
@@ -33,8 +33,8 @@ use tracing::{debug, error, info, warn};
 
 /// message sent by the client using the custom @dfinity/agent
 #[derive(Serialize, Deserialize)]
-struct ClientMessage {
-    serialized_envelope: Vec<u8>,
+struct ClientMessage<'a> {
+    envelope: Envelope<'a>,
     canister_id: Principal,
 }
 
@@ -263,10 +263,16 @@ impl ClientConnectionHandler {
                 if !ic_websocket_established {
                     if let Message::Binary(bytes) = message {
                         if let Ok(ClientMessage {
-                            serialized_envelope,
+                            envelope,
                             canister_id,
                         }) = from_slice(&bytes)
                         {
+                            let mut serialized_envelope = Vec::new();
+                            let mut serializer =
+                                serde_cbor::Serializer::new(&mut serialized_envelope);
+                            serializer.self_describe().unwrap();
+                            envelope.serialize(&mut serializer).unwrap();
+
                             // relay the envelope to the IC
                             match self
                                 .agent
@@ -297,23 +303,50 @@ impl ClientConnectionHandler {
                                     )
                                     .await;
 
-                                    if let Some(RequestStatusResponse::Replied {
-                                        reply: Replied::CallReplied(result),
-                                    }) = request_status_response
-                                    {
-                                        // parse the body in order to get the nonce which will be needed in case it has to start a new poller
-                                        let parsed_body = Decode!(&result, CanisterWsOpenResult);
-                                        let nonce = 0; // TODO: change CanisterWsOpenResult so that it returns 'nonce'
-                                        println!("{:?}", parsed_body);
-                                        let gateway_session = GatewaySession::new(
-                                            self.id,
-                                            vec![], // TODO: determine if this is still needed or we can use client_id instead
-                                            canister_id,
-                                            message_for_client_tx,
-                                            nonce,
-                                        );
-                                        WsConnectionState::Established(gateway_session)
+                                    if let Some(request_status_response) = request_status_response {
+                                        match request_status_response {
+                                            RequestStatusResponse::Replied {
+                                                reply: Replied::CallReplied(result),
+                                            } => {
+                                                // parse the body in order to get the nonce which will be needed in case it has to start a new poller
+                                                let parsed_body =
+                                                    Decode!(&result, CanisterWsOpenResult);
+                                                let nonce = 0; // TODO: change CanisterWsOpenResult so that it returns 'nonce'
+                                                println!("{:?}", parsed_body);
+
+                                                if !self.token.is_cancelled() {
+                                                    let gateway_session = GatewaySession::new(
+                                                        self.id,
+                                                        vec![], // TODO: determine if this is still needed or we can use client_id instead
+                                                        canister_id,
+                                                        message_for_client_tx,
+                                                        nonce,
+                                                    );
+                                                    WsConnectionState::Established(gateway_session)
+                                                } else {
+                                                    // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
+                                                    WsConnectionState::Error(IcWsError::WebSocket(String::from("Preventing client connection handler task to establish new WS connection")))
+                                                }
+                                            },
+                                            RequestStatusResponse::Rejected(e) => {
+                                                WsConnectionState::Error(IcWsError::Initialization(
+                                                    e.to_string(),
+                                                ))
+                                            },
+                                            RequestStatusResponse::Done => {
+                                                WsConnectionState::Error(IcWsError::Initialization(
+                                                    String::from(
+                                                        "IC WS connection already established",
+                                                    ),
+                                                ))
+                                            },
+                                            // if request_status_response is of the variant Unknown, Received, or Processing,
+                                            // the IC WS connection is still in the setup phase
+                                            _ => WsConnectionState::Setup,
+                                        }
                                     } else {
+                                        // if request_status_response is None, the payload's content was of the Call variant and therefore
+                                        // the IC WS connection is still in the setup phase
                                         WsConnectionState::Setup
                                     }
                                 },
