@@ -30,21 +30,27 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-/// message sent by the client using the custom @dfinity/agent (via WS)
+/// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
 struct ClientRequest<'a> {
+    /// Envelope of the signed request to the IC
     envelope: Envelope<'a>,
+    /// Used by the client to identify which response corresponds to this request
+    #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
 }
 
-/// message sent back to the client via WS
+/// Message sent back to the client via WS
 #[derive(Serialize, Deserialize)]
 struct ClientResponse {
+    /// HTTP response produced by the IC
     payload: HttpResponsePayload,
+    /// Used by the client to identify which request this response corresponds to
+    #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
 }
 
-/// A HTTP response from a replica
+/// HTTP response produced by the IC
 #[derive(Serialize, Deserialize)]
 pub struct HttpResponsePayload {
     /// The HTTP status code.
