@@ -34,10 +34,17 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-/// message sent by the client using the custom @dfinity/agent
+/// message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
 struct ClientMessage<'a> {
     envelope: Envelope<'a>,
+    nonce: u64,
+}
+
+/// message sent back to the client via WS
+#[derive(Serialize, Deserialize)]
+struct ClientResponse {
+    payload: HttpResponsePayload,
     nonce: u64,
 }
 
@@ -305,8 +312,8 @@ impl ClientConnectionHandler {
                                 .await
                             {
                                 Ok((http_response, request_status_response)) => {
-                                    // send http response to client
-                                    let http_response = HttpResponsePayload {
+                                    // send response to client
+                                    let payload = HttpResponsePayload {
                                         status: http_response.status.into(),
                                         content_type: http_response
                                             .headers
@@ -315,12 +322,16 @@ impl ClientConnectionHandler {
                                             .map(|x| x.to_string()),
                                         content: http_response.body,
                                     };
+                                    let client_response = ClientResponse {
+                                        payload: payload,
+                                        nonce,
+                                    };
 
                                     let mut serialized_response = Vec::new();
                                     let mut serializer =
                                         serde_cbor::Serializer::new(&mut serialized_response);
                                     serializer.self_describe().unwrap();
-                                    http_response.serialize(&mut serializer).unwrap();
+                                    client_response.serialize(&mut serializer).unwrap();
 
                                     send_ws_message_to_client(
                                         &mut ws_write,
