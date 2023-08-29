@@ -413,11 +413,6 @@ impl GatewayState {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            WsConnectionState::Error(e) => {
-                let _entered = span!(Level::INFO, "ws_connection_error").entered();
-                error!("Connection handler terminated with an error: {:?}", e);
-                // TODO: make sure that cleaning up is not needed
-            },
             WsConnectionState::Setup => (),
         }
 

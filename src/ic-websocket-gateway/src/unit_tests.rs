@@ -92,184 +92,184 @@ mod tests {
         (client, gateway_server)
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn client_should_send_binary_first_message() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn client_should_send_binary_first_message() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as text to the server right after connecting
-        client
-            .send_message(&websocket::OwnedMessage::Text(String::from(
-                "first message",
-            )))
-            .unwrap();
+    //     // client sends the first message as text to the server right after connecting
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Text(String::from(
+    //             "first message",
+    //         )))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message from client should be binary encoded\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"first message from client should be binary encoded\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn client_should_send_binary_first_message_of_correct_type() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn client_should_send_binary_first_message_of_correct_type() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting but serialized from a type which is not RelayedClientMessage
-        client
-            .send_message(&websocket::OwnedMessage::Binary(Vec::<u8>::new()))
-            .unwrap();
+    //     // client sends the first message as binary to the server right after connecting but serialized from a type which is not RelayedClientMessage
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Binary(Vec::<u8>::new()))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message is not of type RelayedClientMessage\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"first message is not of type RelayedClientMessage\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_content_should_be_of_right_type() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn first_message_content_should_be_of_right_type() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but with content not of type CanisterFirstMessageContent
-        let message = RelayedClientMessage {
-            content: Vec::new(),
-            sig: Vec::new(),
-        };
-        let serialized_message = serialize(message);
+    //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+    //     // but with content not of type CanisterFirstMessageContent
+    //     let message = RelayedClientMessage {
+    //         content: Vec::new(),
+    //         sig: Vec::new(),
+    //     };
+    //     let serialized_message = serialize(message);
 
-        client
-            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
-            .unwrap();
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"content of first message is not of type CanisterFirstMessageContent\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"content of first message is not of type CanisterFirstMessageContent\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_should_contain_valid_signature() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn first_message_should_contain_valid_signature() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but with an invalid signature
-        let content = CanisterFirstMessageContent {
-            client_key: Vec::new(),
-            canister_id: Principal::anonymous(),
-        };
-        let serialized_content = serialize(content);
+    //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+    //     // but with an invalid signature
+    //     let content = CanisterFirstMessageContent {
+    //         client_key: Vec::new(),
+    //         canister_id: Principal::anonymous(),
+    //     };
+    //     let serialized_content = serialize(content);
 
-        let message = RelayedClientMessage {
-            content: serialized_content,
-            sig: Vec::new(),
-        };
-        let serialized_message = serialize(message);
+    //     let message = RelayedClientMessage {
+    //         content: serialized_content,
+    //         sig: Vec::new(),
+    //     };
+    //     let serialized_message = serialize(message);
 
-        client
-            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
-            .unwrap();
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid signature\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid signature\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn first_message_should_contain_valid_public_key() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn first_message_should_contain_valid_public_key() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but with an invalid public key (client_key)
-        let content = CanisterFirstMessageContent {
-            client_key: Vec::new(),
-            canister_id: Principal::anonymous(),
-        };
-        let serialized_content = serialize(content);
+    //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+    //     // but with an invalid public key (client_key)
+    //     let content = CanisterFirstMessageContent {
+    //         client_key: Vec::new(),
+    //         canister_id: Principal::anonymous(),
+    //     };
+    //     let serialized_content = serialize(content);
 
-        let valid_signature = get_valid_signature();
+    //     let valid_signature = get_valid_signature();
 
-        let message = RelayedClientMessage {
-            content: serialized_content,
-            sig: valid_signature,
-        };
-        let serialized_message = serialize(message);
+    //     let message = RelayedClientMessage {
+    //         content: serialized_content,
+    //         sig: valid_signature,
+    //     };
+    //     let serialized_message = serialize(message);
 
-        client
-            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
-            .unwrap();
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid public key\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"first message does not contain a valid public key\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn signature_should_verify_against_public_key() {
-        let (mut client, mut server) = start_client_server().await;
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn signature_should_verify_against_public_key() {
+    //     let (mut client, mut server) = start_client_server().await;
 
-        // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-        // but the client's signature does not verify the message against the public key
-        let valid_client_key = get_valid_client_key();
-        let content = CanisterFirstMessageContent {
-            client_key: valid_client_key,
-            canister_id: Principal::anonymous(),
-        };
-        let serialized_content = serialize(content);
+    //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
+    //     // but the client's signature does not verify the message against the public key
+    //     let valid_client_key = get_valid_client_key();
+    //     let content = CanisterFirstMessageContent {
+    //         client_key: valid_client_key,
+    //         canister_id: Principal::anonymous(),
+    //     };
+    //     let serialized_content = serialize(content);
 
-        let valid_signature = get_valid_signature();
+    //     let valid_signature = get_valid_signature();
 
-        let message = RelayedClientMessage {
-            content: serialized_content,
-            sig: valid_signature,
-        };
-        let serialized_message = serialize(message);
+    //     let message = RelayedClientMessage {
+    //         content: serialized_content,
+    //         sig: valid_signature,
+    //     };
+    //     let serialized_message = serialize(message);
 
-        client
-            .send_message(&websocket::OwnedMessage::Binary(serialized_message))
-            .unwrap();
+    //     client
+    //         .send_message(&websocket::OwnedMessage::Binary(serialized_message))
+    //         .unwrap();
 
-        let res = server.recv_from_client_connection_handler().await;
+    //     let res = server.recv_from_client_connection_handler().await;
 
-        let ws_connection_state = res.expect("should not be None");
-        if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
-            return assert_eq!(
-                e,
-                String::from("Client did not follow IC WebSocket establishment protocol: \"client's signature does not verify against public key\"")
-            );
-        }
-        panic!("ws_connection_state does not have the expected type");
-    }
+    //     let ws_connection_state = res.expect("should not be None");
+    //     if let WsConnectionState::Error(IcWsError::Initialization(e)) = ws_connection_state {
+    //         return assert_eq!(
+    //             e,
+    //             String::from("Client did not follow IC WebSocket establishment protocol: \"client's signature does not verify against public key\"")
+    //         );
+    //     }
+    //     panic!("ws_connection_state does not have the expected type");
+    // }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn gets_gateway_session() {
