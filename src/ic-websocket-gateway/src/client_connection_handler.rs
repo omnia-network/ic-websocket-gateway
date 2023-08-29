@@ -32,7 +32,7 @@ use tracing::{debug, error, info, warn};
 
 /// message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
-struct ClientMessage<'a> {
+struct ClientRequest<'a> {
     envelope: Envelope<'a>,
     nonce: u64,
 }
@@ -57,14 +57,14 @@ pub struct HttpResponsePayload {
 
 /// possible states of the WebSocket connection:
 /// - established
-/// - setup
+/// - establishment
 /// - closed
 #[derive(Debug, Clone)]
 pub enum WsConnectionState {
     /// WebSocket connection between client and WS Gateway established
     // does not imply that the IC WebSocket connection has also been established
     Established(GatewaySession),
-    Setup,
+    Establishment,
     /// WebSocket connection between client and WS Gateway closed
     Closed(u64),
 }
@@ -135,7 +135,7 @@ impl ClientConnectionHandler {
 
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
-                let mut ic_websocket_established = false;
+                let mut ic_websocket_setup = false;
                 loop {
                     select! {
                         // bias select! to check token cancellation first
@@ -219,20 +219,21 @@ impl ClientConnectionHandler {
                                         break;
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
-                                    if !ic_websocket_established {
-                                        match self.handle_ic_ws_establishment(message, &mut ws_write, message_for_client_tx.clone()).await {
-                                            //if the connection is successfully established, the following messages are not the first
+                                    if !ic_websocket_setup {
+                                        match self.handle_ic_ws_setup(message, &mut ws_write, message_for_client_tx.clone()).await {
+                                            //if the connection is successfully established, set ic_websocket_setup to true and send connection establishments events to analyzer
                                             Ok(WsConnectionState::Established(_)) => {
-                                                ic_websocket_established = true;
+                                                ic_websocket_setup = true;
                                                 request_connection_setup_events
                                                     .metrics
-                                                    .set_ws_connection_established();
+                                                    .set_ws_connection_setup();
                                                 self.events_channel_tx
                                                     .send(Box::new(request_connection_setup_events.clone()))
                                                     .await
                                                     .expect("analyzer's side of the channel dropped");
                                             }
-                                            Ok(WsConnectionState::Setup) => ic_websocket_established = false,
+                                            // if the connection hasn't been established yet, continue
+                                            Ok(WsConnectionState::Establishment) => continue,
                                             // if the client closes the WS connection, we terminate the connection handler task, without reporting any error
                                             Ok(WsConnectionState::Closed(_)) => break,
                                             // in case of other errors, we report them and terminate the connection handler task
@@ -277,14 +278,14 @@ impl ClientConnectionHandler {
         }
     }
 
-    async fn handle_ic_ws_establishment<S: AsyncRead + AsyncWrite + Unpin>(
+    async fn handle_ic_ws_setup<S: AsyncRead + AsyncWrite + Unpin>(
         &self,
         ws_message: Message,
         mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) -> Result<WsConnectionState, IcWsError> {
         if let Message::Binary(bytes) = ws_message {
-            if let Ok(ClientMessage { envelope, nonce }) = from_slice(&bytes) {
+            if let Ok(ClientRequest { envelope, nonce }) = from_slice(&bytes) {
                 // if the canister_id field is None, it means that the handler hasn't received any envelopes yet from the client
                 if self.canister_id.read().await.is_none() {
                     // the first envelope should have content of variant Call, which contains canister_id
@@ -382,16 +383,16 @@ impl ClientConnectionHandler {
                         // if request_status_response is of the variant Unknown, Received, or Processing,
                         // the IC WS connection is still in the setup phase
                         // TODO: Unknown should be treated separately as it could mean both that the IC hasn't processed yet a request with the given RequestId (but it will) or that such a request does not exist
-                        _ => Ok(WsConnectionState::Setup),
+                        _ => Ok(WsConnectionState::Establishment),
                     }
                 } else {
                     // if request_status_response is None, the payload's content was of the Call variant and therefore
                     // the IC WS connection is still in the setup phase
-                    Ok(WsConnectionState::Setup)
+                    Ok(WsConnectionState::Establishment)
                 }
             } else {
                 Err(IcWsError::Initialization(String::from(
-                    "message from client is not of type ClientMessage",
+                    "message from client is not of type ClientRequest",
                 )))
             }
         } else {

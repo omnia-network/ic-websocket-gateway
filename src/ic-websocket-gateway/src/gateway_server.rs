@@ -413,7 +413,7 @@ impl GatewayState {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            WsConnectionState::Setup => (),
+            WsConnectionState::Establishment => (),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();
