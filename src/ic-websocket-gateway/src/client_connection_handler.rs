@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::CanisterWsOpenResult,
+    canister_methods::{CanisterWsOpenResult, CanisterWsOpenResultValue},
     canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
@@ -34,14 +34,14 @@ use tracing::{debug, error, info, warn};
 #[derive(Serialize, Deserialize)]
 struct ClientRequest<'a> {
     envelope: Envelope<'a>,
-    nonce: u64,
+    nonce: Vec<u8>,
 }
 
 /// message sent back to the client via WS
 #[derive(Serialize, Deserialize)]
 struct ClientResponse {
     payload: HttpResponsePayload,
-    nonce: u64,
+    nonce: Vec<u8>,
 }
 
 /// A HTTP response from a replica
@@ -347,14 +347,23 @@ impl ClientConnectionHandler {
                             reply: Replied::CallReplied(result),
                         } => {
                             // parse the body in order to get the nonce which will be needed in case it has to start a new poller
-                            let parsed_body = Decode!(&result, CanisterWsOpenResult);
-                            let nonce = 0; // TODO: change CanisterWsOpenResult so that it returns 'nonce'
-                            println!("{:?}", parsed_body);
-
+                            let CanisterWsOpenResultValue {
+                                nonce,
+                                client_principal,
+                            } = Decode!(&result, CanisterWsOpenResult)
+                                .map_err(|e| {
+                                    IcWsError::Initialization(format!(
+                                    "client must send ws_open before other methods. Error: {:?}",
+                                    e
+                                ))
+                                })?
+                                .map_err(|e| {
+                                    IcWsError::Initialization(format!("ws_open failed: {:?}", e))
+                                })?;
                             if !self.token.is_cancelled() {
                                 let gateway_session = GatewaySession::new(
                                     self.id,
-                                    vec![], // TODO: determine if this is still needed or we can use client_id instead
+                                    client_principal.as_slice().to_vec(), // TODO: determine if this is still needed or we can use client_id instead
                                     self.canister_id
                                         .read()
                                         .await
