@@ -7,18 +7,14 @@ pub type RequestConnectionSetupEvents = EventsImpl<RequestConnectionSetupEventsM
 #[derive(Debug, Clone)]
 pub struct RequestConnectionSetupEventsMetrics {
     accepted_ws_connection: TimeableEvent,
-    received_first_message: TimeableEvent,
-    validated_first_message: TimeableEvent,
-    ws_connection_setup: TimeableEvent,
+    ws_connection_established: TimeableEvent,
 }
 
 impl RequestConnectionSetupEventsMetrics {
     pub fn default() -> Self {
         Self {
             accepted_ws_connection: TimeableEvent::default(),
-            received_first_message: TimeableEvent::default(),
-            validated_first_message: TimeableEvent::default(),
-            ws_connection_setup: TimeableEvent::default(),
+            ws_connection_established: TimeableEvent::default(),
         }
     }
 
@@ -26,42 +22,26 @@ impl RequestConnectionSetupEventsMetrics {
         self.accepted_ws_connection.set_now();
     }
 
-    pub fn set_received_first_message(&mut self) {
-        self.received_first_message.set_now();
-    }
-
-    pub fn set_validated_first_message(&mut self) {
-        self.validated_first_message.set_now();
-    }
-
-    pub fn set_ws_connection_setup(&mut self) {
-        self.ws_connection_setup.set_now();
+    pub fn set_ws_connection_established(&mut self) {
+        self.ws_connection_established.set_now();
     }
 }
 
 impl EventsMetrics for RequestConnectionSetupEventsMetrics {
     fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.ws_connection_setup
+        &self.ws_connection_established
     }
 
     fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
-            let time_to_first_message = self
-                .received_first_message
+            let time_to_establish = self
+                .ws_connection_established
                 .duration_since(&self.accepted_ws_connection)?;
-            let time_to_validation = self
-                .validated_first_message
-                .duration_since(&self.received_first_message)?;
-            let time_to_setup = self
-                .ws_connection_setup
-                .duration_since(&self.validated_first_message)?;
             let latency = self.compute_latency()?;
 
             return Some(Box::new(RequestConnectionSetupDeltas::new(
                 reference,
-                time_to_first_message,
-                time_to_validation,
-                time_to_setup,
+                time_to_establish,
                 latency,
             )));
         }
@@ -69,7 +49,7 @@ impl EventsMetrics for RequestConnectionSetupEventsMetrics {
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.ws_connection_setup
+        self.ws_connection_established
             .duration_since(&self.accepted_ws_connection)
     }
 }
@@ -77,25 +57,15 @@ impl EventsMetrics for RequestConnectionSetupEventsMetrics {
 #[derive(Debug)]
 struct RequestConnectionSetupDeltas {
     reference: EventsReference,
-    time_to_first_message: Duration,
-    time_to_validation: Duration,
-    time_to_setup: Duration,
+    time_to_establish: Duration,
     latency: Duration,
 }
 
 impl RequestConnectionSetupDeltas {
-    pub fn new(
-        reference: EventsReference,
-        time_to_first_message: Duration,
-        time_to_validation: Duration,
-        time_to_setup: Duration,
-        latency: Duration,
-    ) -> Self {
+    pub fn new(reference: EventsReference, time_to_establish: Duration, latency: Duration) -> Self {
         Self {
             reference,
-            time_to_first_message,
-            time_to_validation,
-            time_to_setup,
+            time_to_establish,
             latency,
         }
     }
@@ -104,8 +74,8 @@ impl RequestConnectionSetupDeltas {
 impl Deltas for RequestConnectionSetupDeltas {
     fn display(&self) {
         debug!(
-            "\nreference: {:?}\ntime_to_first_message: {:?}\ntime_to_validation: {:?}\ntime_to_setup: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_first_message, self.time_to_validation, self.time_to_setup, self.latency
+            "\nreference: {:?}\ntime_to_establish: {:?}\nlatency: {:?}",
+            self.reference, self.time_to_establish, self.latency
         );
     }
 

@@ -33,7 +33,7 @@ pub trait Events: Debug {
     fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventsImpl<T: EventsMetrics + Send> {
     pub reference: Option<EventsReference>,
     collection_type: EventsCollectionType,
