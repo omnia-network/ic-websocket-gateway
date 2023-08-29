@@ -21,7 +21,10 @@ use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        RwLock,
+    },
 };
 use tokio_tungstenite::{
     accept_async,
@@ -35,7 +38,7 @@ use tracing::{debug, error, info, warn};
 #[derive(Serialize, Deserialize)]
 struct ClientMessage<'a> {
     envelope: Envelope<'a>,
-    canister_id: Principal,
+    nonce: u64,
 }
 
 /// A HTTP response from a replica
@@ -82,6 +85,8 @@ pub struct ClientConnectionHandler {
     client_connection_handler_tx: Sender<WsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     token: CancellationToken,
+    // the client tells which canister it wants to connect to in the first envelope it sends via WS
+    canister_id: Arc<RwLock<Option<Principal>>>,
 }
 
 impl ClientConnectionHandler {
@@ -98,6 +103,7 @@ impl ClientConnectionHandler {
             client_connection_handler_tx,
             events_channel_tx,
             token,
+            canister_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -262,11 +268,23 @@ impl ClientConnectionHandler {
                 // check if the IC WebSocket connection hasn't been established yet
                 if !ic_websocket_established {
                     if let Message::Binary(bytes) = message {
-                        if let Ok(ClientMessage {
-                            envelope,
-                            canister_id,
-                        }) = from_slice(&bytes)
-                        {
+                        if let Ok(ClientMessage { envelope, nonce }) = from_slice(&bytes) {
+                            // if the canister_id field is None, it means that the handler hasn't received any envelopes yet from the client
+                            if self.canister_id.read().await.is_none() {
+                                // the first envelope should have content of variant Call, which contains canister_id
+                                if let Some(canister_id) = envelope.content.canister_id() {
+                                    // replace the field with the canister_id received in the first envelope
+                                    // this should not be updated anymore
+                                    self.canister_id.write().await.replace(canister_id);
+                                } else {
+                                    // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
+                                    return WsConnectionState::Error(IcWsError::Initialization(String::from(
+                                        "first message from client should contain canister id in envelope's content",
+                                    )));
+                                }
+                            }
+
+                            // from here on, self.canister_id must not be None
                             let mut serialized_envelope = Vec::new();
                             let mut serializer =
                                 serde_cbor::Serializer::new(&mut serialized_envelope);
@@ -276,7 +294,14 @@ impl ClientConnectionHandler {
                             // relay the envelope to the IC
                             match self
                                 .agent
-                                .relay_envelope_to_canister(serialized_envelope, canister_id)
+                                .relay_envelope_to_canister(
+                                    serialized_envelope,
+                                    self.canister_id
+                                        .read()
+                                        .await
+                                        .expect("must be some by now")
+                                        .clone(),
+                                )
                                 .await
                             {
                                 Ok((http_response, request_status_response)) => {
@@ -318,7 +343,11 @@ impl ClientConnectionHandler {
                                                     let gateway_session = GatewaySession::new(
                                                         self.id,
                                                         vec![], // TODO: determine if this is still needed or we can use client_id instead
-                                                        canister_id,
+                                                        self.canister_id
+                                                            .read()
+                                                            .await
+                                                            .expect("must be some by now")
+                                                            .clone(),
                                                         message_for_client_tx,
                                                         nonce,
                                                     );

@@ -1099,7 +1099,7 @@ dependencies = [
 [[package]]
 name = "ic-agent"
 version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=87746efe3dae38549e59af140845d35e6403cb5f#87746efe3dae38549e59af140845d35e6403cb5f"
+source = "git+https://github.com/omnia-network/agent-rs?rev=392daee4122a2b3d6a8307e7956aeeac9cf5b453#392daee4122a2b3d6a8307e7956aeeac9cf5b453"
 dependencies = [
  "backoff",
  "candid 0.9.3",
@@ -1174,7 +1174,7 @@ dependencies = [
 [[package]]
 name = "ic-certification"
 version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=87746efe3dae38549e59af140845d35e6403cb5f#87746efe3dae38549e59af140845d35e6403cb5f"
+source = "git+https://github.com/omnia-network/agent-rs?rev=392daee4122a2b3d6a8307e7956aeeac9cf5b453#392daee4122a2b3d6a8307e7956aeeac9cf5b453"
 dependencies = [
  "hex",
  "serde",
