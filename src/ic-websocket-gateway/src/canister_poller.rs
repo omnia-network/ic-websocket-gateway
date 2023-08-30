@@ -24,10 +24,10 @@ use tracing::{debug, error, info, warn};
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CertifiedMessage {
+pub struct CanisterToClientMessage {
     pub key: String,
     #[serde(with = "serde_bytes")]
-    pub val: Vec<u8>,
+    pub content: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub cert: Vec<u8>,
     #[serde(with = "serde_bytes")]

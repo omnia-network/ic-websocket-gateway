@@ -12,7 +12,7 @@ mod tests {
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
-    use crate::canister_methods::CanisterFirstMessageContent;
+    use crate::canister_methods::CanisterOpenMessageContent;
     use crate::canister_methods::RelayedClientMessage;
     use crate::client_connection_handler::IcWsError;
     use crate::client_connection_handler::WsConnectionState;
@@ -27,12 +27,16 @@ mod tests {
             .expect("Error connecting to WebSocket server.")
     }
 
-    fn serialize<T: Serialize>(text: T) -> Vec<u8> {
+    fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
         let mut bytes = Vec::new();
         let mut serializer = Serializer::new(&mut bytes);
         serializer.self_describe().unwrap();
-        text.serialize(&mut serializer).unwrap();
+        m.serialize(&mut serializer).unwrap();
         bytes
+    }
+
+    fn candid_serialize<T: CandidType>(m: T) -> Vec<u8> {
+        encode_one(m).expect("Candid serialization should not fail")
     }
 
     fn get_valid_signature() -> Vec<u8> {
@@ -51,7 +55,7 @@ mod tests {
         ]
     }
 
-    fn get_valid_serialized_canister_first_message_content() -> Vec<u8> {
+    fn get_valid_serialized_canister_open_message_content() -> Vec<u8> {
         vec![
             217, 217, 247, 162, 107, 99, 97, 110, 105, 115, 116, 101, 114, 95, 105, 100, 74, 128,
             0, 0, 0, 0, 16, 0, 1, 1, 1, 106, 99, 108, 105, 101, 110, 116, 95, 107, 101, 121, 88,
@@ -62,10 +66,10 @@ mod tests {
 
     fn get_valid_serialized_relayed_client_message() -> Vec<u8> {
         let message = RelayedClientMessage {
-            content: get_valid_serialized_canister_first_message_content(),
+            content: get_valid_serialized_canister_open_message_content(),
             sig: get_valid_signature(),
         };
-        serialize(message)
+        candid_serialize(message)
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
@@ -321,7 +325,7 @@ mod tests {
             .send_message(&websocket::OwnedMessage::Binary(valid_serialized_message))
             .unwrap();
 
-        let _res = server.recv_from_client_connection_handler().await; // ignore gateway session returned after first message
+        let _res = server.recv_from_client_connection_handler().await; // ignore gateway session returned after open message
 
         // close client connection
         client.shutdown().expect("client should have been running");

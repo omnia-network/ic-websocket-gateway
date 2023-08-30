@@ -544,7 +544,14 @@ fn call_ws_close_in_background(
     // therefore this is done in a separate task
     // in order to not slow down the main task
     tokio::spawn(async move {
-        if let Err(e) = canister_methods::ws_close(&agent_cl, &canister_id_cl, client_key_cl).await
+        if let Err(e) = canister_methods::ws_close(
+            &agent_cl,
+            &canister_id_cl,
+            CanisterWsCloseArguments {
+                client_key: client_key_cl,
+            },
+        )
+        .await
         {
             error!("Calling ws_close on canister failed: {}", e);
         }

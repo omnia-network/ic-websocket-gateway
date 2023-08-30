@@ -1,7 +1,7 @@
 use ic_cdk_macros::*;
 use std::{cell::RefCell, collections::HashSet};
 
-use canister::{on_close, on_message, on_open, AppMessage, GATEWAY_PRINCIPAL};
+use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
 use ic_websocket_cdk::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
@@ -41,7 +41,7 @@ fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
     ic_websocket_cdk::ws_register(args)
 }
 
-// method called by the WS Gateway after receiving FirstMessage from the client
+// method called by the WS Gateway after receiving open message from the client
 #[update]
 fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
     ic_websocket_cdk::ws_open(args)
@@ -74,6 +74,6 @@ fn ws_wipe() {
 
 // send a message to the client, usually called by the canister itself
 #[update]
-fn ws_send(client_key: ClientPublicKey, msg: AppMessage) -> CanisterWsSendResult {
-    ic_websocket_cdk::ws_send(client_key, msg)
+fn ws_send(client_key: ClientPublicKey, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
+    ic_websocket_cdk::ws_send(client_key, msg_bytes)
 }

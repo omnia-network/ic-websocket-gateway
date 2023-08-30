@@ -6,9 +6,10 @@
     "test": "./scripts/run_load_tests.sh"
   },
   "dependencies": {
+    "@dfinity/candid": "^0.18.1",
     "bufferutil": "^4.0.7",
     "dotenv": "^16.3.1",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#835995b61c04f9b54ac691b1c9abb5a745bd35fc",
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#41e37667c36d26a535d4247e37711f4bad2184a8",
     "isomorphic-webcrypto": "^2.3.8",
     "utf-8-validate": "^5.0.10",
     "ws": "^8.13.0"
