@@ -1,4 +1,4 @@
-use candid::{CandidType, Decode};
+use candid::{decode_one, CandidType, Decode, Principal};
 use ed25519_compact::{PublicKey, Signature};
 use ic_agent::AgentError;
 use ic_agent::{

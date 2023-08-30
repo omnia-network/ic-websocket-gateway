@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, ClientPublicKey},
+    canister_methods::{self, CanisterWsCloseArguments, ClientPublicKey},
     canister_poller::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,

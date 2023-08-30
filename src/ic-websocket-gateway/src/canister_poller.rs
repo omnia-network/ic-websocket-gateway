@@ -1,6 +1,7 @@
 use crate::{
     canister_methods::{
-        self, CanisterIncomingMessage, CanisterOutputCertifiedMessages, CanisterWsMessageResult,
+        self, CanisterIncomingMessage, CanisterOutputCertifiedMessages,
+        CanisterWsGetMessagesArguments, CanisterWsMessageArguments, CanisterWsMessageResult,
         ClientPublicKey, GatewayStatusMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
@@ -59,7 +60,7 @@ impl PollerChannelsPollerEnds {
 }
 
 pub enum IcWsConnectionUpdate {
-    Message(CertifiedMessage),
+    Message(CanisterToClientMessage),
     Established,
     Error(String),
 }
@@ -204,9 +205,9 @@ impl CanisterPoller {
                             let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(None, EventsCollectionType::CanisterMessage, IncomingCanisterMessageEventsMetrics::default());
                             incoming_canister_message_events.metrics.set_start_relaying_message();
                             let client_key = encoded_message.client_key;
-                            let m = CertifiedMessage {
+                            let m = CanisterToClientMessage {
                                 key: encoded_message.key.clone(),
-                                val: encoded_message.val,
+                                content: encoded_message.content,
                                 cert: msgs.cert.clone(),
                                 tree: msgs.tree.clone(),
                             };
@@ -276,10 +277,15 @@ impl CanisterPoller {
         poller_events.metrics.set_start_polling();
         sleep(self.polling_interval_ms).await;
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        let canister_result =
-            canister_methods::ws_get_messages(&self.agent, &self.canister_id, message_nonce)
-                .await
-                .ok()?;
+        let canister_result = canister_methods::ws_get_messages(
+            &self.agent,
+            &self.canister_id,
+            CanisterWsGetMessagesArguments {
+                nonce: message_nonce,
+            },
+        )
+        .await
+        .ok()?;
         poller_events.metrics.set_received_messages();
         if canister_result.messages.len() > 0 {
             return Some((canister_result, poller_events));
@@ -315,7 +321,15 @@ async fn ws_message_to_canister_with_retries(
 ) -> Result<(), String> {
     let max_retries = 3;
     for attempt in 1..=max_retries {
-        match canister_methods::ws_message(&agent, &canister_id, message.clone()).await {
+        match canister_methods::ws_message(
+            &agent,
+            &canister_id,
+            CanisterWsMessageArguments {
+                msg: message.clone(),
+            },
+        )
+        .await
+        {
             Ok(_) => {
                 break;
             },
