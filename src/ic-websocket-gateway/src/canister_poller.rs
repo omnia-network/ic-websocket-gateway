@@ -1,8 +1,7 @@
 use crate::{
     canister_methods::{
-        self, CanisterIncomingMessage, CanisterOutputCertifiedMessages,
-        CanisterWsGetMessagesArguments, CanisterWsMessageArguments, CanisterWsMessageResult,
-        ClientPublicKey, GatewayStatusMessage,
+        self, CanisterOutputCertifiedMessages, CanisterWsGetMessagesArguments,
+        CanisterWsStatusArguments, CanisterWsStatusResult, ClientPrincipal,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -70,8 +69,8 @@ pub enum IcWsConnectionUpdate {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(u64, ClientPublicKey, Sender<IcWsConnectionUpdate>),
-    ClientDisconnected(ClientPublicKey),
+    NewClientChannel(u64, ClientPrincipal, Sender<IcWsConnectionUpdate>),
+    ClientDisconnected(ClientPrincipal),
 }
 
 /// determines the reason of the poller task termination:
@@ -122,7 +121,7 @@ impl CanisterPoller {
         );
 
         // channels used to communicate with client's WebSocket task
-        let mut client_channels: HashMap<ClientPublicKey, Sender<IcWsConnectionUpdate>> =
+        let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
             HashMap::new();
 
         let mut polling_iteration = 0;
@@ -141,11 +140,8 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(client_id, client_key, client_channel) => {
-                            let agent = Arc::clone(&self.agent);
-                            let canister_id = self.canister_id;
+                        PollerToClientChannelData::NewClientChannel(client_id, client_principal, client_channel) => {
                             let client_channel_cl = client_channel.clone();
-                            let client_key_cl = client_key.clone();
                             let poller_to_analyzer_channel = poller_channels.poller_to_analyzer.clone();
                             tokio::task::spawn(async move {
                                 let mut ic_ws_establishment_notification_events = IcWsEstablishmentNotificationEvents::new(Some(EventsReference::ClientId(client_id)), EventsCollectionType::NewClientConnection, IcWsEstablishmentNotificationEventsMetrics::default());
@@ -157,20 +153,6 @@ impl CanisterPoller {
                                 }
                                 ic_ws_establishment_notification_events.metrics.set_sent_client_notification();
 
-                                // notify canister that it can now send messages for the client corresponding to client_key
-                                let gateway_message =
-                                    CanisterIncomingMessage::IcWebSocketEstablished(client_key_cl);
-                                if let Err(err) = ws_message_to_canister_with_retries(agent, canister_id, gateway_message).await {
-                                    error!("Failed to notify canister of client connection establishment: {:?}", err);
-                                    // as we have already sent the 'IcWsConnectionUpdate::Established' message to the client we now have to tell it that the connection failed
-                                    // we cannot first notify the canister and then the client hanlder as the canister might send a message immediately after receiving the notification (and the client hanlder would miss it)
-                                    if let Err(e) = client_channel_cl.send(IcWsConnectionUpdate::Error(err)).await {
-                                        error!("Client's thread terminated: {}", e);
-                                    }
-                                    // we do not terminate the poller as it would require notifying the poller state manager and all the client handlers for this poller (which we cannot do in this task as it would move 'poller_channels' and 'client_channels')
-                                    // the poller will be terminated in the next polling iteration (if it's still down)
-                                }
-                                ic_ws_establishment_notification_events.metrics.set_sent_canister_notification();
                                 poller_to_analyzer_channel
                                     .send(Box::new(ic_ws_establishment_notification_events))
                                     .await
@@ -180,12 +162,12 @@ impl CanisterPoller {
                             // if it later turns out that it's not, there can be three reasons:
                             // - client failed: when the WS connection closes, the client state manager will send 'PollerToClientChannelData::ClientDisconnected' to the poller and the channel will be removed
                             // - canister failed: the poller will detect the failure in the next polling iteration and the poller will terminate
-                            debug!("Added new channel to poller for client: {:?}", client_key);
-                            client_channels.insert(client_key.clone(), client_channel);
+                            debug!("Added new channel to poller for client: {:?}", client_principal);
+                            client_channels.insert(client_principal.clone(), client_channel);
                         },
-                        PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            debug!("Removed client channel from poller for client {:?}", client_key);
-                            client_channels.remove(&client_key);
+                        PollerToClientChannelData::ClientDisconnected(client_principal) => {
+                            debug!("Removed client channel from poller for client {:?}", client_principal);
+                            client_channels.remove(&client_principal);
                             debug!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
@@ -197,6 +179,8 @@ impl CanisterPoller {
                     }
                 }
                 // poll canister for updates across multiple select! iterations
+                // TODO: check here if the principal is already in the client channels
+                // if not, add the messages to a queue and process them when the principal is added
                 res = &mut get_messages_operation => {
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
@@ -204,7 +188,7 @@ impl CanisterPoller {
                         for encoded_message in msgs.messages {
                             let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(None, EventsCollectionType::CanisterMessage, IncomingCanisterMessageEventsMetrics::default());
                             incoming_canister_message_events.metrics.set_start_relaying_message();
-                            let client_key = encoded_message.client_key;
+                            let client_principal = encoded_message.client_principal;
                             let m = CanisterToClientMessage {
                                 key: encoded_message.key.clone(),
                                 content: encoded_message.content,
@@ -215,7 +199,7 @@ impl CanisterPoller {
                             match get_nonce_from_message(&encoded_message.key) {
                                 Ok(last_message_nonce) => {
                                     incoming_canister_message_events.reference = Some(EventsReference::MessageNonce(last_message_nonce));
-                                    match client_channels.get(&client_key) {
+                                    match client_channels.get(&client_principal) {
                                         Some(client_channel_tx) => {
                                             debug!("Received message with key: {:?} from canister", m.key);
                                             if let Err(e) = client_channel_tx.send(IcWsConnectionUpdate::Message(m)).await {
@@ -227,7 +211,7 @@ impl CanisterPoller {
                                             }
                                             poller_channels.poller_to_analyzer.send(Box::new(incoming_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                         },
-                                        None => error!("Connection to client with key: {:?} closed before message could be delivered", client_key)
+                                        None => error!("Connection to client with key: {:?} closed before message could be delivered", client_principal)
                                     }
                                     message_nonce = last_message_nonce + 1;
                                 },
@@ -293,15 +277,13 @@ impl CanisterPoller {
         None
     }
 
-    async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsMessageResult {
-        let message = CanisterIncomingMessage::IcWebSocketGatewayStatus(GatewayStatusMessage {
-            status_index,
-        });
+    async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsStatusResult {
+        let message = CanisterWsStatusArguments { status_index };
 
         // this logic is performed here, instead of in the branch corresponding to the current future, in order to not slow down the select! loop while waiting for the retries
         // (as once a future is selected, the corresponding branch "blocks" all the futures until the next iteration of select!)
         if let Err(e) =
-            ws_message_to_canister_with_retries(Arc::clone(&self.agent), self.canister_id, message)
+            ws_status_to_canister_with_retries(Arc::clone(&self.agent), self.canister_id, message)
                 .await
         {
             // in case of error, we report it immediately
@@ -314,22 +296,14 @@ impl CanisterPoller {
     }
 }
 
-async fn ws_message_to_canister_with_retries(
+async fn ws_status_to_canister_with_retries(
     agent: Arc<Agent>,
     canister_id: Principal,
-    message: CanisterIncomingMessage,
+    message: CanisterWsStatusArguments,
 ) -> Result<(), String> {
     let max_retries = 3;
     for attempt in 1..=max_retries {
-        match canister_methods::ws_message(
-            &agent,
-            &canister_id,
-            CanisterWsMessageArguments {
-                msg: message.clone(),
-            },
-        )
-        .await
-        {
+        match canister_methods::ws_status(&agent, &canister_id, message.clone()).await {
             Ok(_) => {
                 break;
             },
@@ -371,7 +345,7 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
 async fn signal_termination_and_cleanup(
     poller_to_main_channel: &mut Sender<TerminationInfo>,
     canister_id: Principal,
-    client_channels: &HashMap<ClientPublicKey, Sender<IcWsConnectionUpdate>>,
+    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
     e: String,
 ) {
     // let the main task know that this poller will terminate due to a CDK error

@@ -110,7 +110,6 @@ pub type IcWsEstablishmentNotificationEvents =
 pub struct IcWsEstablishmentNotificationEventsMetrics {
     received_client_channel: TimeableEvent,
     sent_client_notification: TimeableEvent,
-    sent_canister_notification: TimeableEvent,
 }
 
 impl IcWsEstablishmentNotificationEventsMetrics {
@@ -118,7 +117,6 @@ impl IcWsEstablishmentNotificationEventsMetrics {
         Self {
             received_client_channel: TimeableEvent::default(),
             sent_client_notification: TimeableEvent::default(),
-            sent_canister_notification: TimeableEvent::default(),
         }
     }
 
@@ -128,10 +126,6 @@ impl IcWsEstablishmentNotificationEventsMetrics {
 
     pub fn set_sent_client_notification(&mut self) {
         self.sent_client_notification.set_now();
-    }
-
-    pub fn set_sent_canister_notification(&mut self) {
-        self.sent_canister_notification.set_now();
     }
 }
 
@@ -145,15 +139,11 @@ impl EventsMetrics for IcWsEstablishmentNotificationEventsMetrics {
             let time_to_notify_client = self
                 .sent_client_notification
                 .duration_since(&self.received_client_channel)?;
-            let time_to_notify_canister = self
-                .sent_canister_notification
-                .duration_since(&self.sent_client_notification)?;
             let latency = self.compute_latency()?;
 
             return Some(Box::new(IcWsEstablishmentNotificationDeltas::new(
                 reference,
                 time_to_notify_client,
-                time_to_notify_canister,
                 latency,
             )));
         }
@@ -161,7 +151,7 @@ impl EventsMetrics for IcWsEstablishmentNotificationEventsMetrics {
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.sent_canister_notification
+        self.sent_client_notification
             .duration_since(&self.received_client_channel)
     }
 }
@@ -170,7 +160,6 @@ impl EventsMetrics for IcWsEstablishmentNotificationEventsMetrics {
 struct IcWsEstablishmentNotificationDeltas {
     reference: EventsReference,
     time_to_notify_client: Duration,
-    time_to_notify_canister: Duration,
     latency: Duration,
 }
 
@@ -178,13 +167,11 @@ impl IcWsEstablishmentNotificationDeltas {
     pub fn new(
         reference: EventsReference,
         time_to_notify_client: Duration,
-        time_to_notify_canister: Duration,
         latency: Duration,
     ) -> Self {
         Self {
             reference,
             time_to_notify_client,
-            time_to_notify_canister,
             latency,
         }
     }
@@ -193,8 +180,8 @@ impl IcWsEstablishmentNotificationDeltas {
 impl Deltas for IcWsEstablishmentNotificationDeltas {
     fn display(&self) {
         debug!(
-            "\ntime_to_notify_client: {:?}\ntime_to_notify_canister: {:?}\nlatency: {:?}",
-            self.time_to_notify_client, self.time_to_notify_canister, self.latency
+            "\ntime_to_notify_client: {:?}\nlatency: {:?}",
+            self.time_to_notify_client, self.latency
         );
     }
 

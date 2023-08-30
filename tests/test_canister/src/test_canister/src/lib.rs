@@ -5,14 +5,14 @@ use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
 use ic_websocket_cdk::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
-    CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsRegisterArguments,
-    CanisterWsRegisterResult, CanisterWsSendResult, ClientPublicKey, WsHandlers,
+    CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsSendResult, CanisterWsStatusArguments,
+    CanisterWsStatusResult, ClientPrincipal, WsHandlers,
 };
 
 mod canister;
 
 thread_local! {
-    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPublicKey>> = RefCell::new(HashSet::new());
+    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPrincipal>> = RefCell::new(HashSet::new());
 }
 
 #[init]
@@ -35,12 +35,6 @@ fn post_upgrade(gateway_principal: Option<String>) {
     init(gateway_principal);
 }
 
-// method called by the client SDK when instantiating a new IcWebSocket
-#[update]
-fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
-    ic_websocket_cdk::ws_register(args)
-}
-
 // method called by the WS Gateway after receiving open message from the client
 #[update]
 fn ws_open(args: CanisterWsOpenArguments) -> CanisterWsOpenResult {
@@ -59,6 +53,12 @@ fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
     ic_websocket_cdk::ws_message(args)
 }
 
+// method called by the WS Gateway to update its status in the canister
+#[update]
+fn ws_status(args: CanisterWsStatusArguments) -> CanisterWsStatusResult {
+    ic_websocket_cdk::ws_status(args)
+}
+
 // method called by the WS Gateway to get messages for all the clients it serves
 #[query]
 fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessagesResult {
@@ -74,6 +74,6 @@ fn ws_wipe() {
 
 // send a message to the client, usually called by the canister itself
 #[update]
-fn ws_send(client_key: ClientPublicKey, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
+fn ws_send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
     ic_websocket_cdk::ws_send(client_key, msg_bytes)
 }

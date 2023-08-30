@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::CanisterWsOpenResult,
+    canister_methods::{CanisterWsOpenResult, CanisterWsOpenResultValue},
     canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
@@ -30,21 +30,27 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-/// message sent by the client using the custom @dfinity/agent (via WS)
+/// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
 struct ClientRequest<'a> {
+    /// Envelope of the signed request to the IC
     envelope: Envelope<'a>,
-    nonce: u64,
+    /// Used by the client to identify which response corresponds to this request
+    #[serde(with = "serde_bytes")]
+    nonce: Vec<u8>,
 }
 
-/// message sent back to the client via WS
+/// Message sent back to the client via WS
 #[derive(Serialize, Deserialize)]
 struct ClientResponse {
+    /// HTTP response produced by the IC
     payload: HttpResponsePayload,
-    nonce: u64,
+    /// Used by the client to identify which request this response corresponds to
+    #[serde(with = "serde_bytes")]
+    nonce: Vec<u8>,
 }
 
-/// A HTTP response from a replica
+/// HTTP response produced by the IC
 #[derive(Serialize, Deserialize)]
 pub struct HttpResponsePayload {
     /// The HTTP status code.
@@ -328,10 +334,7 @@ impl ClientConnectionHandler {
                         .map(|x| x.to_string()),
                     content: http_response.body,
                 };
-                let client_response = ClientResponse {
-                    payload: payload,
-                    nonce,
-                };
+                let client_response = ClientResponse { payload, nonce };
 
                 let mut serialized_response = Vec::new();
                 let mut serializer = serde_cbor::Serializer::new(&mut serialized_response);
@@ -347,14 +350,23 @@ impl ClientConnectionHandler {
                             reply: Replied::CallReplied(result),
                         } => {
                             // parse the body in order to get the nonce which will be needed in case it has to start a new poller
-                            let parsed_body = Decode!(&result, CanisterWsOpenResult);
-                            let nonce = 0; // TODO: change CanisterWsOpenResult so that it returns 'nonce'
-                            println!("{:?}", parsed_body);
-
+                            let CanisterWsOpenResultValue {
+                                nonce,
+                                client_principal,
+                            } = Decode!(&result, CanisterWsOpenResult)
+                                .map_err(|e| {
+                                    IcWsError::Initialization(format!(
+                                    "client must send ws_open before other methods. Error: {:?}",
+                                    e
+                                ))
+                                })?
+                                .map_err(|e| {
+                                    IcWsError::Initialization(format!("ws_open failed: {:?}", e))
+                                })?;
                             if !self.token.is_cancelled() {
                                 let gateway_session = GatewaySession::new(
                                     self.id,
-                                    vec![], // TODO: determine if this is still needed or we can use client_id instead
+                                    client_principal, // TODO: determine if this is still needed or we can use client_id instead
                                     self.canister_id
                                         .read()
                                         .await

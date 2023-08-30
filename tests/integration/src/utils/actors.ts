@@ -10,27 +10,3 @@ const commonAgentOptions: HttpAgentOptions = {
 
 // needed in the certificates validation
 export const commonAgent = new HttpAgent(commonAgentOptions);
-
-export const createActor = (canisterId: string, options: { agentOptions?: HttpAgentOptions; actorOptions?: ActorConfig } = {}) => {
-  const agent = new HttpAgent({
-    ...commonAgentOptions,
-    ...options.agentOptions,
-  });
-
-  // Fetch root key for certificate validation during development
-  if (process.env.DFX_NETWORK !== "ic") {
-    agent.fetchRootKey().catch((err) => {
-      console.warn(
-        "Unable to fetch root key. Check to ensure that your local replica is running"
-      );
-      console.error(err);
-    });
-  }
-
-  // Creates an actor with using the candid interface and the HttpAgent
-  return Actor.createActor<_SERVICE>(idlFactory, {
-    agent,
-    canisterId,
-    ...options.actorOptions,
-  });
-};

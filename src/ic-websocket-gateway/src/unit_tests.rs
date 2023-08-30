@@ -13,8 +13,6 @@ mod tests {
     use websocket::sync::Client;
     use websocket::ClientBuilder;
 
-    use crate::canister_methods::CanisterOpenMessageContent;
-    use crate::canister_methods::RelayedClientMessage;
     use crate::client_connection_handler::IcWsError;
     use crate::client_connection_handler::WsConnectionState;
     use crate::create_data_dir;
@@ -49,7 +47,7 @@ mod tests {
         ]
     }
 
-    fn get_valid_client_key() -> Vec<u8> {
+    fn get_valid_client_principal() -> Vec<u8> {
         vec![
             229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43, 50,
             45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
@@ -63,14 +61,6 @@ mod tests {
             32, 229, 173, 124, 88, 70, 98, 66, 88, 106, 214, 233, 97, 108, 15, 187, 54, 121, 43,
             50, 45, 131, 52, 17, 59, 72, 46, 186, 105, 141, 71, 119, 203,
         ]
-    }
-
-    fn get_valid_serialized_relayed_client_message() -> Vec<u8> {
-        let message = RelayedClientMessage {
-            content: get_valid_serialized_canister_open_message_content(),
-            sig: get_valid_signature(),
-        };
-        candid_serialize(message)
     }
 
     async fn start_client_server() -> (Client<TcpStream>, GatewayServer) {
@@ -176,7 +166,7 @@ mod tests {
     //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
     //     // but with an invalid signature
     //     let content = CanisterFirstMessageContent {
-    //         client_key: Vec::new(),
+    //         client_principal: Vec::new(),
     //         canister_id: Principal::anonymous(),
     //     };
     //     let serialized_content = serialize(content);
@@ -208,9 +198,9 @@ mod tests {
     //     let (mut client, mut server) = start_client_server().await;
 
     //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
-    //     // but with an invalid public key (client_key)
+    //     // but with an invalid public key (client_principal)
     //     let content = CanisterFirstMessageContent {
-    //         client_key: Vec::new(),
+    //         client_principal: Vec::new(),
     //         canister_id: Principal::anonymous(),
     //     };
     //     let serialized_content = serialize(content);
@@ -245,9 +235,9 @@ mod tests {
 
     //     // client sends the first message as binary to the server right after connecting, serialized from the type RelayedClientMessage
     //     // but the client's signature does not verify the message against the public key
-    //     let valid_client_key = get_valid_client_key();
+    //     let valid_client_principal = get_valid_client_principal();
     //     let content = CanisterFirstMessageContent {
-    //         client_key: valid_client_key,
+    //         client_principal: valid_client_principal,
     //         canister_id: Principal::anonymous(),
     //     };
     //     let serialized_content = serialize(content);
@@ -290,7 +280,7 @@ mod tests {
         let res = server.recv_from_client_connection_handler().await;
 
         let expected_client_id = 0 as u64;
-        let expected_client_key = get_valid_client_key();
+        let expected_client_principal = get_valid_client_principal();
         let expected_canister_id =
             Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").expect("not a valid principal");
         let expected_nonce = 0 as u64;
@@ -298,7 +288,7 @@ mod tests {
         let ws_connection_state = res.expect("should not be None");
         if let WsConnectionState::Established(GatewaySession {
             client_id,
-            client_key,
+            client_principal,
             canister_id,
             nonce,
             ..  // ignore message_for_client_tx as it does does not implement Eq
@@ -306,7 +296,7 @@ mod tests {
         {
             return assert_eq!(
                 client_id == expected_client_id
-                    && client_key == expected_client_key
+                    && client_principal == expected_client_principal
                     && canister_id == expected_canister_id
                     && nonce == expected_nonce,
                 true

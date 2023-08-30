@@ -1,30 +1,16 @@
-type ClientPublicKey = blob;
+type ClientPrincipal = principal;
 
-type DirectClientMessage = record {
-  client_key : ClientPublicKey;
-  message : blob;
-};
-
-type RelayedClientMessage = record {
+type WebsocketMessage = record {
+  client_principal : ClientPrincipal;
+  sequence_num : nat64;
+  timestamp : nat64;
   content : blob;
-  sig : blob;
-};
-
-type GatewayStatusMessage = record {
-  status_index : nat64;
-};
-
-type CanisterIncomingMessage = variant {
-  DirectlyFromClient : DirectClientMessage;
-  RelayedByGateway : RelayedClientMessage;
-  IcWebSocketEstablished : ClientPublicKey;
-  IcWebSocketGatewayStatus : GatewayStatusMessage;
 };
 
 type CanisterOutputMessage = record {
-  client_key : ClientPublicKey;
-  content : blob;
+  client_principal : ClientPrincipal;
   key : text;
+  content : blob;
 };
 
 type CanisterOutputCertifiedMessages = record {
@@ -33,23 +19,12 @@ type CanisterOutputCertifiedMessages = record {
   tree : blob;
 };
 
-type CanisterWsRegisterArguments = record {
-  client_key : ClientPublicKey;
-};
-
-type CanisterWsRegisterResult = variant {
-  Ok : null;
-  Err : text;
-};
-
 type CanisterWsOpenArguments = record {
-  content : blob;
-  sig : blob;
+  is_anonymous : bool;
 };
 
 type CanisterWsOpenResultValue = record {
-  client_key : ClientPublicKey;
-  canister_id : principal;
+  client_principal : ClientPrincipal;
   nonce : nat64;
 };
 
@@ -59,7 +34,7 @@ type CanisterWsOpenResult = variant {
 };
 
 type CanisterWsCloseArguments = record {
-  client_key : ClientPublicKey;
+  client_principal : ClientPrincipal;
 };
 
 type CanisterWsCloseResult = variant {
@@ -68,10 +43,19 @@ type CanisterWsCloseResult = variant {
 };
 
 type CanisterWsMessageArguments = record {
-  msg : CanisterIncomingMessage;
+  msg : WebsocketMessage;
 };
 
 type CanisterWsMessageResult = variant {
+  Ok : null;
+  Err : text;
+};
+
+type CanisterWsStatusArguments = record {
+  status_index : nat64;
+};
+
+type CanisterWsStatusResult = variant {
   Ok : null;
   Err : text;
 };
