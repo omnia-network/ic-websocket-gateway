@@ -10,7 +10,7 @@ use structopt::StructOpt;
 use tokio::sync::mpsc;
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter, prelude::*, EnvFilter};
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod canister_methods;
 mod canister_poller;
@@ -79,10 +79,13 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with_writer(non_blocking_file)
         .with_thread_ids(true)
         .with_filter(env_filter_file);
+
+    let env_filter_stdout =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
         .pretty()
-        .with_filter(filter::LevelFilter::INFO);
+        .with_filter(env_filter_stdout);
 
     tracing_subscriber::registry()
         .with(file_tracing_layer)
