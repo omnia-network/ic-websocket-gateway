@@ -58,6 +58,7 @@ pub struct HttpResponsePayload {
     /// The MIME type of `content`.
     pub content_type: Option<String>,
     /// The body of the error.
+    #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
 }
 
@@ -190,11 +191,11 @@ impl ClientConnectionHandler {
                                     confirmed_connection_setup_events.metrics.set_received_confirmation_from_poller();
                                     debug!("Client established IC WebSocket connection");
                                     // let the client know that the IC WS connection is setup correctly
-                                    send_ws_message_to_client(
-                                        &mut ws_write,
-                                        Message::Text("1".to_string()),
-                                    )
-                                    .await;
+                                    // send_ws_message_to_client(
+                                    //     &mut ws_write,
+                                    //     Message::Text("1".to_string()),
+                                    // )
+                                    // .await;
                                     confirmed_connection_setup_events.metrics.set_confirmation_sent_to_client();
                                     self.events_channel_tx
                                         .send(Box::new(confirmed_connection_setup_events))
@@ -250,10 +251,51 @@ impl ClientConnectionHandler {
                                         }
                                     } else {
                                         // TODO: handle incoming message from client
-                                        warn!("{:?}", IcWsError::NotImplemented(format!(
-                                            "Client sent a message via WebSocket connection: {:?}",
-                                            message
-                                        )));
+                                        // info!("{:?}", IcWsError::NotImplemented(format!(
+                                        //     "Client sent a message via WebSocket connection: {:?}",
+                                        //     message
+                                        // )));
+                                        // relay the envelope to the IC
+                                        if let Message::Binary(bytes) = message {
+                                            if let Ok(ClientRequest { envelope, nonce }) = from_slice(&bytes) {
+                                                let mut serialized_envelope = Vec::new();
+                                                let mut serializer = serde_cbor::Serializer::new(&mut serialized_envelope);
+                                                serializer.self_describe().unwrap();
+                                                envelope.serialize(&mut serializer).unwrap();
+                                            let (http_response, _request_status_response) = self
+                                                .agent
+                                                .relay_envelope_to_canister(
+                                                    serialized_envelope,
+                                                    self.canister_id
+                                                        .read()
+                                                        .await
+                                                        .expect("must be some by now")
+                                                        .clone(),
+                                                )
+                                                .await
+                                                .map_err(|e| IcWsError::Initialization(e.to_string())).unwrap();
+                                            // send response to client
+                                            let payload = HttpResponsePayload {
+                                                status: http_response.status.into(),
+                                                content_type: http_response
+                                                    .headers
+                                                    .get(CONTENT_TYPE)
+                                                    .and_then(|value| value.to_str().ok())
+                                                    .map(|x| x.to_string()),
+                                                content: http_response.body,
+                                            };
+                                            let client_response = ClientResponse { payload, nonce };
+                                            // info!("Received response for client");
+
+                                            let mut serialized_response = Vec::new();
+                                            let mut serializer = serde_cbor::Serializer::new(&mut serialized_response);
+                                            serializer.self_describe().unwrap();
+                                            client_response.serialize(&mut serializer).unwrap();
+
+                                            send_ws_message_to_client(&mut ws_write, Message::Binary(serialized_response))
+                                                .await;
+                                            }
+                                        }
                                     }
                                 },
                                 // in this case, client's session should have been cleaned up on the WS Gateway state already
@@ -296,10 +338,11 @@ impl ClientConnectionHandler {
                 if self.canister_id.read().await.is_none() {
                     // the first envelope should have content of variant Call, which contains canister_id
                     let canister_id = envelope.content.canister_id().ok_or(
-                                    // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
-                                    IcWsError::Initialization(String::from(
-                                        "first message from client should contain canister id in envelope's content",
-                                    )))?;
+                        // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
+                        IcWsError::Initialization(String::from(
+                            "first message from client should contain canister id in envelope's content",
+                        ))
+                    )?;
                     // replace the field with the canister_id received in the first envelope
                     // this should not be updated anymore
                     self.canister_id.write().await.replace(canister_id);

@@ -670,6 +670,7 @@ dependencies = [
  "candid",
  "ic-cdk",
  "ic-cdk-macros",
+ "ic-cdk-timers",
  "ic-websocket-cdk",
  "serde",
 ]

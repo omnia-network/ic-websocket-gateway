@@ -1,10 +1,10 @@
 use candid::{decode_one, encode_one, CandidType};
 use ic_cdk::{api::time, print};
-use serde::{Deserialize, Serialize};
-
 use ic_websocket_cdk::{
     ws_send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use crate::CLIENTS_CONNECTED;
 
@@ -37,11 +37,13 @@ pub fn on_open(args: OnOpenCallbackArgs) {
         ));
     });
 
-    let msg = AppMessage {
-        text: String::from("ping"),
-        timestamp: time(),
-    };
-    send_app_message(args.client_principal, msg);
+    ic_cdk_timers::set_timer(Duration::from_secs(1), move || {
+        let msg = AppMessage {
+            text: String::from("ping"),
+            timestamp: time(),
+        };
+        send_app_message(args.client_principal, msg);
+    });
 }
 
 pub fn on_message(args: OnMessageCallbackArgs) {
