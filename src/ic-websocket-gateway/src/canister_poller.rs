@@ -122,6 +122,9 @@ impl CanisterPoller {
         let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
             HashMap::new();
 
+        let mut clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
+            HashMap::new();
+
         let mut polling_iteration = 0;
         let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
@@ -145,6 +148,8 @@ impl CanisterPoller {
                         PollerToClientChannelData::ClientDisconnected(client_principal) => {
                             debug!("Removed client channel from poller for client {:?}", client_principal);
                             client_channels.remove(&client_principal);
+                            debug!("Removed message queue from poller for client {:?}", client_principal);
+                            clients_message_queues.remove(&client_principal);
                             debug!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
                             if client_channels.is_empty() {
@@ -156,9 +161,10 @@ impl CanisterPoller {
                     }
                 }
                 // poll canister for updates across multiple select! iterations
-                // TODO: check here if the principal is already in the client channels
-                // if not, add the messages to a queue and process them when the principal is added
                 res = &mut get_messages_operation => {
+                    // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
+                    clients_message_queues = process_queues(clients_message_queues, &client_channels).await;
+
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
@@ -188,7 +194,16 @@ impl CanisterPoller {
                                             }
                                             poller_channels.poller_to_analyzer.send(Box::new(incoming_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                         },
-                                        None => error!("Connection to client with key: {:?} closed before message could be delivered", client_principal)
+                                        None => {
+                                            // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
+                                            //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+                                            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
+                                            if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
+                                                message_queue.push(m);
+                                            } else {
+                                                clients_message_queues.insert(client_principal, vec![m]);
+                                            }
+                                        }
                                     }
                                     message_nonce = last_message_nonce + 1;
                                 },
@@ -299,6 +314,39 @@ async fn ws_status_to_canister_with_retries(
         }
     }
     Ok(())
+}
+
+async fn process_queues(
+    clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+) -> HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> {
+    // TODO: make sure that messages are delivered to each client in the order defined by their sequence numbers
+
+    let mut to_be_stored = HashMap::new();
+
+    for (client_principal, message_queue) in clients_message_queues {
+        match client_channels.get(&client_principal) {
+            Some(client_channel_tx) => {
+                // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
+                // thus the respective queue does not need to be stored
+                for m in message_queue {
+                    warn!("Processing message with key: {:?} from queue", m.key);
+                    if let Err(e) = client_channel_tx
+                        .send(IcWsConnectionUpdate::Message(m))
+                        .await
+                    {
+                        error!("Client's thread terminated: {}", e);
+                    }
+                }
+            },
+            None => {
+                // if the client channel has not been received yet, keep the messages in the queue
+                to_be_stored.insert(client_principal, message_queue);
+            },
+        };
+    }
+
+    to_be_stored
 }
 
 fn sample_uniform(lower_bound: i32, upper_bound: i32) -> i32 {
