@@ -305,7 +305,7 @@ impl GatewayState {
         agent: Arc<Agent>,
     ) {
         match connection_state {
-            IcWsConnectionState::Opened(gateway_session) => {
+            IcWsConnectionState::Established(gateway_session) => {
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(gateway_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -413,6 +413,7 @@ impl GatewayState {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
+            _ => error!("should not receive variants other than 'Established' and 'Closed'"),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();
