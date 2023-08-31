@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type RequestConnectionSetupEvents = EventsImpl<RequestConnectionSetupEventsMetrics>;
 
@@ -73,9 +73,11 @@ impl RequestConnectionSetupDeltas {
 
 impl Deltas for RequestConnectionSetupDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_setup: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_setup, self.latency
+            self.reference,
+            self.time_to_setup,
+            self.latency
         );
     }
 
@@ -163,9 +165,11 @@ impl ConfirmedConnectionSetupDeltas {
 
 impl Deltas for ConfirmedConnectionSetupDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_send_confirmation: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_send_confirmation, self.latency
+            self.reference,
+            self.time_to_send_confirmation,
+            self.latency
         );
     }
 
@@ -253,9 +257,11 @@ impl OutgoingCanisterMessageDeltas {
 
 impl Deltas for OutgoingCanisterMessageDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_send: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_send, self.latency
+            self.reference,
+            self.time_to_send,
+            self.latency
         );
     }
 

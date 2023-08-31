@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type PollerEvents = EventsImpl<PollerEventsMetrics>;
 
@@ -88,9 +88,11 @@ impl PollerDeltas {
 
 impl Deltas for PollerDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\nlatency: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.latency
+            self.time_to_receive,
+            self.time_to_start_relaying,
+            self.latency
         );
     }
 
@@ -179,9 +181,10 @@ impl IcWsEstablishmentNotificationDeltas {
 
 impl Deltas for IcWsEstablishmentNotificationDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\ntime_to_notify_client: {:?}\nlatency: {:?}",
-            self.time_to_notify_client, self.latency
+            self.time_to_notify_client,
+            self.latency
         );
     }
 
@@ -269,9 +272,11 @@ impl IncomingCanisterMessageDeltas {
 
 impl Deltas for IncomingCanisterMessageDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_relay, self.latency
+            self.reference,
+            self.time_to_relay,
+            self.latency
         );
     }
 

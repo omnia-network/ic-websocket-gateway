@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type ListenerEvents = EventsImpl<ListenerEventsMetrics>;
 
@@ -98,9 +98,12 @@ impl ListenerDeltas {
 
 impl Deltas for ListenerDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_accept: {:?}\ntime_to_start_handling: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_accept, self.time_to_start_handling, self.latency
+            self.reference,
+            self.time_to_accept,
+            self.time_to_start_handling,
+            self.latency
         );
     }
 

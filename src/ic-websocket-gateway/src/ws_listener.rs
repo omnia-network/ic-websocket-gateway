@@ -1,5 +1,5 @@
 use crate::{
-    client_connection_handler::{ClientConnectionHandler, WsConnectionState},
+    client_connection_handler::{ClientConnectionHandler, IcWsConnectionState},
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
@@ -32,7 +32,7 @@ pub struct WsListener {
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
-    client_connection_handler_tx: Sender<WsConnectionState>,
+    client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     // needed to know which gateway_session to delete in case of error or WS closed
     next_client_id: u64,
@@ -42,7 +42,7 @@ impl WsListener {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        client_connection_handler_tx: Sender<WsConnectionState>,
+        client_connection_handler_tx: Sender<IcWsConnectionState>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         tls_config: Option<TlsConfig>,
     ) -> Self {

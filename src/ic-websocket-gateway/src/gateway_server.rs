@@ -19,7 +19,7 @@ use crate::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
     },
-    client_connection_handler::WsConnectionState,
+    client_connection_handler::IcWsConnectionState,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::gateway_server_metrics::{
         ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
@@ -80,9 +80,9 @@ pub struct GatewayServer {
     /// gateway address:
     address: String,
     /// sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
-    client_connection_handler_tx: Sender<WsConnectionState>,
+    client_connection_handler_tx: Sender<IcWsConnectionState>,
     /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
-    client_connection_handler_rx: Receiver<WsConnectionState>,
+    client_connection_handler_rx: Receiver<IcWsConnectionState>,
     /// sender side of the channel used to send events from different components to the analyzer
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     /// state of the WS Gateway
@@ -233,7 +233,7 @@ impl GatewayServer {
         info!("Starting graceful shutdown");
         self.token.cancel();
         loop {
-            if let Ok(WsConnectionState::Closed(client_id)) =
+            if let Ok(IcWsConnectionState::Closed(client_id)) =
                 self.client_connection_handler_rx.try_recv()
             {
                 // cleanup client's session from WS Gateway state
@@ -265,7 +265,7 @@ impl GatewayServer {
         while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
     }
 
-    pub async fn recv_from_client_connection_handler(&mut self) -> Option<WsConnectionState> {
+    pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsConnectionState> {
         self.client_connection_handler_rx.recv().await
     }
 }
@@ -297,7 +297,7 @@ impl GatewayState {
 
     async fn manage_clients_connections(
         &mut self,
-        connection_state: WsConnectionState,
+        connection_state: IcWsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval: u64,
@@ -305,7 +305,7 @@ impl GatewayState {
         agent: Arc<Agent>,
     ) {
         match connection_state {
-            WsConnectionState::Established(gateway_session) => {
+            IcWsConnectionState::Opened(gateway_session) => {
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(gateway_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -409,11 +409,10 @@ impl GatewayState {
                     .await
                     .expect("analyzer's side of the channel dropped");
             },
-            WsConnectionState::Closed(client_id) => {
+            IcWsConnectionState::Closed(client_id) => {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            WsConnectionState::Establishment => (),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();
