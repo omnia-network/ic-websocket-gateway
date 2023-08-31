@@ -4,7 +4,6 @@ use crate::{
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
     metrics::client_connection_handler_metrics::{
-        ConfirmedConnectionSetupEvents, ConfirmedConnectionSetupEventsMetrics,
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
@@ -181,26 +180,6 @@ impl ClientConnectionHandler {
                                     }
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                 },
-                                IcWsConnectionUpdate::Established => {
-                                    let mut confirmed_connection_setup_events = ConfirmedConnectionSetupEvents::new(
-                                        Some(EventsReference::ClientId(self.id)),
-                                        EventsCollectionType::NewClientConnection,
-                                        ConfirmedConnectionSetupEventsMetrics::default(),
-                                    );
-                                    confirmed_connection_setup_events.metrics.set_received_confirmation_from_poller();
-                                    debug!("Client established IC WebSocket connection");
-                                    // let the client know that the IC WS connection is setup correctly
-                                    // send_ws_message_to_client(
-                                    //     &mut ws_write,
-                                    //     Message::Text("1".to_string()),
-                                    // )
-                                    // .await;
-                                    confirmed_connection_setup_events.metrics.set_confirmation_sent_to_client();
-                                    self.events_channel_tx
-                                        .send(Box::new(confirmed_connection_setup_events))
-                                        .await
-                                        .expect("analyzer's side of the channel dropped");
-                                }
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 IcWsConnectionUpdate::Error(e) => {
                                     // close the WebSocket connection
