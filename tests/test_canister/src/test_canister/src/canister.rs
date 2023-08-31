@@ -4,7 +4,6 @@ use ic_websocket_cdk::{
     ws_send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 use crate::CLIENTS_CONNECTED;
 
@@ -37,13 +36,11 @@ pub fn on_open(args: OnOpenCallbackArgs) {
         ));
     });
 
-    ic_cdk_timers::set_timer(Duration::from_secs(1), move || {
-        let msg = AppMessage {
-            text: String::from("ping"),
-            timestamp: time(),
-        };
-        send_app_message(args.client_principal, msg);
-    });
+    let msg = AppMessage {
+        text: String::from("ping"),
+        timestamp: time(),
+    };
+    send_app_message(args.client_principal, msg);
 }
 
 pub fn on_message(args: OnMessageCallbackArgs) {
@@ -61,6 +58,7 @@ fn send_app_message(client_key: ClientPrincipal, msg: AppMessage) {
     if let Err(e) = ws_send(client_key, msg.candid_serialize()) {
         print(format!("Could not send message: {}", e));
     }
+    print(format!("Message sent"));
 }
 
 pub fn on_close(args: OnCloseCallbackArgs) {

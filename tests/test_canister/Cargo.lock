@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "ic-websocket-cdk"
 version = "0.1.0"
-source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=592a8bcc7bb95c8668bfa4290358a7031e5e3494#592a8bcc7bb95c8668bfa4290358a7031e5e3494"
+source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=c4b300e2685a7568b87de46eac1330edcdbcd665#c4b300e2685a7568b87de46eac1330edcdbcd665"
 dependencies = [
  "base64",
  "candid",
@@ -670,7 +670,6 @@ dependencies = [
  "candid",
  "ic-cdk",
  "ic-cdk-macros",
- "ic-cdk-timers",
  "ic-websocket-cdk",
  "serde",
 ]
