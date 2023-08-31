@@ -4,7 +4,6 @@ use crate::{
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
     metrics::client_connection_handler_metrics::{
-        ConfirmedConnectionSetupEvents, ConfirmedConnectionSetupEventsMetrics,
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
@@ -62,16 +61,15 @@ pub struct HttpResponsePayload {
     pub content: Vec<u8>,
 }
 
-/// possible states of the WebSocket connection:
+/// possible states of the IC WebSocket connection:
 /// - established
-/// - establishment
 /// - closed
 #[derive(Debug, Clone)]
-pub enum WsConnectionState {
-    /// WebSocket connection between client and WS Gateway established
-    // does not imply that the IC WebSocket connection has also been established
+pub enum IcWsConnectionState {
+    /// IC WebSocket connection between client and canister established
     Established(GatewaySession),
-    Establishment,
+    Setup(CanisterWsOpenResultValue),
+    Init,
     /// WebSocket connection between client and WS Gateway closed
     Closed(u64),
 }
@@ -83,14 +81,12 @@ pub enum IcWsError {
     Initialization(String),
     /// WebSocket error
     WebSocket(String),
-    /// IC WS method not implemented yet
-    NotImplemented(String),
 }
 
 pub struct ClientConnectionHandler {
     id: u64,
     agent: Arc<Agent>,
-    client_connection_handler_tx: Sender<WsConnectionState>,
+    client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     token: CancellationToken,
     // the client tells which canister it wants to connect to in the first envelope it sends via WS
@@ -101,7 +97,7 @@ impl ClientConnectionHandler {
     pub fn new(
         id: u64,
         agent: Arc<Agent>,
-        client_connection_handler_tx: Sender<WsConnectionState>,
+        client_connection_handler_tx: Sender<IcWsConnectionState>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         token: CancellationToken,
     ) -> Self {
@@ -151,11 +147,13 @@ impl ClientConnectionHandler {
                         // waits for the token to be cancelled
                         _ = &mut wait_for_cancellation => {
                             self.send_connection_state_to_clients_manager(
-                                WsConnectionState::Closed(self.id)
+                                IcWsConnectionState::Closed(self.id)
                             )
                             .await;
                             // close the WebSocket connection
-                            ws_write.close().await.unwrap();
+                            if let Err(e) = ws_write.close().await {
+                                error!("Error closing the WS connection: {:?}", e);
+                            }
                             debug!("Terminating client connection handler task");
                             break;
                         },
@@ -182,26 +180,6 @@ impl ClientConnectionHandler {
                                     }
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                 },
-                                IcWsConnectionUpdate::Established => {
-                                    let mut confirmed_connection_setup_events = ConfirmedConnectionSetupEvents::new(
-                                        Some(EventsReference::ClientId(self.id)),
-                                        EventsCollectionType::NewClientConnection,
-                                        ConfirmedConnectionSetupEventsMetrics::default(),
-                                    );
-                                    confirmed_connection_setup_events.metrics.set_received_confirmation_from_poller();
-                                    debug!("Client established IC WebSocket connection");
-                                    // let the client know that the IC WS connection is setup correctly
-                                    // send_ws_message_to_client(
-                                    //     &mut ws_write,
-                                    //     Message::Text("1".to_string()),
-                                    // )
-                                    // .await;
-                                    confirmed_connection_setup_events.metrics.set_confirmation_sent_to_client();
-                                    self.events_channel_tx
-                                        .send(Box::new(confirmed_connection_setup_events))
-                                        .await
-                                        .expect("analyzer's side of the channel dropped");
-                                }
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 IcWsConnectionUpdate::Error(e) => {
                                     // close the WebSocket connection
@@ -219,7 +197,7 @@ impl ClientConnectionHandler {
                                     // check if the WebSocket connection is closed
                                     if message.is_close() {
                                         // let the main task know that it should remove the client's session from the WS Gateway state
-                                        self.send_connection_state_to_clients_manager(WsConnectionState::Closed(
+                                        self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(
                                             self.id,
                                         ))
                                         .await;
@@ -227,10 +205,26 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        match self.handle_ic_ws_setup(message, &mut ws_write, message_for_client_tx.clone()).await {
-                                            //if the connection is successfully established, set ic_websocket_setup to true and send connection establishments events to analyzer
-                                            Ok(WsConnectionState::Established(_)) => {
+                                        match self.handle_ic_ws_setup(message, &mut ws_write).await {
+                                            // if the IC WS connection is successfully established, register state in client manager
+                                            Ok(IcWsConnectionState::Setup(canister_ws_open_result_value)) => {
                                                 ic_websocket_setup = true;
+                                                let gateway_session = GatewaySession::new(
+                                                    self.id,
+                                                    canister_ws_open_result_value.client_principal, // TODO: determine if this is still needed or we can use client_id instead
+                                                    self.canister_id
+                                                        .read()
+                                                        .await
+                                                        .expect("must be some by now")
+                                                        .clone(),
+                                                    message_for_client_tx.clone(),
+                                                    canister_ws_open_result_value.nonce,
+                                                );
+                                                self.send_connection_state_to_clients_manager(IcWsConnectionState::Established(
+                                                    gateway_session,
+                                                ))
+                                                .await;
+                                                debug!("Created new client session");
                                                 request_connection_setup_events
                                                     .metrics
                                                     .set_ws_connection_setup();
@@ -240,61 +234,19 @@ impl ClientConnectionHandler {
                                                     .expect("analyzer's side of the channel dropped");
                                             }
                                             // if the connection hasn't been established yet, continue
-                                            Ok(WsConnectionState::Establishment) => continue,
-                                            // if the client closes the WS connection, we terminate the connection handler task, without reporting any error
-                                            Ok(WsConnectionState::Closed(_)) => break,
+                                            Ok(IcWsConnectionState::Init) => continue,
                                             // in case of other errors, we report them and terminate the connection handler task
                                             Err(e) => {
                                                 warn!("{:?}", e);
                                                 break;
                                             }
+                                            Ok(variant) => error!("handle_ic_ws_setup should not return variant: {:?}", variant)
                                         }
                                     } else {
-                                        // TODO: handle incoming message from client
-                                        // info!("{:?}", IcWsError::NotImplemented(format!(
-                                        //     "Client sent a message via WebSocket connection: {:?}",
-                                        //     message
-                                        // )));
-                                        // relay the envelope to the IC
-                                        if let Message::Binary(bytes) = message {
-                                            if let Ok(ClientRequest { envelope, nonce }) = from_slice(&bytes) {
-                                                let mut serialized_envelope = Vec::new();
-                                                let mut serializer = serde_cbor::Serializer::new(&mut serialized_envelope);
-                                                serializer.self_describe().unwrap();
-                                                envelope.serialize(&mut serializer).unwrap();
-                                            let (http_response, _request_status_response) = self
-                                                .agent
-                                                .relay_envelope_to_canister(
-                                                    serialized_envelope,
-                                                    self.canister_id
-                                                        .read()
-                                                        .await
-                                                        .expect("must be some by now")
-                                                        .clone(),
-                                                )
-                                                .await
-                                                .map_err(|e| IcWsError::Initialization(e.to_string())).unwrap();
-                                            // send response to client
-                                            let payload = HttpResponsePayload {
-                                                status: http_response.status.into(),
-                                                content_type: http_response
-                                                    .headers
-                                                    .get(CONTENT_TYPE)
-                                                    .and_then(|value| value.to_str().ok())
-                                                    .map(|x| x.to_string()),
-                                                content: http_response.body,
-                                            };
-                                            let client_response = ClientResponse { payload, nonce };
-                                            // info!("Received response for client");
-
-                                            let mut serialized_response = Vec::new();
-                                            let mut serializer = serde_cbor::Serializer::new(&mut serialized_response);
-                                            serializer.self_describe().unwrap();
-                                            client_response.serialize(&mut serializer).unwrap();
-
-                                            send_ws_message_to_client(&mut ws_write, Message::Binary(serialized_response))
-                                                .await;
-                                            }
+                                        // relay the envelope to the IC and the response back to the client
+                                        if let Err(e) = self.handle_ws_message(message, &mut ws_write).await {
+                                            warn!("{:?}", e);
+                                            break;
                                         }
                                     }
                                 },
@@ -303,14 +255,14 @@ impl ClientConnectionHandler {
                                 // just to be sure, send the cleanup message again
                                 // TODO: figure out if this is necessary or can be ignored
                                 Ok(None) => {
-                                    self.send_connection_state_to_clients_manager(WsConnectionState::Closed(self.id))
+                                    self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
                                         .await;
                                     warn!("Client WebSocket connection already closed");
                                 },
                                 // the client's still needs to be cleaned up so it is necessary to return the client id
                                 Err(e) => {
                                     // let the main task know that it should remove the client's session from the WS Gateway state
-                                    self.send_connection_state_to_clients_manager(WsConnectionState::Closed(self.id))
+                                    self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
                                         .await;
                                     warn!("Client WebSocket connection error: {:?}", e);
                                 }
@@ -329,135 +281,99 @@ impl ClientConnectionHandler {
     async fn handle_ic_ws_setup<S: AsyncRead + AsyncWrite + Unpin>(
         &self,
         ws_message: Message,
-        mut ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
-        message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    ) -> Result<WsConnectionState, IcWsError> {
-        if let Message::Binary(bytes) = ws_message {
-            if let Ok(ClientRequest { envelope, nonce }) = from_slice(&bytes) {
-                // if the canister_id field is None, it means that the handler hasn't received any envelopes yet from the client
-                if self.canister_id.read().await.is_none() {
-                    // the first envelope should have content of variant Call, which contains canister_id
-                    let canister_id = envelope.content.canister_id().ok_or(
-                        // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
-                        IcWsError::Initialization(String::from(
-                            "first message from client should contain canister id in envelope's content",
-                        ))
-                    )?;
-                    // replace the field with the canister_id received in the first envelope
-                    // this should not be updated anymore
-                    self.canister_id.write().await.replace(canister_id);
-                }
+        ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
+    ) -> Result<IcWsConnectionState, IcWsError> {
+        let client_request = get_client_request(ws_message)?;
+        // if the canister_id field is None, it means that the handler hasn't received any envelopes yet from the client
+        if self.canister_id.read().await.is_none() {
+            // the first envelope should have content of variant Call, which contains canister_id
+            let canister_id = client_request.envelope.content.canister_id().ok_or(
+                // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
+                IcWsError::Initialization(String::from(
+                    "first message from client should contain canister id in envelope's content",
+                )),
+            )?;
+            // replace the field with the canister_id received in the first envelope
+            // this should not be updated anymore
+            self.canister_id.write().await.replace(canister_id);
+        }
+        // from here on, self.canister_id must not be None
 
-                // from here on, self.canister_id must not be None
-                let mut serialized_envelope = Vec::new();
-                let mut serializer = serde_cbor::Serializer::new(&mut serialized_envelope);
-                serializer.self_describe().unwrap();
-                envelope.serialize(&mut serializer).unwrap();
-
-                // relay the envelope to the IC
-                let (http_response, request_status_response) = self
-                    .agent
-                    .relay_envelope_to_canister(
-                        serialized_envelope,
-                        self.canister_id
-                            .read()
-                            .await
-                            .expect("must be some by now")
-                            .clone(),
-                    )
-                    .await
-                    .map_err(|e| IcWsError::Initialization(e.to_string()))?;
-                // send response to client
-                let payload = HttpResponsePayload {
-                    status: http_response.status.into(),
-                    content_type: http_response
-                        .headers
-                        .get(CONTENT_TYPE)
-                        .and_then(|value| value.to_str().ok())
-                        .map(|x| x.to_string()),
-                    content: http_response.body,
-                };
-                let client_response = ClientResponse { payload, nonce };
-
-                let mut serialized_response = Vec::new();
-                let mut serializer = serde_cbor::Serializer::new(&mut serialized_response);
-                serializer.self_describe().unwrap();
-                client_response.serialize(&mut serializer).unwrap();
-
-                send_ws_message_to_client(&mut ws_write, Message::Binary(serialized_response))
-                    .await;
-
-                if let Some(request_status_response) = request_status_response {
-                    match request_status_response {
-                        RequestStatusResponse::Replied {
-                            reply: Replied::CallReplied(result),
-                        } => {
-                            // parse the body in order to get the nonce which will be needed in case it has to start a new poller
-                            let CanisterWsOpenResultValue {
-                                nonce,
-                                client_principal,
-                            } = Decode!(&result, CanisterWsOpenResult)
-                                .map_err(|e| {
-                                    IcWsError::Initialization(format!(
-                                    "client must send ws_open before other methods. Error: {:?}",
-                                    e
-                                ))
-                                })?
-                                .map_err(|e| {
-                                    IcWsError::Initialization(format!("ws_open failed: {:?}", e))
-                                })?;
-                            if !self.token.is_cancelled() {
-                                let gateway_session = GatewaySession::new(
-                                    self.id,
-                                    client_principal, // TODO: determine if this is still needed or we can use client_id instead
-                                    self.canister_id
-                                        .read()
-                                        .await
-                                        .expect("must be some by now")
-                                        .clone(),
-                                    message_for_client_tx,
-                                    nonce,
-                                );
-                                self.send_connection_state_to_clients_manager(
-                                    WsConnectionState::Established(gateway_session.clone()),
-                                )
-                                .await;
-                                debug!("Created new client session");
-                                Ok(WsConnectionState::Established(gateway_session))
-                            } else {
-                                // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
-                                Err(IcWsError::WebSocket(String::from("Preventing client connection handler task to establish new WS connection")))
-                            }
-                        },
-                        RequestStatusResponse::Rejected(e) => {
-                            Err(IcWsError::Initialization(e.to_string()))
-                        },
-                        RequestStatusResponse::Done => Err(IcWsError::Initialization(
-                            String::from("IC WS connection already established"),
-                        )),
-                        // if request_status_response is of the variant Unknown, Received, or Processing,
-                        // the IC WS connection is still in the setup phase
-                        // TODO: Unknown should be treated separately as it could mean both that the IC hasn't processed yet a request with the given RequestId (but it will) or that such a request does not exist
-                        _ => Ok(WsConnectionState::Establishment),
-                    }
-                } else {
-                    // if request_status_response is None, the payload's content was of the Call variant and therefore
-                    // the IC WS connection is still in the setup phase
-                    Ok(WsConnectionState::Establishment)
-                }
-            } else {
-                Err(IcWsError::Initialization(String::from(
-                    "message from client is not of type ClientRequest",
-                )))
-            }
+        // relay the request to the IC and the response back to the client via WS and determine whether the IC WS connection has been setup
+        if let Some(request_status_response) = self
+            .relay_request_response(client_request, ws_write)
+            .await?
+        {
+            // determine the status of the IC WS connection establishment
+            self.get_ic_ws_establishment_status(request_status_response)
+                .await
         } else {
-            Err(IcWsError::Initialization(String::from(
-                "message from client is not binary encoded",
-            )))
+            // if request_status_response is None, the payload's content was of the Call variant and therefore
+            // the client has just started the IC WS establishment
+            Ok(IcWsConnectionState::Init)
         }
     }
 
-    async fn send_connection_state_to_clients_manager(&self, connection_state: WsConnectionState) {
+    /// relays relays the client's request to the IC and then sends the response back to the client via WS
+    /// the caller does not need to check the state fo the response, it just relays the messages back and forth
+    async fn handle_ws_message<S: AsyncRead + AsyncWrite + Unpin>(
+        &self,
+        message: Message,
+        ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
+    ) -> Result<(), IcWsError> {
+        let client_request = get_client_request(message)?;
+        self.relay_request_response(client_request, ws_write)
+            .await?;
+        Ok(())
+    }
+
+    /// relays the client's request to the IC and then sends the response back to the client via WS
+    /// if the content of the envelope in the request is of variant ReadState, returns RequestStatusResponse so that the caller can determine whether the request has been processed
+    async fn relay_request_response<'a, S: AsyncRead + AsyncWrite + Unpin>(
+        &self,
+        client_request: ClientRequest<'a>,
+        ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
+    ) -> Result<Option<RequestStatusResponse>, IcWsError> {
+        let serialized_envelope = serialize(client_request.envelope)?;
+
+        // relay the envelope to the IC
+        let (http_response, request_status_response) = self
+            .agent
+            .relay_envelope_to_canister(
+                serialized_envelope,
+                self.canister_id
+                    .read()
+                    .await
+                    .expect("must be some by now")
+                    .clone(),
+            )
+            .await
+            .map_err(|e| IcWsError::Initialization(e.to_string()))?;
+
+        // send the HTTP response back to the client
+        let payload = HttpResponsePayload {
+            status: http_response.status.into(),
+            content_type: http_response
+                .headers
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(|x| x.to_string()),
+            content: http_response.body.clone(),
+        };
+        let client_response = ClientResponse {
+            payload,
+            nonce: client_request.nonce,
+        };
+        let serialized_response = serialize(client_response)?;
+        send_ws_message_to_client(ws_write, Message::Binary(serialized_response)).await;
+
+        Ok(request_status_response)
+    }
+
+    async fn send_connection_state_to_clients_manager(
+        &self,
+        connection_state: IcWsConnectionState,
+    ) {
         if let Err(e) = self
             .client_connection_handler_tx
             .send(connection_state)
@@ -469,6 +385,78 @@ impl ClientConnectionHandler {
             );
         }
     }
+
+    /// determines the status of the response from the IC following a request to /read_state
+    async fn get_ic_ws_establishment_status(
+        &self,
+        request_status_response: RequestStatusResponse,
+    ) -> Result<IcWsConnectionState, IcWsError> {
+        match request_status_response {
+            RequestStatusResponse::Replied {
+                reply: Replied::CallReplied(result),
+            } => {
+                // parse the body in order to get the nonce which will be needed in case it has to start a new poller
+                let canister_ws_open_result_value = Decode!(&result, CanisterWsOpenResult)
+                    .map_err(|e| {
+                        IcWsError::Initialization(format!(
+                            "client must call ws_open before other methods. Error: {:?}",
+                            e
+                        ))
+                    })?
+                    .map_err(|e| IcWsError::Initialization(format!("ws_open failed: {:?}", e)))?;
+                if !self.token.is_cancelled() {
+                    // return the ws_open result value so that the handler can construct a new client session and send it to the client's state manager
+                    Ok(IcWsConnectionState::Setup(canister_ws_open_result_value))
+                } else {
+                    // if the gateway has already started the graceful shutdown, we have to prevent new clients from connecting
+                    Err(IcWsError::WebSocket(String::from(
+                        "Preventing client connection handler task to establish new WS connection",
+                    )))
+                }
+            },
+            RequestStatusResponse::Rejected(e) => Err(IcWsError::Initialization(e.to_string())),
+            RequestStatusResponse::Done => Err(IcWsError::Initialization(String::from(
+                "IC WS connection already established",
+            ))),
+            // if request_status_response is of the variant Unknown, Received, or Processing,
+            // the IC WS connection is still in the setup phase
+            // TODO: Unknown should be treated separately as it could mean both that the IC hasn't processed yet a request with the given RequestId (but it will) or that such a request does not exist
+            _ => Ok(IcWsConnectionState::Init),
+        }
+    }
+}
+
+fn get_client_request<'a>(message: Message) -> Result<ClientRequest<'a>, IcWsError> {
+    if let Message::Binary(bytes) = message {
+        if let Ok(client_request) = from_slice(&bytes) {
+            return Ok(client_request);
+        } else {
+            return Err(IcWsError::WebSocket(String::from(
+                "ws message from client is not of type ClientRequest",
+            )));
+        }
+    }
+    Err(IcWsError::WebSocket(String::from(
+        "ws message from client is not binary encoded",
+    )))
+}
+
+fn serialize<S: Serialize>(message: S) -> Result<Vec<u8>, IcWsError> {
+    let mut serialized_message = Vec::new();
+    let mut serializer = serde_cbor::Serializer::new(&mut serialized_message);
+    serializer.self_describe().map_err(|e| {
+        IcWsError::WebSocket(format!(
+            "could not write sel-describe tag to stream. Error: {:?}",
+            e.to_string()
+        ))
+    })?;
+    message.serialize(&mut serializer).map_err(|e| {
+        IcWsError::WebSocket(format!(
+            "could not serialize message. Error: {:?}",
+            e.to_string()
+        ))
+    })?;
+    Ok(serialized_message)
 }
 
 async fn send_ws_message_to_client<S: AsyncRead + AsyncWrite + Unpin>(

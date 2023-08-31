@@ -5,7 +5,6 @@ use crate::{
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
-        IcWsEstablishmentNotificationEvents, IcWsEstablishmentNotificationEventsMetrics,
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
         PollerEventsMetrics,
     },
@@ -60,7 +59,6 @@ impl PollerChannelsPollerEnds {
 
 pub enum IcWsConnectionUpdate {
     Message(CanisterToClientMessage),
-    Established,
     Error(String),
 }
 
@@ -140,28 +138,7 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(client_id, client_principal, client_channel) => {
-                            let client_channel_cl = client_channel.clone();
-                            let poller_to_analyzer_channel = poller_channels.poller_to_analyzer.clone();
-                            tokio::task::spawn(async move {
-                                let mut ic_ws_establishment_notification_events = IcWsEstablishmentNotificationEvents::new(Some(EventsReference::ClientId(client_id)), EventsCollectionType::NewClientConnection, IcWsEstablishmentNotificationEventsMetrics::default());
-                                ic_ws_establishment_notification_events.metrics.set_received_client_channel();
-
-                                // notify client handler that the IC WS connection establishment is completed
-                                if let Err(e) = client_channel_cl.send(IcWsConnectionUpdate::Established).await {
-                                    error!("Client's thread terminated: {}", e);
-                                }
-                                ic_ws_establishment_notification_events.metrics.set_sent_client_notification();
-
-                                poller_to_analyzer_channel
-                                    .send(Box::new(ic_ws_establishment_notification_events))
-                                    .await
-                                    .expect("analyzer's side of the channel dropped");
-                            });
-                            // add the client channel even if it's not yet guaranteed that the IC WS establishment is successful
-                            // if it later turns out that it's not, there can be three reasons:
-                            // - client failed: when the WS connection closes, the client state manager will send 'PollerToClientChannelData::ClientDisconnected' to the poller and the channel will be removed
-                            // - canister failed: the poller will detect the failure in the next polling iteration and the poller will terminate
+                        PollerToClientChannelData::NewClientChannel(_client_id, client_principal, client_channel) => {
                             debug!("Added new channel to poller for client: {:?}", client_principal);
                             client_channels.insert(client_principal.clone(), client_channel);
                         },

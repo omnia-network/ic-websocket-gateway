@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type RequestConnectionSetupEvents = EventsImpl<RequestConnectionSetupEventsMetrics>;
 
@@ -73,99 +73,11 @@ impl RequestConnectionSetupDeltas {
 
 impl Deltas for RequestConnectionSetupDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_setup: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_setup, self.latency
-        );
-    }
-
-    fn get_reference(&self) -> &EventsReference {
-        &self.reference
-    }
-
-    fn get_latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-pub type ConfirmedConnectionSetupEvents = EventsImpl<ConfirmedConnectionSetupEventsMetrics>;
-
-#[derive(Debug, Clone)]
-pub struct ConfirmedConnectionSetupEventsMetrics {
-    received_confirmation_from_poller: TimeableEvent,
-    confirmation_sent_to_client: TimeableEvent,
-}
-
-impl ConfirmedConnectionSetupEventsMetrics {
-    pub fn default() -> Self {
-        Self {
-            received_confirmation_from_poller: TimeableEvent::default(),
-            confirmation_sent_to_client: TimeableEvent::default(),
-        }
-    }
-
-    pub fn set_received_confirmation_from_poller(&mut self) {
-        self.received_confirmation_from_poller.set_now();
-    }
-
-    pub fn set_confirmation_sent_to_client(&mut self) {
-        self.confirmation_sent_to_client.set_now();
-    }
-}
-
-impl EventsMetrics for ConfirmedConnectionSetupEventsMetrics {
-    fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.confirmation_sent_to_client
-    }
-
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
-        if let Some(reference) = reference {
-            let time_to_send_confirmation = self
-                .confirmation_sent_to_client
-                .duration_since(&self.received_confirmation_from_poller)?;
-            let latency = self.compute_latency()?;
-
-            return Some(Box::new(ConfirmedConnectionSetupDeltas::new(
-                reference,
-                time_to_send_confirmation,
-                latency,
-            )));
-        }
-        None
-    }
-
-    fn compute_latency(&self) -> Option<Duration> {
-        self.confirmation_sent_to_client
-            .duration_since(&self.received_confirmation_from_poller)
-    }
-}
-
-#[derive(Debug)]
-struct ConfirmedConnectionSetupDeltas {
-    reference: EventsReference,
-    time_to_send_confirmation: Duration,
-    latency: Duration,
-}
-
-impl ConfirmedConnectionSetupDeltas {
-    pub fn new(
-        reference: EventsReference,
-        time_to_send_confirmation: Duration,
-        latency: Duration,
-    ) -> Self {
-        Self {
-            reference,
-            time_to_send_confirmation,
-            latency,
-        }
-    }
-}
-
-impl Deltas for ConfirmedConnectionSetupDeltas {
-    fn display(&self) {
-        debug!(
-            "\nreference: {:?}\ntime_to_send_confirmation: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_send_confirmation, self.latency
+            self.reference,
+            self.time_to_setup,
+            self.latency
         );
     }
 
@@ -253,9 +165,11 @@ impl OutgoingCanisterMessageDeltas {
 
 impl Deltas for OutgoingCanisterMessageDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_send: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_send, self.latency
+            self.reference,
+            self.time_to_send,
+            self.latency
         );
     }
 

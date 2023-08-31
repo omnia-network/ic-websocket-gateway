@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type ConnectionEstablishmentEvents = EventsImpl<ConnectionEstablishmentEventsMetrics>;
 
@@ -98,7 +98,7 @@ impl ConnectionEstablishmentDeltas {
 
 impl Deltas for ConnectionEstablishmentDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_start_poller: {:?}\ntime_to_send_client_channel: {:?}\nlatency: {:?}",
             self.reference, self.time_to_start_poller, self.time_to_send_client_channel, self.latency
         );

@@ -1,6 +1,6 @@
 use crate::events_analyzer::{Deltas, EventsImpl, EventsMetrics, EventsReference, TimeableEvent};
 use std::time::Duration;
-use tracing::debug;
+use tracing::trace;
 
 pub type PollerEvents = EventsImpl<PollerEventsMetrics>;
 
@@ -88,100 +88,11 @@ impl PollerDeltas {
 
 impl Deltas for PollerDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\nlatency: {:?}",
-            self.time_to_receive, self.time_to_start_relaying, self.latency
-        );
-    }
-
-    fn get_reference(&self) -> &EventsReference {
-        &self.reference
-    }
-
-    fn get_latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-pub type IcWsEstablishmentNotificationEvents =
-    EventsImpl<IcWsEstablishmentNotificationEventsMetrics>;
-
-#[derive(Debug, Clone)]
-pub struct IcWsEstablishmentNotificationEventsMetrics {
-    received_client_channel: TimeableEvent,
-    sent_client_notification: TimeableEvent,
-}
-
-impl IcWsEstablishmentNotificationEventsMetrics {
-    pub fn default() -> Self {
-        Self {
-            received_client_channel: TimeableEvent::default(),
-            sent_client_notification: TimeableEvent::default(),
-        }
-    }
-
-    pub fn set_received_client_channel(&mut self) {
-        self.received_client_channel.set_now();
-    }
-
-    pub fn set_sent_client_notification(&mut self) {
-        self.sent_client_notification.set_now();
-    }
-}
-
-impl EventsMetrics for IcWsEstablishmentNotificationEventsMetrics {
-    fn get_value_for_interval(&self) -> &TimeableEvent {
-        &self.sent_client_notification
-    }
-
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
-        if let Some(reference) = reference {
-            let time_to_notify_client = self
-                .sent_client_notification
-                .duration_since(&self.received_client_channel)?;
-            let latency = self.compute_latency()?;
-
-            return Some(Box::new(IcWsEstablishmentNotificationDeltas::new(
-                reference,
-                time_to_notify_client,
-                latency,
-            )));
-        }
-        None
-    }
-
-    fn compute_latency(&self) -> Option<Duration> {
-        self.sent_client_notification
-            .duration_since(&self.received_client_channel)
-    }
-}
-
-#[derive(Debug)]
-struct IcWsEstablishmentNotificationDeltas {
-    reference: EventsReference,
-    time_to_notify_client: Duration,
-    latency: Duration,
-}
-
-impl IcWsEstablishmentNotificationDeltas {
-    pub fn new(
-        reference: EventsReference,
-        time_to_notify_client: Duration,
-        latency: Duration,
-    ) -> Self {
-        Self {
-            reference,
-            time_to_notify_client,
-            latency,
-        }
-    }
-}
-
-impl Deltas for IcWsEstablishmentNotificationDeltas {
-    fn display(&self) {
-        debug!(
-            "\ntime_to_notify_client: {:?}\nlatency: {:?}",
-            self.time_to_notify_client, self.latency
+            self.time_to_receive,
+            self.time_to_start_relaying,
+            self.latency
         );
     }
 
@@ -269,9 +180,11 @@ impl IncomingCanisterMessageDeltas {
 
 impl Deltas for IncomingCanisterMessageDeltas {
     fn display(&self) {
-        debug!(
+        trace!(
             "\nreference: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_relay, self.latency
+            self.reference,
+            self.time_to_relay,
+            self.latency
         );
     }
 
