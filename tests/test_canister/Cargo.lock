@@ -66,9 +66,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "candid"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1791006b86aee82bd8adc1f56923c61aea91b6cd46965d48d63681ab6509e5be"
+checksum = "762aa04e3a889d47a1773b74ee3b13438a9bc895954fff79ebf7f308c3744a6c"
 dependencies = [
  "anyhow",
  "binread",
@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "ic-websocket-cdk"
 version = "0.1.0"
-source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=5ac3759fb4e5a5166dfcb4fd326970edd165eff3#5ac3759fb4e5a5166dfcb4fd326970edd165eff3"
+source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=592a8bcc7bb95c8668bfa4290358a7031e5e3494#592a8bcc7bb95c8668bfa4290358a7031e5e3494"
 dependencies = [
  "base64",
  "candid",
@@ -406,9 +406,9 @@ checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 
 [[package]]
 name = "memchr"
-version = "2.6.1"
+version = "2.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f478948fd84d9f8e86967bf432640e46adfb5a4bd4f14ef7e864ab38220534ae"
+checksum = "5486aed0026218e61b8a01d5fbd5a0a134649abb71a0e53b7bc088529dced86e"
 
 [[package]]
 name = "num-bigint"

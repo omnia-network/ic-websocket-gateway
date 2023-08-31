@@ -95,7 +95,7 @@ describe("WS client", () => {
           timestamp: BigInt(Date.now()),
         });
 
-        await ws.send(pongMessage);
+        ws.send(pongMessage);
       };
     });
 
