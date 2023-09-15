@@ -40,21 +40,47 @@ pub struct CanisterWsGetMessagesArguments {
 
 /// Messages exchanged through the WebSocket.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-struct WebsocketMessage {
-    client_principal: ClientPrincipal, // The client that the gateway will forward the message to or that sent the message.
-    sequence_num: u64, // Both ways, messages should arrive with sequence numbers 0, 1, 2...
-    timestamp: u64,    // Timestamp of when the message was made for the recipient to inspect.
+pub struct WebsocketMessage {
+    /// The client that the gateway will forward the message to or that sent the message.
+    client_principal: ClientPrincipal,
+    /// Both ways, messages should arrive with sequence numbers 0, 1, 2...
+    sequence_num: u64,
+    /// Timestamp of when the message was made for the recipient to inspect.
+    timestamp: u64,
+    /// Whether the message is a service message sent by the CDK to the client or vice versa.
+    pub is_service_message: bool,
+    /// Application message of type CanisterServiceMessage encoded in binary.
     #[serde(with = "serde_bytes")]
-    content: Vec<u8>, // Application message encoded in binary.
+    pub content: Vec<u8>,
 }
 
 /// Element of the list of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputMessage {
-    pub client_principal: ClientPrincipal, // The client that the gateway will forward the message to or that sent the message.
-    pub key: String,                       // Key for certificate verification.
+    /// The client that the gateway will forward the message to or that sent the message.
+    pub client_principal: ClientPrincipal,
+    /// Key for certificate verification.
+    pub key: String,
+    /// The message to be relayed, that contains the application message of type WesocketMessage.
     #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>, // The message to be relayed, that contains the application message.
+    pub content: Vec<u8>,
+}
+
+#[derive(CandidType, Deserialize, Serialize)]
+pub struct CanisterOpenMessageContent {
+    client_principal: ClientPrincipal,
+}
+
+#[derive(CandidType, Deserialize, Serialize)]
+pub struct CanisterAckMessageContent {
+    last_incoming_sequence_num: u64,
+}
+
+/// A service message sent by the CDK to the client.
+#[derive(CandidType, Deserialize, Serialize)]
+pub enum CanisterServiceMessage {
+    OpenMessage(CanisterOpenMessageContent),
+    AckMessage(CanisterAckMessageContent),
 }
 
 /// List of messages returned to the WS Gateway after polling.

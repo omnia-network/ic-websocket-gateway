@@ -1,7 +1,8 @@
 use crate::{
     canister_methods::{
-        self, CanisterOutputCertifiedMessages, CanisterWsGetMessagesArguments,
-        CanisterWsStatusArguments, CanisterWsStatusResult, ClientPrincipal,
+        self, CanisterOutputCertifiedMessages, CanisterServiceMessage,
+        CanisterWsGetMessagesArguments, CanisterWsStatusArguments, CanisterWsStatusResult,
+        ClientPrincipal, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -9,7 +10,7 @@ use crate::{
         PollerEventsMetrics,
     },
 };
-use candid::CandidType;
+use candid::{CandidType, Decode};
 use ic_agent::{export::Principal, Agent};
 use rand::distributions::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
@@ -121,7 +122,7 @@ impl CanisterPoller {
         let mut clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
             HashMap::new();
 
-        let mut polling_iteration = 0;
+        let mut polling_iteration = 0; // used as a reference for the PollerEvents
         let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
@@ -164,51 +165,70 @@ impl CanisterPoller {
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
-                        for encoded_message in msgs.messages {
-                            let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(None, EventsCollectionType::CanisterMessage, IncomingCanisterMessageEventsMetrics::default());
-                            incoming_canister_message_events.metrics.set_start_relaying_message();
-                            let client_principal = encoded_message.client_principal;
-                            let m = CanisterToClientMessage {
-                                key: encoded_message.key.clone(),
-                                content: encoded_message.content,
-                                cert: msgs.cert.clone(),
-                                tree: msgs.tree.clone(),
-                            };
+                        if message_nonce != 0 {
+                            for canister_output_message in msgs.messages {
+                                let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(None, EventsCollectionType::CanisterMessage, IncomingCanisterMessageEventsMetrics::default());
+                                incoming_canister_message_events.metrics.set_start_relaying_message();
+                                let client_principal = canister_output_message.client_principal;
+                                let m = CanisterToClientMessage {
+                                    key: canister_output_message.key.clone(),
+                                    content: canister_output_message.content,
+                                    cert: msgs.cert.clone(),
+                                    tree: msgs.tree.clone(),
+                                };
 
-                            match get_nonce_from_message(&encoded_message.key) {
-                                Ok(last_message_nonce) => {
-                                    incoming_canister_message_events.reference = Some(EventsReference::MessageNonce(last_message_nonce));
-                                    match client_channels.get(&client_principal) {
-                                        Some(client_channel_tx) => {
-                                            debug!("Received message with key: {:?} from canister", m.key);
-                                            if let Err(e) = client_channel_tx.send(IcWsConnectionUpdate::Message(m)).await {
-                                                error!("Client's thread terminated: {}", e);
-                                                incoming_canister_message_events.metrics.set_no_message_relayed();
-                                            }
-                                            else {
-                                                incoming_canister_message_events.metrics.set_message_relayed();
-                                            }
-                                            poller_channels.poller_to_analyzer.send(Box::new(incoming_canister_message_events)).await.expect("analyzer's side of the channel dropped");
-                                        },
-                                        None => {
-                                            // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-                                            //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                                            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
-                                            if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
-                                                message_queue.push(m);
-                                            } else {
-                                                clients_message_queues.insert(client_principal, vec![m]);
+                                match get_nonce_from_message(&canister_output_message.key) {
+                                    Ok(last_message_nonce) => {
+                                        incoming_canister_message_events.reference = Some(EventsReference::MessageNonce(last_message_nonce));
+                                        match client_channels.get(&client_principal) {
+                                            Some(client_channel_tx) => {
+                                                debug!("Received message with key: {:?} from canister", m.key);
+                                                if let Err(e) = client_channel_tx.send(IcWsConnectionUpdate::Message(m)).await {
+                                                    error!("Client's thread terminated: {}", e);
+                                                    incoming_canister_message_events.metrics.set_no_message_relayed();
+                                                }
+                                                else {
+                                                    incoming_canister_message_events.metrics.set_message_relayed();
+                                                }
+                                                poller_channels.poller_to_analyzer.send(Box::new(incoming_canister_message_events)).await.expect("analyzer's side of the channel dropped");
+                                            },
+                                            None => {
+                                                // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
+                                                //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+                                                warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
+                                                if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
+                                                    message_queue.push(m);
+                                                } else {
+                                                    clients_message_queues.insert(client_principal, vec![m]);
+                                                }
                                             }
                                         }
+                                        message_nonce = last_message_nonce + 1;
+                                    },
+                                    Err(cdk_err) => {
+                                        error!("Terminating poller task due to CDK error: {}", cdk_err);
+                                        signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, cdk_err).await;
+                                        break 'poller_loop;
                                     }
-                                    message_nonce = last_message_nonce + 1;
-                                },
-                                Err(cdk_err) => {
-                                    error!("Terminating poller task due to CDK error: {}", cdk_err);
-                                    signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, cdk_err).await;
-                                    break 'poller_loop;
                                 }
                             }
+                        }
+                        else {
+                            // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
+                            // therefore, starting from the last message polled, we check the first message of type CanisterServiceMessage::OpenMessage, send it to the respective client
+                            // and set message_nonce to the respective nonce so that in the next iteration the poller polls from there on
+
+                            // TODO: make sure that we are not ignoring any client that called ws_open
+                            for canister_output_message in msgs.messages.iter().rev() {
+                                let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage).expect("content of canister_output_message is not of type WebsocketMessage");
+                                if websocket_message.is_service_message {
+                                    let canister_service_message = Decode!(&websocket_message.content, CanisterServiceMessage).expect("content of websocket_message is not of type CanisterServiceMessage");
+                                    if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
+                                        // TODO: send message to client
+                                    }
+                                }
+                            }
+
                         }
                         // counting only iterations which return at least one canister message
                         polling_iteration += 1;
