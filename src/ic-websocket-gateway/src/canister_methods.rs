@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 
 pub type ClientPrincipal = Principal;
 
-/// The result of [ws_open].
-pub type CanisterWsOpenResult = Result<CanisterWsOpenResultValue, String>;
 /// The result of [ws_close].
 pub type CanisterWsCloseResult = Result<(), String>;
 /// The result of [ws_status].
@@ -20,7 +18,6 @@ pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, S
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenResultValue {
     pub client_principal: ClientPrincipal,
-    pub nonce: u64,
 }
 
 /// The arguments for [ws_close].

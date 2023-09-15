@@ -40,7 +40,6 @@ pub struct GatewaySession {
     client_principal: ClientPrincipal,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    nonce: u64,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -52,7 +51,6 @@ pub struct GatewaySession {
     pub client_principal: ClientPrincipal,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    pub nonce: u64,
 }
 
 impl GatewaySession {
@@ -61,14 +59,12 @@ impl GatewaySession {
         client_principal: ClientPrincipal,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        nonce: u64,
     ) -> Self {
         Self {
             client_id,
             client_principal,
             canister_id,
             message_for_client_tx,
-            nonce,
         }
     }
 }
@@ -305,7 +301,7 @@ impl GatewayState {
         agent: Arc<Agent>,
     ) {
         match connection_state {
-            IcWsConnectionState::Established(gateway_session) => {
+            IcWsConnectionState::Setup(gateway_session) => {
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(gateway_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -379,9 +375,7 @@ impl GatewayState {
                         // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
                         // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                         // the new poller thread should not get those same messages again
-                        poller
-                            .run_polling(poller_channels_poller_ends, gateway_session.nonce)
-                            .await;
+                        poller.run_polling(poller_channels_poller_ends).await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
                     });
@@ -413,7 +407,7 @@ impl GatewayState {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            _ => error!("should not receive variants other than 'Established' and 'Closed'"),
+            _ => error!("should not receive variants other than 'Setup' and 'Closed'"),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();

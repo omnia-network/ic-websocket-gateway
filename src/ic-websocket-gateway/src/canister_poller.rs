@@ -108,15 +108,11 @@ impl CanisterPoller {
             canister_id = %self.canister_id
         )
     )]
-    pub async fn run_polling(
-        &self,
-        mut poller_channels: PollerChannelsPollerEnds,
-        mut message_nonce: u64,
-    ) {
-        info!(
-            "Created new poller task starting from nonce: {}",
-            message_nonce
-        );
+    pub async fn run_polling(&self, mut poller_channels: PollerChannelsPollerEnds) {
+        // once the poller starts running, it requests messages from nonce 0.
+        // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
+        // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
+        let mut message_nonce = 0;
 
         // channels used to communicate with client's WebSocket task
         let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
