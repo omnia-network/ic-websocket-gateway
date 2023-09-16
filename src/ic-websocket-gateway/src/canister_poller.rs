@@ -14,11 +14,7 @@ use candid::{CandidType, Decode};
 use ic_agent::{export::Principal, Agent};
 use rand::distributions::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
@@ -166,17 +162,17 @@ impl CanisterPoller {
                     // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
                     clients_message_queues = process_queues(clients_message_queues, &client_channels).await;
 
-                    if let Some((msgs, mut poller_events)) = res {
+                    if let Some((mut msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
-                        // TODO: modify canister messages in place so that we do not have to clone them
-                        for canister_output_message in self.process_canister_messages(
-                            &msgs.messages,
-                            &client_channels,
+
+                        self.process_canister_messages(
+                            &mut msgs.messages,
                             message_nonce
-                        ).await {
+                        ).await;
+                        for canister_output_message in msgs.messages {
                             if let Err(e) = self.relay_message(
-                                canister_output_message.to_owned(),
+                                canister_output_message,
                                 msgs.cert.clone(),
                                 msgs.tree.clone(),
                                 &client_channels,
@@ -271,20 +267,18 @@ impl CanisterPoller {
 
     async fn process_canister_messages<'a>(
         &self,
-        messages: &'a Vec<CanisterOutputMessage>,
-        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+        messages: &'a mut Vec<CanisterOutputMessage>,
         message_nonce: u64,
-    ) -> Vec<&'a CanisterOutputMessage> {
+    ) {
         if message_nonce != 0 {
             // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
             // therefore, all the received messages are new and have to be relayed to the respective client handlers
-            messages.iter().collect()
+            return;
         } else {
             // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
             // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
             // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-            self.get_messages_of_first_polling_iteration(messages, client_channels)
-                .await
+            self.get_messages_of_first_polling_iteration(messages).await
         }
     }
 
@@ -356,47 +350,28 @@ impl CanisterPoller {
 
     async fn get_messages_of_first_polling_iteration<'a>(
         &self,
-        messages: &'a Vec<CanisterOutputMessage>,
-        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
-    ) -> Vec<&'a CanisterOutputMessage> {
+        messages: &'a mut Vec<CanisterOutputMessage>,
+    ) {
+        // eliminating the undesired messages in-place has the advantage that we do not have to clone every message when relaying it to the client handler
+        // however, this requires decoding every message polled in the first iteration
+        // as this happens only once (per reboot), it's a good trad off
+
         // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
         //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
-
-        // keep track of the principals of all connected clients so that we can send the open message to each of them
-        let mut principals: BTreeSet<&Principal> = client_channels
-            .iter()
-            .map(|(principal, _)| principal)
-            .collect();
-        let mut messages_to_be_sent = Vec::new();
-        for canister_output_message in messages.iter().rev() {
-            if principals
-                .iter()
-                .any(|principal| **principal == canister_output_message.client_principal)
-            {
-                let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage)
-                    .expect("content of canister_output_message is not of type WebsocketMessage");
-                if websocket_message.is_service_message {
-                    let canister_service_message =
-                        Decode!(&websocket_message.content, CanisterServiceMessage).expect(
-                            "content of websocket_message is not of type CanisterServiceMessage",
-                        );
-                    if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
-                        // push messages to be sent to clients to a queue
-                        // these messages are pushed in reverse order compared to how they are received from the canister
-                        messages_to_be_sent.push(canister_output_message);
-                        // once the poller relays the open message for a connected client, the corresponding principal can be removed from the temporary set of principals
-                        principals.remove(&canister_output_message.client_principal);
-                        // once the set of principals is empty, we can stop processing the remaining canister messages as these were sent before the poller started
-                        if principals.len() == 0 {
-                            break;
-                        }
-                    }
+        messages.retain(|canister_output_message| {
+            let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            if websocket_message.is_service_message {
+                let canister_service_message =
+                    Decode!(&websocket_message.content, CanisterServiceMessage).expect(
+                        "content of websocket_message is not of type CanisterServiceMessage",
+                    );
+                if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
+                    return true;
                 }
             }
-        }
-        // reverse the order of the messages in the queue so that they are in the same order as when received from the canister
-        // this way the message_nonce is set to the one of the open message of the last client that connected
-        messages_to_be_sent.iter().rev().map(|m| *m).collect()
+            false
+        })
     }
 }
 
