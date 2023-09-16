@@ -169,64 +169,21 @@ impl CanisterPoller {
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
-                        if message_nonce != 0 {
-                            for canister_output_message in msgs.messages {
-                                if let Err(cdk_err) = self.relay_message(canister_output_message, msgs.cert.clone(), msgs.tree.clone(), &client_channels, &poller_channels, &mut clients_message_queues, &mut message_nonce).await {
-                                    error!("Terminating poller task due to CDK error: {}", cdk_err);
-                                    signal_termination_and_cleanup(
-                                        &mut poller_channels.poller_to_main,
-                                        self.canister_id,
-                                        &client_channels,
-                                        cdk_err,
-                                    )
-                                    .await;
-                                    break 'poller_loop;
-                                }
-                            }
-                        }
-                        else {
-                            // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
-                            // therefore, starting from the last message polled, we check the first message of type CanisterServiceMessage::OpenMessage, send it to the respective client
-                            // and set message_nonce to the respective nonce so that in the next iteration the poller polls from there on
-
-                            // keep track of the principals of all the clients in the poller's state so that we can send the open message to each of them
-                            let mut principals: BTreeSet<&Principal> = client_channels.iter().map(|(principal, _)| principal).collect();
-                            let mut messages_to_be_sent = Vec::new();
-                            for canister_output_message in msgs.messages.iter().rev() {
-                                if principals.contains(&&canister_output_message.client_principal) {
-                                    let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage).expect("content of canister_output_message is not of type WebsocketMessage");
-                                    if websocket_message.is_service_message {
-                                        let canister_service_message = Decode!(&websocket_message.content, CanisterServiceMessage).expect("content of websocket_message is not of type CanisterServiceMessage");
-                                        if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
-                                            // push messages to be sent to clients to a queue
-                                            // these messages are pushed in reverse order compared to how they are received from the canister
-                                            messages_to_be_sent.push(canister_output_message);
-                                            // once the poller relays the open message for a connected client, the corresponding principal can be removed from the temporary set of principals
-                                            principals.remove(&canister_output_message.client_principal);
-                                            // once the set of principals is empty, we can stop processing the remaining canister messages as these were sent before the poller started
-                                            if principals.len() == 0 {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // reverse the order of the messages in the queue so that they are in the same order as when received from the canister
-                            // this way the message_nonce is set to the one of the open message of the last client that connected
-                            for canister_output_message in messages_to_be_sent.iter().rev() {
-                                if let Err(cdk_err) = self.relay_message(canister_output_message.to_owned().clone(), msgs.cert.clone(), msgs.tree.clone(), &client_channels, &poller_channels, &mut clients_message_queues, &mut message_nonce).await {
-                                    error!("Terminating poller task due to CDK error: {}", cdk_err);
-                                    signal_termination_and_cleanup(
-                                        &mut poller_channels.poller_to_main,
-                                        self.canister_id,
-                                        &client_channels,
-                                        cdk_err,
-                                    )
-                                    .await;
-                                    break 'poller_loop;
-                                }
-                            }
-
+                        if let Err(e) = self.relay_canister_messages(msgs,
+                            &client_channels,
+                            &poller_channels,
+                            &mut clients_message_queues,
+                            &mut message_nonce
+                        ).await {
+                            error!("Terminating poller task due to CDK error: {}", e);
+                            signal_termination_and_cleanup(
+                                &mut poller_channels.poller_to_main,
+                                self.canister_id,
+                                &client_channels,
+                                e,
+                            )
+                            .await;
+                            break 'poller_loop;
                         }
                         // counting only iterations which return at least one canister message
                         polling_iteration += 1;
@@ -301,6 +258,45 @@ impl CanisterPoller {
         Ok(())
     }
 
+    async fn relay_canister_messages(
+        &self,
+        msgs: CanisterOutputCertifiedMessages,
+        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+        poller_channels: &PollerChannelsPollerEnds,
+        clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+        message_nonce: &mut u64,
+    ) -> Result<(), String> {
+        if *message_nonce != 0 {
+            // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
+            // therefore, all the received messages are new and have to be relayed to the respective client handlers
+            for canister_output_message in msgs.messages {
+                self.relay_message(
+                    canister_output_message,
+                    msgs.cert.clone(),
+                    msgs.tree.clone(),
+                    client_channels,
+                    poller_channels,
+                    clients_message_queues,
+                    message_nonce,
+                )
+                .await?
+            }
+            Ok(())
+        } else {
+            // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
+            // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
+            // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
+            self.handle_messages_of_first_polling_iteration(
+                msgs,
+                client_channels,
+                poller_channels,
+                clients_message_queues,
+                message_nonce,
+            )
+            .await
+        }
+    }
+
     async fn relay_message(
         &self,
         canister_output_message: CanisterOutputMessage,
@@ -364,6 +360,66 @@ impl CanisterPoller {
             },
         }
         *message_nonce = last_message_nonce + 1;
+        Ok(())
+    }
+
+    async fn handle_messages_of_first_polling_iteration(
+        &self,
+        msgs: CanisterOutputCertifiedMessages,
+        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+        poller_channels: &PollerChannelsPollerEnds,
+        clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+        message_nonce: &mut u64,
+    ) -> Result<(), String> {
+        // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
+        //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
+
+        // keep track of the principals of all connected clients so that we can send the open message to each of them
+        let mut principals: BTreeSet<&Principal> = client_channels
+            .iter()
+            .map(|(principal, _)| principal)
+            .collect();
+        let mut messages_to_be_sent = Vec::new();
+        for canister_output_message in msgs.messages.iter().rev() {
+            if principals
+                .iter()
+                .any(|principal| **principal == canister_output_message.client_principal)
+            {
+                let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage)
+                    .expect("content of canister_output_message is not of type WebsocketMessage");
+                if websocket_message.is_service_message {
+                    let canister_service_message =
+                        Decode!(&websocket_message.content, CanisterServiceMessage).expect(
+                            "content of websocket_message is not of type CanisterServiceMessage",
+                        );
+                    if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
+                        // push messages to be sent to clients to a queue
+                        // these messages are pushed in reverse order compared to how they are received from the canister
+                        messages_to_be_sent.push(canister_output_message);
+                        // once the poller relays the open message for a connected client, the corresponding principal can be removed from the temporary set of principals
+                        principals.remove(&canister_output_message.client_principal);
+                        // once the set of principals is empty, we can stop processing the remaining canister messages as these were sent before the poller started
+                        if principals.len() == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // reverse the order of the messages in the queue so that they are in the same order as when received from the canister
+        // this way the message_nonce is set to the one of the open message of the last client that connected
+        for canister_output_message in messages_to_be_sent.iter().rev() {
+            self.relay_message(
+                canister_output_message.to_owned().clone(),
+                msgs.cert.clone(),
+                msgs.tree.clone(),
+                client_channels,
+                poller_channels,
+                clients_message_queues,
+                message_nonce,
+            )
+            .await?
+        }
         Ok(())
     }
 }
