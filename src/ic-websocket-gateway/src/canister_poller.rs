@@ -500,7 +500,8 @@ async fn sleep(millis: u64) {
 #[cfg(test)]
 mod tests {
     use crate::canister_methods::{
-        CanisterOpenMessageContent, CanisterOutputMessage, CanisterServiceMessage, WebsocketMessage,
+        CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputMessage,
+        CanisterServiceMessage, WebsocketMessage,
     };
     use crate::canister_poller::filter_messages_of_first_polling_iteration;
     use candid::{encode_one, Principal};
@@ -515,33 +516,111 @@ mod tests {
         bytes
     }
 
-    #[tokio::test()]
-    async fn should_process_messages() {
-        let mut messages = Vec::new();
+    fn mock_open_message(client_principal: Principal) -> CanisterServiceMessage {
+        CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { client_principal })
+    }
 
+    fn mock_ack_message() -> CanisterServiceMessage {
+        CanisterServiceMessage::AckMessage(CanisterAckMessageContent {
+            last_incoming_sequence_num: 0,
+        })
+    }
+
+    fn mock_websocket_service_message(content: CanisterServiceMessage) -> WebsocketMessage {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-
-        let canister_service_message =
-            CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { client_principal });
-
-        let websocket_message = WebsocketMessage {
+        WebsocketMessage {
             client_principal,
             sequence_num: 0,
             timestamp: 0,
             is_service_message: true,
-            content: encode_one(canister_service_message).unwrap(),
-        };
+            content: encode_one(content).unwrap(),
+        }
+    }
 
-        let canister_message = CanisterOutputMessage {
+    fn mock_websocket_message() -> WebsocketMessage {
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        WebsocketMessage {
+            client_principal,
+            sequence_num: 0,
+            timestamp: 0,
+            is_service_message: false,
+            content: vec![],
+        }
+    }
+
+    fn mock_canister_output_message(content: WebsocketMessage) -> CanisterOutputMessage {
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        CanisterOutputMessage {
             client_principal,
             key: String::from("gateway_uid_0"),
-            content: cbor_serialize(websocket_message),
-        };
+            content: cbor_serialize(content),
+        }
+    }
 
+    fn canister_open_message() -> CanisterOutputMessage {
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        let open_message = mock_open_message(client_principal);
+        let websocket_service_message = mock_websocket_service_message(open_message);
+        mock_canister_output_message(websocket_service_message)
+    }
+
+    fn canister_ack_message() -> CanisterOutputMessage {
+        let ack_message = mock_ack_message();
+        let websocket_service_message = mock_websocket_service_message(ack_message);
+        mock_canister_output_message(websocket_service_message)
+    }
+
+    fn canister_output_message() -> CanisterOutputMessage {
+        let websocket_message = mock_websocket_message();
+        mock_canister_output_message(websocket_message)
+    }
+
+    #[tokio::test()]
+    async fn should_filter_out_non_open_messages() {
+        let mut messages = Vec::new();
+
+        // this message should be filtered out
+        let canister_message = canister_output_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_ack_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_output_message();
+        messages.push(canister_message);
+
+        // this message should not be filtered out
+        let canister_message = canister_open_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_ack_message();
+        messages.push(canister_message);
+
+        // this message should not be filtered out
+        let canister_message = canister_open_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_output_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_ack_message();
+        messages.push(canister_message);
+
+        // this message should be filtered out
+        let canister_message = canister_output_message();
+        messages.push(canister_message);
+
+        // this message should not be filtered out
+        let canister_message = canister_open_message();
         messages.push(canister_message);
 
         filter_messages_of_first_polling_iteration(&mut messages).await;
 
-        assert_eq!(messages.len(), 1);
+        assert_eq!(messages.len(), 3);
     }
 }

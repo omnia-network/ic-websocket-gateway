@@ -73,7 +73,7 @@ pub struct CanisterOpenMessageContent {
 
 #[derive(CandidType, Deserialize, Serialize)]
 pub struct CanisterAckMessageContent {
-    last_incoming_sequence_num: u64,
+    pub last_incoming_sequence_num: u64,
 }
 
 /// A service message sent by the CDK to the client.
