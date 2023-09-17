@@ -1,8 +1,8 @@
 use crate::{
     canister_methods::{
-        self, CanisterOutputCertifiedMessages, CanisterOutputMessage, CanisterServiceMessage,
-        CanisterWsGetMessagesArguments, CanisterWsStatusArguments, CanisterWsStatusResult,
-        ClientPrincipal, WebsocketMessage,
+        self, CanisterOpenMessageContent, CanisterOutputCertifiedMessages, CanisterOutputMessage,
+        CanisterServiceMessage, CanisterWsGetMessagesArguments, CanisterWsStatusArguments,
+        CanisterWsStatusResult, ClientPrincipal, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -10,10 +10,11 @@ use crate::{
         PollerEventsMetrics,
     },
 };
-use candid::{CandidType, Decode};
+use candid::CandidType;
 use ic_agent::{export::Principal, Agent};
 use rand::distributions::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
+use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
@@ -278,7 +279,7 @@ impl CanisterPoller {
             // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
             // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
             // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-            self.get_messages_of_first_polling_iteration(messages).await
+            filter_messages_of_first_polling_iteration(messages).await
         }
     }
 
@@ -347,32 +348,32 @@ impl CanisterPoller {
         *message_nonce = last_message_nonce + 1;
         Ok(())
     }
+}
 
-    async fn get_messages_of_first_polling_iteration<'a>(
-        &self,
-        messages: &'a mut Vec<CanisterOutputMessage>,
-    ) {
-        // eliminating the undesired messages in-place has the advantage that we do not have to clone every message when relaying it to the client handler
-        // however, this requires decoding every message polled in the first iteration
-        // as this happens only once (per reboot), it's a good trad off
+async fn filter_messages_of_first_polling_iteration<'a>(
+    messages: &'a mut Vec<CanisterOutputMessage>,
+) {
+    // eliminating the undesired messages in-place has the advantage that we do not have to clone every message when relaying it to the client handler
+    // however, this requires decoding every message polled in the first iteration
+    // as this happens only once (per reboot), it's a good trad off
 
-        // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
-        //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
-        messages.retain(|canister_output_message| {
-            let websocket_message = Decode!(&canister_output_message.content, WebsocketMessage)
-                .expect("content of canister_output_message is not of type WebsocketMessage");
-            if websocket_message.is_service_message {
-                let canister_service_message =
-                    Decode!(&websocket_message.content, CanisterServiceMessage).expect(
-                        "content of websocket_message is not of type CanisterServiceMessage",
-                    );
-                if let CanisterServiceMessage::OpenMessage(_) = canister_service_message {
-                    return true;
-                }
+    // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
+    //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
+    messages.retain(|canister_output_message| {
+        let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
+            .expect("content of canister_output_message is not of type WebsocketMessage");
+        if websocket_message.is_service_message {
+            let canister_service_message: CanisterServiceMessage =
+                from_slice(&websocket_message.content)
+                    .expect("content of websocket_message is not of type CanisterServiceMessage");
+            if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { .. }) =
+                canister_service_message
+            {
+                return true;
             }
-            false
-        })
-    }
+        }
+        false
+    })
 }
 
 async fn ws_status_to_canister_with_retries(
@@ -499,6 +500,49 @@ async fn sleep(millis: u64) {
 
 #[cfg(test)]
 mod tests {
+    use crate::canister_methods::{
+        CanisterOpenMessageContent, CanisterOutputMessage, CanisterServiceMessage, WebsocketMessage,
+    };
+    use crate::canister_poller::filter_messages_of_first_polling_iteration;
+    use candid::Principal;
+    use serde::Serialize;
+    use serde_cbor::Serializer;
 
-    // #[tokio::test()]
+    fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut serializer = Serializer::new(&mut bytes);
+        serializer.self_describe().unwrap();
+        m.serialize(&mut serializer).unwrap();
+        bytes
+    }
+
+    #[tokio::test()]
+    async fn should_process_messages() {
+        let mut messages = Vec::new();
+
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+
+        let canister_service_message =
+            CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { client_principal });
+
+        let websocket_message = WebsocketMessage {
+            client_principal,
+            sequence_num: 0,
+            timestamp: 0,
+            is_service_message: true,
+            content: cbor_serialize(canister_service_message),
+        };
+
+        let canister_message = CanisterOutputMessage {
+            client_principal,
+            key: String::from("gateway_uid_0"),
+            content: cbor_serialize(websocket_message),
+        };
+
+        messages.push(canister_message);
+
+        filter_messages_of_first_polling_iteration(&mut messages).await;
+
+        assert_eq!(messages.len(), 1);
+    }
 }

@@ -42,14 +42,14 @@ pub struct CanisterWsGetMessagesArguments {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct WebsocketMessage {
     /// The client that the gateway will forward the message to or that sent the message.
-    client_principal: ClientPrincipal,
+    pub client_principal: ClientPrincipal,
     /// Both ways, messages should arrive with sequence numbers 0, 1, 2...
-    sequence_num: u64,
+    pub sequence_num: u64,
     /// Timestamp of when the message was made for the recipient to inspect.
-    timestamp: u64,
+    pub timestamp: u64,
     /// Whether the message is a service message sent by the CDK to the client or vice versa.
     pub is_service_message: bool,
-    /// Application message of type CanisterServiceMessage encoded in binary.
+    /// Application message encoded in binary.
     #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
 }
@@ -68,7 +68,7 @@ pub struct CanisterOutputMessage {
 
 #[derive(CandidType, Deserialize, Serialize)]
 pub struct CanisterOpenMessageContent {
-    client_principal: ClientPrincipal,
+    pub client_principal: ClientPrincipal,
 }
 
 #[derive(CandidType, Deserialize, Serialize)]
