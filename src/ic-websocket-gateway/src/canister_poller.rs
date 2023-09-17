@@ -172,7 +172,7 @@ impl CanisterPoller {
                             message_nonce
                         ).await;
                         for canister_output_message in msgs.messages {
-                            if let Err(e) = self.relay_message(
+                            if let Err(e) = relay_message(
                                 canister_output_message,
                                 msgs.cert.clone(),
                                 msgs.tree.clone(),
@@ -282,72 +282,71 @@ impl CanisterPoller {
             filter_messages_of_first_polling_iteration(messages).await
         }
     }
+}
 
-    async fn relay_message(
-        &self,
-        canister_output_message: CanisterOutputMessage,
-        cert: Vec<u8>,
-        tree: Vec<u8>,
-        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
-        poller_channels: &PollerChannelsPollerEnds,
-        clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
-        message_nonce: &mut u64,
-    ) -> Result<(), String> {
-        let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
-            None,
-            EventsCollectionType::CanisterMessage,
-            IncomingCanisterMessageEventsMetrics::default(),
-        );
-        incoming_canister_message_events
-            .metrics
-            .set_start_relaying_message();
-        let client_principal = canister_output_message.client_principal;
-        let m = CanisterToClientMessage {
-            key: canister_output_message.key.clone(),
-            content: canister_output_message.content,
-            cert,
-            tree,
-        };
+async fn relay_message(
+    canister_output_message: CanisterOutputMessage,
+    cert: Vec<u8>,
+    tree: Vec<u8>,
+    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+    poller_channels: &PollerChannelsPollerEnds,
+    clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+    message_nonce: &mut u64,
+) -> Result<(), String> {
+    let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
+        None,
+        EventsCollectionType::CanisterMessage,
+        IncomingCanisterMessageEventsMetrics::default(),
+    );
+    incoming_canister_message_events
+        .metrics
+        .set_start_relaying_message();
+    let client_principal = canister_output_message.client_principal;
+    let m = CanisterToClientMessage {
+        key: canister_output_message.key.clone(),
+        content: canister_output_message.content,
+        cert,
+        tree,
+    };
 
-        let last_message_nonce = get_nonce_from_message(&canister_output_message.key)?;
-        incoming_canister_message_events.reference =
-            Some(EventsReference::MessageNonce(last_message_nonce));
-        match client_channels.get(&client_principal) {
-            Some(client_channel_tx) => {
-                debug!("Received message with key: {:?} from canister", m.key);
-                if let Err(e) = client_channel_tx
-                    .send(IcWsConnectionUpdate::Message(m))
-                    .await
-                {
-                    error!("Client's thread terminated: {}", e);
-                    incoming_canister_message_events
-                        .metrics
-                        .set_no_message_relayed();
-                } else {
-                    incoming_canister_message_events
-                        .metrics
-                        .set_message_relayed();
-                }
-                poller_channels
-                    .poller_to_analyzer
-                    .send(Box::new(incoming_canister_message_events))
-                    .await
-                    .expect("analyzer's side of the channel dropped");
-            },
-            None => {
-                // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-                //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
-                if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
-                    message_queue.push(m);
-                } else {
-                    clients_message_queues.insert(client_principal, vec![m]);
-                }
-            },
-        }
-        *message_nonce = last_message_nonce + 1;
-        Ok(())
+    let last_message_nonce = get_nonce_from_message(&canister_output_message.key)?;
+    incoming_canister_message_events.reference =
+        Some(EventsReference::MessageNonce(last_message_nonce));
+    match client_channels.get(&client_principal) {
+        Some(client_channel_tx) => {
+            debug!("Received message with key: {:?} from canister", m.key);
+            if let Err(e) = client_channel_tx
+                .send(IcWsConnectionUpdate::Message(m))
+                .await
+            {
+                error!("Client's thread terminated: {}", e);
+                incoming_canister_message_events
+                    .metrics
+                    .set_no_message_relayed();
+            } else {
+                incoming_canister_message_events
+                    .metrics
+                    .set_message_relayed();
+            }
+            poller_channels
+                .poller_to_analyzer
+                .send(Box::new(incoming_canister_message_events))
+                .await
+                .expect("analyzer's side of the channel dropped");
+        },
+        None => {
+            // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
+            //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
+            if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
+                message_queue.push(m);
+            } else {
+                clients_message_queues.insert(client_principal, vec![m]);
+            }
+        },
     }
+    *message_nonce = last_message_nonce + 1;
+    Ok(())
 }
 
 async fn filter_messages_of_first_polling_iteration<'a>(
@@ -499,14 +498,20 @@ async fn sleep(millis: u64) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::canister_methods::{
         CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputMessage,
-        CanisterServiceMessage, WebsocketMessage,
+        CanisterServiceMessage, ClientPrincipal, WebsocketMessage,
     };
-    use crate::canister_poller::filter_messages_of_first_polling_iteration;
+    use crate::canister_poller::{
+        filter_messages_of_first_polling_iteration, relay_message, CanisterToClientMessage,
+        IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
+    };
     use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::Serializer;
+    use tokio::sync::mpsc::{self, Receiver, Sender};
 
     fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -575,8 +580,7 @@ mod tests {
         mock_canister_output_message(websocket_message)
     }
 
-    #[tokio::test()]
-    async fn should_filter_out_non_open_messages() {
+    fn mock_messages() -> Vec<CanisterOutputMessage> {
         let mut messages = Vec::new();
 
         // this message should be filtered out
@@ -619,8 +623,72 @@ mod tests {
         let canister_message = canister_open_message();
         messages.push(canister_message);
 
+        messages
+    }
+
+    #[tokio::test()]
+    async fn should_filter_out_non_open_messages() {
+        let mut messages = mock_messages();
+
         filter_messages_of_first_polling_iteration(&mut messages).await;
 
         assert_eq!(messages.len(), 3);
+    }
+
+    #[tokio::test()]
+    async fn should_relay_open_message() {
+        let mut messages = Vec::new();
+        let canister_message = canister_open_message();
+        messages.push(canister_message);
+
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+
+        let mut message_nonce = 0;
+
+        let (message_for_client_tx, mut _message_for_client_rx): (
+            Sender<IcWsConnectionUpdate>,
+            Receiver<IcWsConnectionUpdate>,
+        ) = mpsc::channel(100);
+
+        let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
+            HashMap::new();
+
+        client_channels.insert(client_principal, message_for_client_tx);
+
+        let mut clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
+            HashMap::new();
+
+        let (events_channel_tx, _events_channel_rx) = mpsc::channel(100);
+        let (
+            _poller_channel_for_client_channel_sender_tx,
+            poller_channel_for_client_channel_sender_rx,
+        ) = mpsc::channel(100);
+
+        let (poller_channel_for_completion_tx, mut _poller_channel_for_completion_rx): (
+            Sender<TerminationInfo>,
+            Receiver<TerminationInfo>,
+        ) = mpsc::channel(100);
+
+        let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
+            poller_channel_for_client_channel_sender_rx,
+            poller_channel_for_completion_tx,
+            events_channel_tx.clone(),
+        );
+
+        let messages = mock_messages();
+
+        for canister_output_message in messages {
+            relay_message(
+                canister_output_message,
+                Vec::new(),
+                Vec::new(),
+                &client_channels,
+                &poller_channels_poller_ends,
+                &mut clients_message_queues,
+                &mut message_nonce,
+            )
+            .await
+            .unwrap();
+        }
     }
 }
