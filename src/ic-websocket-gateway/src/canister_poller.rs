@@ -10,7 +10,7 @@ use crate::{
         PollerEventsMetrics,
     },
 };
-use candid::CandidType;
+use candid::{decode_one, CandidType};
 use ic_agent::{export::Principal, Agent};
 use rand::distributions::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
@@ -363,9 +363,8 @@ async fn filter_messages_of_first_polling_iteration<'a>(
         let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
             .expect("content of canister_output_message is not of type WebsocketMessage");
         if websocket_message.is_service_message {
-            let canister_service_message: CanisterServiceMessage =
-                from_slice(&websocket_message.content)
-                    .expect("content of websocket_message is not of type CanisterServiceMessage");
+            let canister_service_message = decode_one(&websocket_message.content)
+                .expect("content of websocket_message is not of type CanisterServiceMessage");
             if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { .. }) =
                 canister_service_message
             {
@@ -504,7 +503,7 @@ mod tests {
         CanisterOpenMessageContent, CanisterOutputMessage, CanisterServiceMessage, WebsocketMessage,
     };
     use crate::canister_poller::filter_messages_of_first_polling_iteration;
-    use candid::Principal;
+    use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::Serializer;
 
@@ -530,7 +529,7 @@ mod tests {
             sequence_num: 0,
             timestamp: 0,
             is_service_message: true,
-            content: cbor_serialize(canister_service_message),
+            content: encode_one(canister_service_message).unwrap(),
         };
 
         let canister_message = CanisterOutputMessage {
