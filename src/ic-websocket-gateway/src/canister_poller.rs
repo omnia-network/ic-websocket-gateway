@@ -167,7 +167,7 @@ impl CanisterPoller {
                         poller_events.metrics.set_start_relaying_messages();
                         poller_channels.poller_to_analyzer.send(Box::new(poller_events)).await.expect("analyzer's side of the channel dropped");
 
-                        self.process_canister_messages(
+                        process_canister_messages(
                             &mut msgs.messages,
                             message_nonce
                         ).await;
@@ -265,22 +265,21 @@ impl CanisterPoller {
         sleep(self.send_status_interval_ms).await;
         Ok(())
     }
+}
 
-    async fn process_canister_messages<'a>(
-        &self,
-        messages: &'a mut Vec<CanisterOutputMessage>,
-        message_nonce: u64,
-    ) {
-        if message_nonce != 0 {
-            // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
-            // therefore, all the received messages are new and have to be relayed to the respective client handlers
-            return;
-        } else {
-            // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
-            // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
-            // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-            filter_messages_of_first_polling_iteration(messages).await
-        }
+async fn process_canister_messages<'a>(
+    messages: &'a mut Vec<CanisterOutputMessage>,
+    message_nonce: u64,
+) {
+    if message_nonce != 0 {
+        // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
+        // therefore, all the received messages are new and have to be relayed to the respective client handlers
+        return;
+    } else {
+        // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
+        // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
+        // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
+        filter_messages_of_first_polling_iteration(messages).await
     }
 }
 
@@ -505,8 +504,8 @@ mod tests {
         CanisterServiceMessage, ClientPrincipal, WebsocketMessage,
     };
     use crate::canister_poller::{
-        filter_messages_of_first_polling_iteration, relay_message, CanisterToClientMessage,
-        IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
+        process_canister_messages, relay_message, CanisterToClientMessage, IcWsConnectionUpdate,
+        PollerChannelsPollerEnds, TerminationInfo,
     };
     use candid::{encode_one, Principal};
     use serde::Serialize;
@@ -627,9 +626,8 @@ mod tests {
     }
 
     #[tokio::test()]
-    async fn should_relay_only_open_message() {
+    async fn should_process_canister_messages() {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        let mut message_nonce = 0;
 
         let (message_for_client_tx, mut message_for_client_rx): (
             Sender<IcWsConnectionUpdate>,
@@ -662,7 +660,8 @@ mod tests {
         );
 
         let mut messages = mock_messages();
-        filter_messages_of_first_polling_iteration(&mut messages).await;
+        let mut message_nonce = 0;
+        process_canister_messages(&mut messages, message_nonce).await;
         assert_eq!(messages.len(), 3);
 
         for canister_output_message in messages {
@@ -681,5 +680,10 @@ mod tests {
                 panic!("should not receive error");
             }
         }
+
+        let mut messages = mock_messages();
+        // here message_nonce is > 0, so messages will not be filtered
+        process_canister_messages(&mut messages, message_nonce).await;
+        assert_eq!(messages.len(), 10);
     }
 }
