@@ -627,25 +627,11 @@ mod tests {
     }
 
     #[tokio::test()]
-    async fn should_filter_out_non_open_messages() {
-        let mut messages = mock_messages();
-
-        filter_messages_of_first_polling_iteration(&mut messages).await;
-
-        assert_eq!(messages.len(), 3);
-    }
-
-    #[tokio::test()]
-    async fn should_relay_open_message() {
-        let mut messages = Vec::new();
-        let canister_message = canister_open_message();
-        messages.push(canister_message);
-
+    async fn should_relay_only_open_message() {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-
         let mut message_nonce = 0;
 
-        let (message_for_client_tx, mut _message_for_client_rx): (
+        let (message_for_client_tx, mut message_for_client_rx): (
             Sender<IcWsConnectionUpdate>,
             Receiver<IcWsConnectionUpdate>,
         ) = mpsc::channel(100);
@@ -675,7 +661,9 @@ mod tests {
             events_channel_tx.clone(),
         );
 
-        let messages = mock_messages();
+        let mut messages = mock_messages();
+        filter_messages_of_first_polling_iteration(&mut messages).await;
+        assert_eq!(messages.len(), 3);
 
         for canister_output_message in messages {
             relay_message(
@@ -689,6 +677,9 @@ mod tests {
             )
             .await
             .unwrap();
+            if let Err(_) = message_for_client_rx.try_recv() {
+                panic!("should not receive error");
+            }
         }
     }
 }
