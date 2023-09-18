@@ -36,6 +36,18 @@ pub struct CanisterWsGetMessagesArguments {
     pub nonce: u64,
 }
 
+/// Message polled from the canister
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CanisterToClientMessage {
+    pub key: String,
+    #[serde(with = "serde_bytes")]
+    pub content: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub cert: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub tree: Vec<u8>,
+}
+
 /// Messages exchanged through the WebSocket.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct WebsocketMessage {

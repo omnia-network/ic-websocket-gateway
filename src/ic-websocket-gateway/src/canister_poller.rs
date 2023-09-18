@@ -1,7 +1,8 @@
 use crate::{
     canister_methods::{
         self, CanisterOpenMessageContent, CanisterOutputCertifiedMessages, CanisterOutputMessage,
-        CanisterServiceMessage, CanisterWsGetMessagesArguments, ClientPrincipal, WebsocketMessage,
+        CanisterServiceMessage, CanisterToClientMessage, CanisterWsGetMessagesArguments,
+        ClientPrincipal, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -9,9 +10,8 @@ use crate::{
         PollerEventsMetrics,
     },
 };
-use candid::{decode_one, CandidType};
+use candid::decode_one;
 use ic_agent::{export::Principal, Agent};
-use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -22,24 +22,14 @@ use tracing::{debug, error, info, warn};
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CanisterToClientMessage {
-    pub key: String,
-    #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub cert: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub tree: Vec<u8>,
-}
-
-/// ends of the channels needed by each canister poller tasks:
-/// - main_to_poller: receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
-/// - poller_to_main: sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
+/// ends of the channels needed by each canister poller tasks
 #[derive(Debug)]
 pub struct PollerChannelsPollerEnds {
+    /// receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
     main_to_poller: Receiver<PollerToClientChannelData>,
+    /// sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
     poller_to_main: Sender<TerminationInfo>,
+    /// sending side of the channel used by the poller to send events to the event analyzer
     poller_to_analyzer: Sender<Box<dyn Events + Send>>,
 }
 
@@ -57,28 +47,32 @@ impl PollerChannelsPollerEnds {
     }
 }
 
+/// updates the client connection handler on the IC WS connection state
 pub enum IcWsConnectionUpdate {
+    /// contains a new message to be realyed to the client
     Message(CanisterToClientMessage),
+    /// lets the client connection hanlder know that an error occurred and the connection should be closed
     Error(String),
 }
 
-/// contains the information that the main sends to the poller task:
-/// - NewClientChannel: sending side of the channel use by the poller to send messages to the client
-/// - ClientDisconnected: signals the poller which cllient disconnected
+/// contains the information that the main task sends to the poller task:
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
+    /// contains the sending side of the channel use by the poller to send messages to the client
     NewClientChannel(ClientPrincipal, Sender<IcWsConnectionUpdate>),
+    /// signals the poller which cllient disconnected
     ClientDisconnected(ClientPrincipal),
 }
 
 /// determines the reason of the poller task termination:
-/// - LastClientDisconnected: last client disconnected and therefore there is no need to continue polling
-/// - CdkError: error while polling the canister
 pub enum TerminationInfo {
+    /// contains the principal of the last client and therefore there is no need to continue polling
     LastClientDisconnected(Principal),
+    /// error while polling the canister
     CdkError(Principal),
 }
 
+/// periodically polls the canister for updates to be relayed to clients
 pub struct CanisterPoller {
     canister_id: Principal,
     agent: Arc<Agent>,
@@ -107,14 +101,17 @@ impl CanisterPoller {
         // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
         let mut message_nonce = 0;
 
-        // channels used to communicate with client's WebSocket task
+        // channels used to communicate with the connection handler task of the client identified by the principal
         let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
             HashMap::new();
 
+        // queues where the poller temporarily stores messages received from the canister before a client is registered
+        // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
         let mut clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
             HashMap::new();
 
         let mut polling_iteration = 0; // used as a reference for the PollerEvents
+
         let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
@@ -336,7 +333,8 @@ async fn process_queues(
     clients_message_queues.retain(|client_principal, message_queue| {
         if let Some(client_channel_tx) = client_channels.get(&client_principal) {
             // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
-            // thus the respective queue does not need to be stored
+            // thus the respective queue does not need to be retained
+            // relay all the messages previously received for the corresponding client
             for m in message_queue.to_owned() {
                 let client_channel_tx = client_channel_tx.clone();
                 let handle = tokio::spawn(async move {
