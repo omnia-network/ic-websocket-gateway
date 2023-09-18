@@ -513,7 +513,7 @@ mod tests {
     use serde_cbor::Serializer;
     use tokio::sync::mpsc::{self, Receiver, Sender};
 
-    use super::PollerToClientChannelData;
+    use super::{process_queues, PollerToClientChannelData};
 
     fn init_poller() -> (
         Sender<IcWsConnectionUpdate>,
@@ -754,5 +754,40 @@ mod tests {
         .unwrap();
 
         assert_eq!(clients_message_queues.len(), 1);
+    }
+
+    #[tokio::test()]
+    async fn should_process_message_in_queue() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            mut client_channels,
+            _poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
+
+        let canister_output_message = canister_open_message();
+        let client_principal = canister_output_message.client_principal;
+        let m = CanisterToClientMessage {
+            key: canister_output_message.key.clone(),
+            content: canister_output_message.content,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
+        clients_message_queues.insert(client_principal, vec![m]);
+
+        client_channels.insert(client_principal, message_for_client_tx);
+
+        clients_message_queues = process_queues(clients_message_queues, &client_channels).await;
+
+        if let Err(_) = message_for_client_rx.try_recv() {
+            panic!("should not receive error");
+        }
+
+        assert_eq!(clients_message_queues.len(), 0);
     }
 }
