@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
-    select,
+    join, select,
     sync::mpsc::{Receiver, Sender},
 };
 use tracing::{debug, error, info, warn};
@@ -147,7 +147,7 @@ impl CanisterPoller {
                 // poll canister for updates across multiple select! iterations
                 res = &mut get_messages_operation => {
                     // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
-                    process_queues(&mut clients_message_queues, &client_channels);
+                    process_queues(&mut clients_message_queues, &client_channels).await;
 
                     if let Some((mut msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
@@ -329,19 +329,21 @@ async fn filter_messages_of_first_polling_iteration<'a>(
     })
 }
 
-fn process_queues(
+async fn process_queues(
     clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
     client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
 ) {
     // TODO: make sure that messages are delivered to each client in the order defined by their sequence numbers
+    //       might not be the case as messages are sent concurrently
 
+    let mut handles = Vec::new();
     clients_message_queues.retain(|client_principal, message_queue| {
         if let Some(client_channel_tx) = client_channels.get(&client_principal) {
             // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
             // thus the respective queue does not need to be stored
             for m in message_queue.to_owned() {
                 let client_channel_tx = client_channel_tx.clone();
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     warn!("Processing message with key: {:?} from queue", m.key);
                     if let Err(e) = client_channel_tx
                         .send(IcWsConnectionUpdate::Message(m))
@@ -350,12 +352,17 @@ fn process_queues(
                         error!("Client's thread terminated: {}", e);
                     }
                 });
+                handles.push(handle);
             }
             return false;
         }
         // if the client channel has not been received yet, keep the messages in the queue
         true
     });
+    // the tasks must be awaited so that messages in queue are relayed before newly polled messages
+    for handle in handles {
+        let (_,) = join!(handle);
+    }
 }
 
 pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
@@ -715,7 +722,7 @@ mod tests {
         // simulates the client being registered in the poller
         client_channels.insert(client_principal, message_for_client_tx);
 
-        process_queues(&mut clients_message_queues, &client_channels);
+        process_queues(&mut clients_message_queues, &client_channels).await;
 
         if let None = message_for_client_rx.recv().await {
             panic!("should receive message");
@@ -751,7 +758,7 @@ mod tests {
         };
         clients_message_queues.insert(client_principal, vec![m]);
 
-        process_queues(&mut clients_message_queues, &client_channels);
+        process_queues(&mut clients_message_queues, &client_channels).await;
 
         assert_eq!(clients_message_queues.len(), 1);
     }
