@@ -507,10 +507,64 @@ mod tests {
         process_canister_messages, relay_message, CanisterToClientMessage, IcWsConnectionUpdate,
         PollerChannelsPollerEnds, TerminationInfo,
     };
+    use crate::events_analyzer::Events;
     use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::Serializer;
     use tokio::sync::mpsc::{self, Receiver, Sender};
+
+    use super::PollerToClientChannelData;
+
+    fn init_poller() -> (
+        Sender<IcWsConnectionUpdate>,
+        Receiver<IcWsConnectionUpdate>,
+        HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+        PollerChannelsPollerEnds,
+        HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+        Receiver<Box<dyn Events + Send>>,
+        Sender<PollerToClientChannelData>,
+        Receiver<TerminationInfo>,
+    ) {
+        let (message_for_client_tx, message_for_client_rx): (
+            Sender<IcWsConnectionUpdate>,
+            Receiver<IcWsConnectionUpdate>,
+        ) = mpsc::channel(100);
+
+        let client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
+            HashMap::new();
+
+        let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
+
+        let (
+            poller_channel_for_client_channel_sender_tx,
+            poller_channel_for_client_channel_sender_rx,
+        ) = mpsc::channel(100);
+
+        let (poller_channel_for_completion_tx, poller_channel_for_completion_rx): (
+            Sender<TerminationInfo>,
+            Receiver<TerminationInfo>,
+        ) = mpsc::channel(100);
+
+        let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
+            poller_channel_for_client_channel_sender_rx,
+            poller_channel_for_completion_tx,
+            events_channel_tx.clone(),
+        );
+
+        let clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
+            HashMap::new();
+
+        (
+            message_for_client_tx,
+            message_for_client_rx,
+            client_channels,
+            poller_channels_poller_ends,
+            clients_message_queues,
+            events_channel_rx,
+            poller_channel_for_client_channel_sender_tx,
+            poller_channel_for_completion_rx,
+        )
+    }
 
     fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -627,37 +681,20 @@ mod tests {
 
     #[tokio::test()]
     async fn should_process_canister_messages() {
-        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-
-        let (message_for_client_tx, mut message_for_client_rx): (
-            Sender<IcWsConnectionUpdate>,
-            Receiver<IcWsConnectionUpdate>,
-        ) = mpsc::channel(100);
-
-        let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
-            HashMap::new();
-
-        client_channels.insert(client_principal, message_for_client_tx);
-
-        let mut clients_message_queues: HashMap<ClientPrincipal, Vec<CanisterToClientMessage>> =
-            HashMap::new();
-
-        let (events_channel_tx, _events_channel_rx) = mpsc::channel(100);
         let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            mut client_channels,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
             _poller_channel_for_client_channel_sender_tx,
-            poller_channel_for_client_channel_sender_rx,
-        ) = mpsc::channel(100);
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-        let (poller_channel_for_completion_tx, mut _poller_channel_for_completion_rx): (
-            Sender<TerminationInfo>,
-            Receiver<TerminationInfo>,
-        ) = mpsc::channel(100);
-
-        let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
-            poller_channel_for_client_channel_sender_rx,
-            poller_channel_for_completion_tx,
-            events_channel_tx.clone(),
-        );
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        client_channels.insert(client_principal, message_for_client_tx);
 
         let mut messages = mock_messages();
         let mut message_nonce = 0;
@@ -685,5 +722,37 @@ mod tests {
         // here message_nonce is > 0, so messages will not be filtered
         process_canister_messages(&mut messages, message_nonce).await;
         assert_eq!(messages.len(), 10);
+    }
+
+    #[tokio::test()]
+    async fn should_push_message_to_queue() {
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            client_channels,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
+
+        let canister_output_message = canister_open_message();
+        let mut message_nonce = 0;
+
+        relay_message(
+            canister_output_message,
+            Vec::new(),
+            Vec::new(),
+            &client_channels,
+            &poller_channels_poller_ends,
+            &mut clients_message_queues,
+            &mut message_nonce,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(clients_message_queues.len(), 1);
     }
 }
