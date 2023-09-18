@@ -785,6 +785,7 @@ mod tests {
         };
         clients_message_queues.insert(client_principal, vec![m]);
 
+        // simulates the client being registered in the poller
         client_channels.insert(client_principal, message_for_client_tx);
 
         process_queues(&mut clients_message_queues, &client_channels);
@@ -794,5 +795,36 @@ mod tests {
         }
 
         assert_eq!(clients_message_queues.len(), 0);
+    }
+
+    #[tokio::test()]
+    /// Simulates the case in which there is a message in the queue for a client that is not yet connected.
+    /// Keeps the message in the queue.
+    async fn should_keep_message_in_queue() {
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            client_channels,
+            _poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
+
+        let canister_output_message = canister_open_message();
+        let client_principal = canister_output_message.client_principal;
+        let m = CanisterToClientMessage {
+            key: canister_output_message.key.clone(),
+            content: canister_output_message.content,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
+        clients_message_queues.insert(client_principal, vec![m]);
+
+        process_queues(&mut clients_message_queues, &client_channels);
+
+        assert_eq!(clients_message_queues.len(), 1);
     }
 }
