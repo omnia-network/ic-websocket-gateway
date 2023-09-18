@@ -323,22 +323,21 @@ impl ClientConnectionHandler {
         if let EnvelopeContentVariant::Call = client_request.envelope.content.variant() {
             let serialized_envelope = serialize(client_request.envelope)?;
 
+            let canister_id = self.canister_id.read().await.expect("must be some by now");
+
             // relay the envelope to the IC
             self.agent
-                .relay_envelope_to_canister(
-                    serialized_envelope,
-                    self.canister_id
-                        .read()
-                        .await
-                        .expect("must be some by now")
-                        .clone(),
-                )
+                .relay_envelope_to_canister(serialized_envelope, canister_id.clone())
                 .await
                 .map_err(|e| IcWsError::Initialization(e.to_string()))?;
 
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
+            debug!(
+                "relayed serialized envelope of type Call to canister with principal: {:?}",
+                canister_id.to_string()
+            );
             Ok(())
         } else {
             Err(IcWsError::Initialization(String::from(

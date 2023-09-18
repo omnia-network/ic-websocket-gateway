@@ -219,16 +219,15 @@ impl CanisterPoller {
 }
 
 fn process_canister_messages<'a>(messages: &'a mut Vec<CanisterOutputMessage>, message_nonce: u64) {
-    if message_nonce != 0 {
-        // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
-        // therefore, all the received messages are new and have to be relayed to the respective client handlers
-        return;
-    } else {
+    if message_nonce == 0 {
         // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
         // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
         // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-        filter_messages_of_first_polling_iteration(messages)
+        filter_messages_of_first_polling_iteration(messages);
+        debug!("filtered polled messages");
     }
+    // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
+    // therefore, all the received messages are new and have to be relayed to the respective client handlers
 }
 
 async fn relay_message(
@@ -292,6 +291,9 @@ async fn relay_message(
             }
         },
     }
+    // TODO: check without panicking
+    // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
+
     *message_nonce = last_message_nonce + 1;
     Ok(())
 }
@@ -326,18 +328,17 @@ async fn process_queues(
     clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
     client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
 ) {
-    // TODO: make sure that messages are delivered to each client in the order defined by their sequence numbers
-    //       might not be the case as messages are sent concurrently
-
     let mut handles = Vec::new();
     clients_message_queues.retain(|client_principal, message_queue| {
         if let Some(client_channel_tx) = client_channels.get(&client_principal) {
             // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
             // thus the respective queue does not need to be retained
             // relay all the messages previously received for the corresponding client
-            for m in message_queue.to_owned() {
-                let client_channel_tx = client_channel_tx.clone();
-                let handle = tokio::spawn(async move {
+            let client_channel_tx = client_channel_tx.clone();
+            let message_queue = message_queue.to_owned();
+            let handle = tokio::spawn(async move {
+                // make sure that messages are delivered to each client in the order defined by their sequence numbers
+                for m in message_queue {
                     warn!("Processing message with key: {:?} from queue", m.key);
                     if let Err(e) = client_channel_tx
                         .send(IcWsConnectionUpdate::Message(m))
@@ -345,9 +346,9 @@ async fn process_queues(
                     {
                         error!("Client's thread terminated: {}", e);
                     }
-                });
-                handles.push(handle);
-            }
+                }
+            });
+            handles.push(handle);
             return false;
         }
         // if the client channel has not been received yet, keep the messages in the queue
