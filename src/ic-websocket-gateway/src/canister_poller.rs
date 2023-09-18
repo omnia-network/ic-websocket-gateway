@@ -95,7 +95,12 @@ impl CanisterPoller {
             canister_id = %self.canister_id
         )
     )]
-    pub async fn run_polling(&self, mut poller_channels: PollerChannelsPollerEnds) {
+    pub async fn run_polling(
+        &self,
+        mut poller_channels: PollerChannelsPollerEnds,
+        first_client_principal: ClientPrincipal,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
+    ) {
         // once the poller starts running, it requests messages from nonce 0.
         // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
         // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
@@ -104,6 +109,11 @@ impl CanisterPoller {
         // channels used to communicate with the connection handler task of the client identified by the principal
         let mut client_channels: HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>> =
             HashMap::new();
+        // the channel used to send updates to the first client is passed as an argument to the poller
+        // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
+        // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
+        // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
+        client_channels.insert(first_client_principal, message_for_client_tx);
 
         // queues where the poller temporarily stores messages received from the canister before a client is registered
         // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
@@ -153,7 +163,8 @@ impl CanisterPoller {
 
                         process_canister_messages(
                             &mut msgs.messages,
-                            message_nonce
+                            message_nonce,
+                            first_client_principal
                         );
                         for canister_output_message in msgs.messages {
                             if let Err(e) = relay_message(
@@ -218,12 +229,16 @@ impl CanisterPoller {
     }
 }
 
-fn process_canister_messages<'a>(messages: &'a mut Vec<CanisterOutputMessage>, message_nonce: u64) {
+fn process_canister_messages<'a>(
+    messages: &'a mut Vec<CanisterOutputMessage>,
+    message_nonce: u64,
+    first_client_principal: ClientPrincipal,
+) {
     if message_nonce == 0 {
         // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
         // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
         // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-        filter_messages_of_first_polling_iteration(messages);
+        filter_messages_of_first_polling_iteration(messages, first_client_principal);
         debug!("filtered polled messages");
     }
     // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
@@ -298,30 +313,37 @@ async fn relay_message(
     Ok(())
 }
 
-fn filter_messages_of_first_polling_iteration<'a>(messages: &'a mut Vec<CanisterOutputMessage>) {
-    // eliminating the undesired messages in-place has the advantage that we do not have to clone every message when relaying it to the client handler
+fn filter_messages_of_first_polling_iteration<'a>(
+    messages: &'a mut Vec<CanisterOutputMessage>,
+    first_client_principal: ClientPrincipal,
+) {
+    // eliminating the undesired messages in place has the advantage that we do not have to clone every message when relaying it to the client handler
     // however, this requires decoding every message polled in the first iteration
-    // as this happens only once (per reboot), it's a good trad off
+    // as this happens only once (per reboot), it's a good trade off
 
-    // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
-    //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
-
-    // TODO: the polled messages might contain "old" open messages which are not filtered out
-    //       these should not be pushed into the queue as the client that sent them is already disconnected
+    messages.reverse();
+    let mut keep = true;
     messages.retain(|canister_output_message| {
-        let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
-            .expect("content of canister_output_message is not of type WebsocketMessage");
-        if websocket_message.is_service_message {
-            let canister_service_message = decode_one(&websocket_message.content)
-                .expect("content of websocket_message is not of type CanisterServiceMessage");
-            if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent { .. }) =
-                canister_service_message
-            {
-                return true;
+        if keep {
+            let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            if websocket_message.is_service_message {
+                let canister_service_message = decode_one(&websocket_message.content)
+                    .expect("content of websocket_message is not of type CanisterServiceMessage");
+                if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent {
+                    client_principal,
+                }) = canister_service_message
+                {
+                    if client_principal == first_client_principal {
+                        keep = false;
+                    }
+                }
             }
+            return true;
         }
         false
-    })
+    });
+    messages.reverse();
 }
 
 async fn process_queues(
@@ -424,8 +446,8 @@ mod tests {
         CanisterServiceMessage, ClientPrincipal, WebsocketMessage,
     };
     use crate::canister_poller::{
-        process_canister_messages, relay_message, CanisterToClientMessage, IcWsConnectionUpdate,
-        PollerChannelsPollerEnds, TerminationInfo,
+        filter_messages_of_first_polling_iteration, process_canister_messages, relay_message,
+        CanisterToClientMessage, IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
     };
     use crate::events_analyzer::Events;
     use candid::{encode_one, Principal};
@@ -568,58 +590,69 @@ mod tests {
     }
 
     fn mock_messages_to_be_filtered() -> Vec<CanisterOutputMessage> {
-        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        let mut sequence_number = 0;
+        let old_client_principal = Principal::from_text("aaaaa-aa").unwrap();
+        let reconnecting_client_principal =
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        let new_client_principal =
+            Principal::from_text("ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae")
+                .unwrap();
 
         let mut messages = Vec::new();
 
-        // this message should be filtered out
-        let canister_message = canister_output_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(old_client_principal, 10);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_open_message(reconnecting_client_principal, 0);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_output_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_ack_message(old_client_principal, 11);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 1);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 2);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 3);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_output_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_ack_message(reconnecting_client_principal, 4);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal, sequence_number);
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(old_client_principal, 12);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should be filtered out
-        let canister_message = canister_output_message(client_principal, sequence_number);
+        // the gateway reboots and therefore all the previous connections are closed
+        // client 2chl6-4hpzw-vqaaa-aaaaa-c reconnects
+        // new client ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae connects
+
+        // this message should not be filtered out as it is the open message sent by the first client that (re)connects after the gateway reboots
+        let canister_message = canister_open_message(reconnecting_client_principal, 0);
         messages.push(canister_message);
-        sequence_number += 1;
 
-        // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal, sequence_number);
+        // this message should not be filtered out as it was sent after the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 1);
+        messages.push(canister_message);
+
+        // this message should not be filtered out as it was sent after the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 2);
+        messages.push(canister_message);
+
+        // this message should not be filtered out as it was sent after the gateway rebooted
+        let canister_message = canister_open_message(new_client_principal, 0);
+        messages.push(canister_message);
+
+        // this message should not be filtered out as it was sent after the gateway rebooted
+        let canister_message = canister_output_message(new_client_principal, 1);
         messages.push(canister_message);
 
         messages
@@ -641,6 +674,28 @@ mod tests {
     }
 
     #[tokio::test()]
+    /// Simulates the case in which polled messages are filtered before being relayed.
+    /// The messages that are not fltered out should be relayed in the same order as when polled.
+    async fn should_return_filtered_messages_in_order() {
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+
+        let mut messages = mock_messages_to_be_filtered();
+        filter_messages_of_first_polling_iteration(&mut messages, client_principal);
+        assert_eq!(messages.len(), 5);
+
+        let mut expected_sequence_number = 0;
+        for canister_output_message in messages {
+            let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            if websocket_message.client_principal == client_principal {
+                assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+                expected_sequence_number += 1;
+            }
+        }
+        assert_eq!(expected_sequence_number, 3);
+    }
+
+    #[tokio::test()]
     /// Simulates the case in which the poller starts and the canister's queue contains some old messages.
     /// Relays only open messages for the connected clients.
     async fn should_process_canister_messages() {
@@ -656,14 +711,21 @@ mod tests {
             _poller_channel_for_completion_rx,
         ) = init_poller();
 
-        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        client_channels.insert(client_principal, message_for_client_tx);
+        let reconnecting_client_principal =
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        client_channels.insert(reconnecting_client_principal, message_for_client_tx.clone());
+        // messages from 2chl6-4hpzw-vqaaa-aaaaa-c must be relayed as the client is registered in the poller
+
+        // simulating the case in which the poller did not yet receive the client channel for client ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
+        // messages from ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae should be pushed to the queue
 
         let mut messages = mock_messages_to_be_filtered();
         let mut message_nonce = 0;
-        process_canister_messages(&mut messages, message_nonce);
-        assert_eq!(messages.len(), 3);
+        process_canister_messages(&mut messages, message_nonce, reconnecting_client_principal);
+        assert_eq!(messages.len(), 5);
 
+        let mut received = 0;
+        let mut queued = 0;
         for canister_output_message in messages {
             relay_message(
                 canister_output_message,
@@ -676,15 +738,36 @@ mod tests {
             )
             .await
             .unwrap();
-            if let Err(_) = message_for_client_rx.try_recv() {
-                panic!("should not receive error");
+
+            match message_for_client_rx.try_recv() {
+                Ok(update) => {
+                    if let IcWsConnectionUpdate::Message(m) = update {
+                        // counts the messages relayed should only be for client 2chl6-4hpzw-vqaaa-aaaaa-c
+                        // as it is the only one registered in the poller
+                        let websocket_message: WebsocketMessage = from_slice(&m.content)
+                            .expect("content must be of type WebsocketMessage");
+                        // only client 2chl6-4hpzw-vqaaa-aaaaa-c should be registered in poller
+                        assert_eq!(
+                            websocket_message.client_principal,
+                            reconnecting_client_principal
+                        );
+                        received += 1
+                    } else {
+                        panic!("updates must be of variant Message")
+                    }
+                },
+                Err(_) => queued += 1,
             }
         }
+        let expected_received = 3; // number of messages for 2chl6-4hpzw-vqaaa-aaaaa-c in mock_messages_to_be_filtered after gateway reboots
+        assert_eq!(received, expected_received);
+        let expected_queued = 2; // number of messages for ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
+        assert_eq!(queued, expected_queued);
 
         let mut messages = mock_messages_to_be_filtered();
         // here message_nonce is > 0, so messages will not be filtered
-        process_canister_messages(&mut messages, message_nonce);
-        assert_eq!(messages.len(), 10);
+        process_canister_messages(&mut messages, message_nonce, reconnecting_client_principal);
+        assert_eq!(messages.len(), 13);
     }
 
     #[tokio::test()]

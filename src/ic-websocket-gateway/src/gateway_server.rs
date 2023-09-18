@@ -364,27 +364,21 @@ impl GatewayState {
                     // spawn new canister poller task
                     tokio::spawn(async move {
                         let poller = CanisterPoller::new(canister_id, agent, polling_interval);
-                        // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
-                        // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
-                        // the new poller thread should not get those same messages again
-                        poller.run_polling(poller_channels_poller_ends).await;
+                        // the channel used to send updates to the first client is passed as an argument to the poller
+                        // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
+                        poller
+                            .run_polling(
+                                poller_channels_poller_ends,
+                                client_principal.clone(),
+                                gateway_session.message_for_client_tx.clone(),
+                            )
+                            .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
                     });
                     connection_establishment_events
                         .metrics
                         .set_started_new_poller();
-
-                    // send channel data to poller
-                    if let Err(e) = poller_channel_for_client_channel_sender_tx
-                        .send(poller_to_client_channel_data)
-                        .await
-                    {
-                        error!(
-                            "Receiver has been dropped on the poller task's side. Error: {:?}",
-                            e
-                        )
-                    }
                 }
                 connection_establishment_events
                     .metrics
