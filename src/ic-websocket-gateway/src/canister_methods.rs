@@ -9,8 +9,6 @@ pub type ClientPrincipal = Principal;
 
 /// The result of [ws_close].
 pub type CanisterWsCloseResult = Result<(), String>;
-/// The result of [ws_status].
-pub type CanisterWsStatusResult = Result<(), String>;
 /// The result of [ws_get_messages].
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
@@ -124,23 +122,6 @@ pub async fn ws_close(
         .map_err(|e| e.to_string())?;
 
     Decode!(&res, CanisterWsCloseResult).map_err(|e| e.to_string())?
-}
-
-pub async fn ws_status(
-    agent: &Agent,
-    canister_id: &Principal,
-    args: CanisterWsStatusArguments,
-) -> CanisterWsStatusResult {
-    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
-
-    let res = agent
-        .update(canister_id, "ws_status")
-        .with_arg(args)
-        .call_and_wait()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Decode!(&res, CanisterWsStatusResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_get_messages(

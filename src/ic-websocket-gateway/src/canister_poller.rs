@@ -1,8 +1,7 @@
 use crate::{
     canister_methods::{
         self, CanisterOpenMessageContent, CanisterOutputCertifiedMessages, CanisterOutputMessage,
-        CanisterServiceMessage, CanisterWsGetMessagesArguments, CanisterWsStatusArguments,
-        CanisterWsStatusResult, ClientPrincipal, WebsocketMessage,
+        CanisterServiceMessage, CanisterWsGetMessagesArguments, ClientPrincipal, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -12,7 +11,6 @@ use crate::{
 };
 use candid::{decode_one, CandidType};
 use ic_agent::{export::Principal, Agent};
-use rand::distributions::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
 use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -85,21 +83,14 @@ pub struct CanisterPoller {
     canister_id: Principal,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
-    send_status_interval_ms: u64,
 }
 
 impl CanisterPoller {
-    pub fn new(
-        canister_id: Principal,
-        agent: Arc<Agent>,
-        polling_interval_ms: u64,
-        send_status_interval_ms: u64,
-    ) -> Self {
+    pub fn new(canister_id: Principal, agent: Arc<Agent>, polling_interval_ms: u64) -> Self {
         Self {
             canister_id,
             agent,
             polling_interval_ms,
-            send_status_interval_ms,
         }
     }
 
@@ -128,11 +119,6 @@ impl CanisterPoller {
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
-
-        // status index used by the CDK to detect when the WS Gateway fails
-        let mut gateway_status_index: u64 = 0;
-        let gateway_status_operation = self.send_status_message_to_canister(gateway_status_index);
-        tokio::pin!(gateway_status_operation);
 
         'poller_loop: loop {
             select! {
@@ -200,21 +186,6 @@ impl CanisterPoller {
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
                     get_messages_operation.set(self.get_canister_updates(message_nonce, polling_iteration));
                 },
-                res = &mut gateway_status_operation => {
-                    match res {
-                        Ok(_) => {
-                            gateway_status_index += 1;
-                            gateway_status_operation.set(
-                                self.send_status_message_to_canister(gateway_status_index)
-                            );
-                        }
-                        Err(e) => {
-                            error!("Terminating poller task due to fail in sending gateway status update: {}", e);
-                            signal_termination_and_cleanup(&mut poller_channels.poller_to_main, self.canister_id, &client_channels, e).await;
-                            break 'poller_loop;
-                        }
-                    }
-                }
             }
         }
     }
@@ -246,24 +217,6 @@ impl CanisterPoller {
             return Some((canister_result, poller_events));
         }
         None
-    }
-
-    async fn send_status_message_to_canister(&self, status_index: u64) -> CanisterWsStatusResult {
-        let message = CanisterWsStatusArguments { status_index };
-
-        // this logic is performed here, instead of in the branch corresponding to the current future, in order to not slow down the select! loop while waiting for the retries
-        // (as once a future is selected, the corresponding branch "blocks" all the futures until the next iteration of select!)
-        if let Err(e) =
-            ws_status_to_canister_with_retries(Arc::clone(&self.agent), self.canister_id, message)
-                .await
-        {
-            // in case of error, we report it immediately
-            return Err(e);
-        }
-        info!("Sent gateway status update: {}", status_index);
-        // if the ws_message is successful, we wait the interval for the gateway status check before returning
-        sleep(self.send_status_interval_ms).await;
-        Ok(())
     }
 }
 
@@ -376,34 +329,6 @@ async fn filter_messages_of_first_polling_iteration<'a>(
     })
 }
 
-async fn ws_status_to_canister_with_retries(
-    agent: Arc<Agent>,
-    canister_id: Principal,
-    message: CanisterWsStatusArguments,
-) -> Result<(), String> {
-    let max_retries = 3;
-    for attempt in 1..=max_retries {
-        match canister_methods::ws_status(&agent, &canister_id, message.clone()).await {
-            Ok(_) => {
-                break;
-            },
-            Err(e) => {
-                warn!(
-                    "Attempt {}: called ws_message on canister failed: {}",
-                    attempt, e
-                );
-                if attempt == max_retries {
-                    return Err(String::from("Max retries for calling ws_message reached"));
-                }
-                let retry_delay_ms = sample_uniform(2, 5) as u64 * 1000;
-                warn!("Retrying in {} milliseconds...", retry_delay_ms);
-                sleep(retry_delay_ms).await;
-            },
-        }
-    }
-    Ok(())
-}
-
 fn process_queues(
     clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
     client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
@@ -431,12 +356,6 @@ fn process_queues(
         // if the client channel has not been received yet, keep the messages in the queue
         true
     });
-}
-
-fn sample_uniform(lower_bound: i32, upper_bound: i32) -> i32 {
-    let mut rng = rand::thread_rng();
-    let uniform = Uniform::new_inclusive(lower_bound, upper_bound);
-    uniform.sample(&mut rng)
 }
 
 pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {

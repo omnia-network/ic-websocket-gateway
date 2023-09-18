@@ -38,9 +38,6 @@ struct DeploymentInfo {
     #[structopt(long, default_value = "100")]
     polling_interval: u64,
 
-    #[structopt(long, default_value = "30000")]
-    send_status_interval: u64,
-
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
 
@@ -137,10 +134,7 @@ async fn main() -> Result<(), String> {
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     gateway_server
-        .manage_state(
-            deployment_info.polling_interval,
-            deployment_info.send_status_interval,
-        )
+        .manage_state(deployment_info.polling_interval)
         .await;
     info!("Terminated state manager");
 

@@ -149,7 +149,7 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
+    pub async fn manage_state(&mut self, polling_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -173,7 +173,6 @@ impl GatewayServer {
                         poller_channel_for_completion_tx.clone(),
                         self.events_channel_tx.clone(),
                         polling_interval,
-                        send_status_interval,
                         self.agent.clone()
                     ).await;
 
@@ -297,7 +296,6 @@ impl GatewayState {
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval: u64,
-        send_status_interval: u64,
         agent: Arc<Agent>,
     ) {
         match connection_state {
@@ -366,12 +364,7 @@ impl GatewayState {
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(
-                            canister_id,
-                            agent,
-                            polling_interval,
-                            send_status_interval,
-                        );
+                        let poller = CanisterPoller::new(canister_id, agent, polling_interval);
                         // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
                         // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
                         // the new poller thread should not get those same messages again
