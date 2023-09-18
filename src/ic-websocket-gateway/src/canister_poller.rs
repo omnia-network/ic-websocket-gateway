@@ -147,6 +147,7 @@ impl CanisterPoller {
                 // poll canister for updates across multiple select! iterations
                 res = &mut get_messages_operation => {
                     // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
+                    // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
                     process_queues(&mut clients_message_queues, &client_channels).await;
 
                     if let Some((mut msgs, mut poller_events)) = res {
@@ -156,7 +157,7 @@ impl CanisterPoller {
                         process_canister_messages(
                             &mut msgs.messages,
                             message_nonce
-                        ).await;
+                        );
                         for canister_output_message in msgs.messages {
                             if let Err(e) = relay_message(
                                 canister_output_message,
@@ -220,10 +221,7 @@ impl CanisterPoller {
     }
 }
 
-async fn process_canister_messages<'a>(
-    messages: &'a mut Vec<CanisterOutputMessage>,
-    message_nonce: u64,
-) {
+fn process_canister_messages<'a>(messages: &'a mut Vec<CanisterOutputMessage>, message_nonce: u64) {
     if message_nonce != 0 {
         // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
         // therefore, all the received messages are new and have to be relayed to the respective client handlers
@@ -232,7 +230,7 @@ async fn process_canister_messages<'a>(
         // if the poller just started (message_nonce == 0), the canister might have already had other messages in the queue which we should not send to the clients
         // therefore, starting from the last message polled, we relay the open message of type CanisterServiceMessage::OpenMessage for each connected client
         // message_nonce has to be set to the nonce of the last open message pollled in this iteration so that in the next iteration we can poll from there
-        filter_messages_of_first_polling_iteration(messages).await
+        filter_messages_of_first_polling_iteration(messages)
     }
 }
 
@@ -301,9 +299,7 @@ async fn relay_message(
     Ok(())
 }
 
-async fn filter_messages_of_first_polling_iteration<'a>(
-    messages: &'a mut Vec<CanisterOutputMessage>,
-) {
+fn filter_messages_of_first_polling_iteration<'a>(messages: &'a mut Vec<CanisterOutputMessage>) {
     // eliminating the undesired messages in-place has the advantage that we do not have to clone every message when relaying it to the client handler
     // however, this requires decoding every message polled in the first iteration
     // as this happens only once (per reboot), it's a good trad off
@@ -630,8 +626,11 @@ mod tests {
         messages
     }
 
-    fn mock_ordered_messages(client_principal: Principal) -> Vec<CanisterOutputMessage> {
-        let mut sequence_number = 0;
+    fn mock_ordered_messages(
+        client_principal: Principal,
+        start_sequence_number: u64,
+    ) -> Vec<CanisterOutputMessage> {
+        let mut sequence_number = start_sequence_number;
 
         let mut messages = Vec::new();
         while sequence_number < 10 {
@@ -663,7 +662,7 @@ mod tests {
 
         let mut messages = mock_messages();
         let mut message_nonce = 0;
-        process_canister_messages(&mut messages, message_nonce).await;
+        process_canister_messages(&mut messages, message_nonce);
         assert_eq!(messages.len(), 3);
 
         for canister_output_message in messages {
@@ -685,7 +684,7 @@ mod tests {
 
         let mut messages = mock_messages();
         // here message_nonce is > 0, so messages will not be filtered
-        process_canister_messages(&mut messages, message_nonce).await;
+        process_canister_messages(&mut messages, message_nonce);
         assert_eq!(messages.len(), 10);
     }
 
@@ -816,7 +815,10 @@ mod tests {
 
         let mut messages = Vec::new();
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        for canister_output_message in mock_ordered_messages(client_principal) {
+        let start_sequence_number = 0;
+        for canister_output_message in
+            mock_ordered_messages(client_principal, start_sequence_number)
+        {
             let m = CanisterToClientMessage {
                 key: canister_output_message.key.clone(),
                 content: canister_output_message.content,
@@ -867,7 +869,8 @@ mod tests {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
         client_channels.insert(client_principal, message_for_client_tx);
 
-        let messages = mock_ordered_messages(client_principal);
+        let start_sequence_number = 0;
+        let messages = mock_ordered_messages(client_principal, start_sequence_number);
         let count_messages = messages.len() as u64;
         let mut message_nonce = 0;
         for canister_output_message in messages {
@@ -894,6 +897,80 @@ mod tests {
 
         // make sure that all messages are received
         assert_eq!(count_messages, expected_sequence_number);
+        // make sure that no messages are pushed into the queue
+        assert_eq!(clients_message_queues.len(), 0);
+    }
+
+    #[tokio::test()]
+    /// Simulates the case in which the gateway polls multiple messages for a client that is connected while there are already multiple messages in the queue.
+    /// Relays the messages to the client in ascending order specified by the sequence number.
+    async fn should_relay_polled_messages_in_order_after_processing_queue() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            mut client_channels,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
+
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        client_channels.insert(client_principal, message_for_client_tx);
+
+        let mut messages_in_queue = Vec::new();
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        let start_sequence_number = 0;
+        for canister_output_message in
+            mock_ordered_messages(client_principal, start_sequence_number)
+        {
+            let m = CanisterToClientMessage {
+                key: canister_output_message.key.clone(),
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
+            messages_in_queue.push(m);
+        }
+
+        let count_messages_in_queue = messages_in_queue.len() as u64;
+        clients_message_queues.insert(client_principal, messages_in_queue);
+
+        process_queues(&mut clients_message_queues, &client_channels).await;
+
+        let start_sequence_number = count_messages_in_queue;
+        let polled_messages = mock_ordered_messages(client_principal, start_sequence_number);
+        let count_polled_messages = polled_messages.len() as u64;
+        let mut message_nonce = 0;
+        for canister_output_message in polled_messages {
+            relay_message(
+                canister_output_message,
+                Vec::new(),
+                Vec::new(),
+                &client_channels,
+                &poller_channels_poller_ends,
+                &mut clients_message_queues,
+                &mut message_nonce,
+            )
+            .await
+            .unwrap();
+        }
+
+        let mut expected_sequence_number = 0;
+        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+            let websocket_message: WebsocketMessage = from_slice(&m.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+            expected_sequence_number += 1;
+        }
+
+        // make sure that all messages are received
+        assert_eq!(
+            count_messages_in_queue + count_polled_messages,
+            expected_sequence_number
+        );
         // make sure that no messages are pushed into the queue
         assert_eq!(clients_message_queues.len(), 0);
     }
