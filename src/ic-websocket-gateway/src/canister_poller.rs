@@ -67,7 +67,7 @@ pub enum IcWsConnectionUpdate {
 /// - ClientDisconnected: signals the poller which cllient disconnected
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
-    NewClientChannel(u64, ClientPrincipal, Sender<IcWsConnectionUpdate>),
+    NewClientChannel(ClientPrincipal, Sender<IcWsConnectionUpdate>),
     ClientDisconnected(ClientPrincipal),
 }
 
@@ -125,7 +125,7 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(_client_id, client_principal, client_channel) => {
+                        PollerToClientChannelData::NewClientChannel(client_principal, client_channel) => {
                             debug!("Added new channel to poller for client: {:?}", client_principal);
                             client_channels.insert(client_principal.clone(), client_channel);
                         },
@@ -568,7 +568,7 @@ mod tests {
         mock_canister_output_message(websocket_message, client_principal)
     }
 
-    fn mock_messages() -> Vec<CanisterOutputMessage> {
+    fn mock_messages_to_be_filtered() -> Vec<CanisterOutputMessage> {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
         let mut sequence_number = 0;
 
@@ -660,7 +660,7 @@ mod tests {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
         client_channels.insert(client_principal, message_for_client_tx);
 
-        let mut messages = mock_messages();
+        let mut messages = mock_messages_to_be_filtered();
         let mut message_nonce = 0;
         process_canister_messages(&mut messages, message_nonce);
         assert_eq!(messages.len(), 3);
@@ -682,7 +682,7 @@ mod tests {
             }
         }
 
-        let mut messages = mock_messages();
+        let mut messages = mock_messages_to_be_filtered();
         // here message_nonce is > 0, so messages will not be filtered
         process_canister_messages(&mut messages, message_nonce);
         assert_eq!(messages.len(), 10);

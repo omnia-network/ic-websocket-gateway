@@ -317,7 +317,6 @@ impl GatewayState {
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
-                    gateway_session.client_id,
                     client_principal.clone(),
                     gateway_session.message_for_client_tx.clone(),
                 );
