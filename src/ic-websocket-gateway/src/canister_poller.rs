@@ -357,6 +357,9 @@ async fn filter_messages_of_first_polling_iteration<'a>(
 
     // TODO: if for some of the connected clients there are also messages other than the open message, these must also be relayed
     //       !!! the current implementation skips these messages if they are inserted in the queue before the last open message polled in the first iteration !!!
+
+    // TODO: the polled messages might contain "old" open messages which are not filtered out
+    //       these should not be pushed into the queue as the client that sent them is already disconnected
     messages.retain(|canister_output_message| {
         let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
             .expect("content of canister_output_message is not of type WebsocketMessage");
@@ -680,6 +683,8 @@ mod tests {
     }
 
     #[tokio::test()]
+    /// Simulates the case in which the poller starts and the canister's queue contains some old messages.
+    /// Relays only open messages for the connected clients.
     async fn should_process_canister_messages() {
         let (
             message_for_client_tx,
@@ -725,6 +730,8 @@ mod tests {
     }
 
     #[tokio::test()]
+    /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
+    /// Stores the message in the queue so that it can be processed later.
     async fn should_push_message_to_queue() {
         let (
             _message_for_client_tx,
@@ -757,6 +764,8 @@ mod tests {
     }
 
     #[tokio::test()]
+    /// Simulates the case in which there is a message in the queue for a client that is connected.
+    /// Relays the message to the client and empties the queue.
     async fn should_process_message_in_queue() {
         let (
             message_for_client_tx,
