@@ -512,20 +512,21 @@ mod tests {
     fn mock_websocket_service_message(
         content: CanisterServiceMessage,
         client_principal: Principal,
+        sequence_num: u64,
     ) -> WebsocketMessage {
         WebsocketMessage {
             client_principal,
-            sequence_num: 0,
+            sequence_num,
             timestamp: 0,
             is_service_message: true,
             content: encode_one(content).unwrap(),
         }
     }
 
-    fn mock_websocket_message(client_principal: Principal) -> WebsocketMessage {
+    fn mock_websocket_message(client_principal: Principal, sequence_num: u64) -> WebsocketMessage {
         WebsocketMessage {
             client_principal,
-            sequence_num: 0,
+            sequence_num,
             timestamp: 0,
             is_service_message: false,
             content: vec![],
@@ -543,68 +544,87 @@ mod tests {
         }
     }
 
-    fn canister_open_message(client_principal: Principal) -> CanisterOutputMessage {
+    fn canister_open_message(
+        client_principal: Principal,
+        sequence_num: u64,
+    ) -> CanisterOutputMessage {
         let open_message = mock_open_message(client_principal);
         let websocket_service_message =
-            mock_websocket_service_message(open_message, client_principal);
+            mock_websocket_service_message(open_message, client_principal, sequence_num);
         mock_canister_output_message(websocket_service_message, client_principal)
     }
 
-    fn canister_ack_message(client_principal: Principal) -> CanisterOutputMessage {
+    fn canister_ack_message(
+        client_principal: Principal,
+        sequence_num: u64,
+    ) -> CanisterOutputMessage {
         let ack_message = mock_ack_message();
         let websocket_service_message =
-            mock_websocket_service_message(ack_message, client_principal);
+            mock_websocket_service_message(ack_message, client_principal, sequence_num);
         mock_canister_output_message(websocket_service_message, client_principal)
     }
 
-    fn canister_output_message(client_principal: Principal) -> CanisterOutputMessage {
-        let websocket_message = mock_websocket_message(client_principal);
+    fn canister_output_message(
+        client_principal: Principal,
+        sequence_num: u64,
+    ) -> CanisterOutputMessage {
+        let websocket_message = mock_websocket_message(client_principal, sequence_num);
         mock_canister_output_message(websocket_message, client_principal)
     }
 
     fn mock_messages() -> Vec<CanisterOutputMessage> {
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        let mut sequence_number = 0;
 
         let mut messages = Vec::new();
 
         // this message should be filtered out
-        let canister_message = canister_output_message(client_principal);
+        let canister_message = canister_output_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal);
+        let canister_message = canister_ack_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_output_message(client_principal);
+        let canister_message = canister_output_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal);
+        let canister_message = canister_open_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal);
+        let canister_message = canister_ack_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal);
+        let canister_message = canister_open_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_output_message(client_principal);
+        let canister_message = canister_output_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_ack_message(client_principal);
+        let canister_message = canister_ack_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should be filtered out
-        let canister_message = canister_output_message(client_principal);
+        let canister_message = canister_output_message(client_principal, sequence_number);
         messages.push(canister_message);
+        sequence_number += 1;
 
         // this message should not be filtered out
-        let canister_message = canister_open_message(client_principal);
+        let canister_message = canister_open_message(client_principal, sequence_number);
         messages.push(canister_message);
 
         messages
@@ -674,7 +694,8 @@ mod tests {
         ) = init_poller();
 
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        let canister_output_message = canister_open_message(client_principal);
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(client_principal, sequence_number);
         let mut message_nonce = 0;
 
         relay_message(
@@ -709,7 +730,8 @@ mod tests {
         ) = init_poller();
 
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        let canister_output_message = canister_open_message(client_principal);
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(client_principal, sequence_number);
         let client_principal = canister_output_message.client_principal;
         let m = CanisterToClientMessage {
             key: canister_output_message.key.clone(),
@@ -748,7 +770,8 @@ mod tests {
         ) = init_poller();
 
         let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
-        let canister_output_message = canister_open_message(client_principal);
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(client_principal, sequence_number);
         let client_principal = canister_output_message.client_principal;
         let m = CanisterToClientMessage {
             key: canister_output_message.key.clone(),
