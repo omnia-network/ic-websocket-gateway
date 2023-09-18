@@ -825,6 +825,8 @@ mod tests {
             };
             messages.push(m);
         }
+
+        let count_messages = messages.len() as u64;
         clients_message_queues.insert(client_principal, messages);
 
         // simulates the client being registered in the poller
@@ -840,6 +842,59 @@ mod tests {
             expected_sequence_number += 1;
         }
 
+        // make sure that all messages are received
+        assert_eq!(count_messages, expected_sequence_number);
+        // make sure that no messages are pushed into the queue
+        assert_eq!(clients_message_queues.len(), 0);
+    }
+
+    #[tokio::test()]
+    /// Simulates the case in which the gateway polls multiple messages for a client that is connected.
+    /// Relays the messages to the client in ascending order specified by the sequence number.
+    async fn should_relay_polled_messages_in_order() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            mut client_channels,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
+
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+        client_channels.insert(client_principal, message_for_client_tx);
+
+        let messages = mock_ordered_messages(client_principal);
+        let count_messages = messages.len() as u64;
+        let mut message_nonce = 0;
+        for canister_output_message in messages {
+            relay_message(
+                canister_output_message,
+                Vec::new(),
+                Vec::new(),
+                &client_channels,
+                &poller_channels_poller_ends,
+                &mut clients_message_queues,
+                &mut message_nonce,
+            )
+            .await
+            .unwrap();
+        }
+
+        let mut expected_sequence_number = 0;
+        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+            let websocket_message: WebsocketMessage = from_slice(&m.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+            expected_sequence_number += 1;
+        }
+
+        // make sure that all messages are received
+        assert_eq!(count_messages, expected_sequence_number);
+        // make sure that no messages are pushed into the queue
         assert_eq!(clients_message_queues.len(), 0);
     }
 }
