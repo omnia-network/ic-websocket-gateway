@@ -1,4 +1,4 @@
-import IcWebSocket from "ic-websocket-js";
+import IcWebSocket, { generateRandomIdentity } from "ic-websocket-js";
 import environment from "./utils/environment";
 import { deserializeAppMessage, serializeAppMessage } from "./utils/idl";
 import type { _SERVICE } from "../../test_canister/src/declarations/test_canister/test_canister.did";
@@ -54,6 +54,7 @@ describe("WS client", () => {
     ws = new IcWebSocket(gatewayAddress, undefined, {
       canisterId,
       networkUrl: icUrl,
+      identity: generateRandomIdentity(),
     });
 
     ws.onopen = () => {
