@@ -34,9 +34,6 @@ use tracing::{debug, error, info, warn};
 struct ClientRequest<'a> {
     /// Envelope of the signed request to the IC
     envelope: Envelope<'a>,
-    /// Used by the client to identify which response corresponds to this request
-    #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
 }
 
 /// Message sent back to the client via WS
