@@ -339,14 +339,20 @@ async fn relay_message(
     Ok(())
 }
 
+/// Finds the response to the open message of the client that started the poller.
+/// Returns all the messages following this message (inclusive).
 fn filter_messages_of_first_polling_iteration<'a>(
     messages: &'a mut Vec<CanisterOutputMessage>,
     first_client_principal: ClientPrincipal,
 ) {
-    // eliminating the undesired messages in place has the advantage that we do not have to clone every message when relaying it to the client handler
-    // however, this requires decoding every message polled in the first iteration
-    // as this happens only once (per reboot), it's a good trade off
+    // the filter assumes that, if the response to the open message of the first client that connects after the gateway reboots is not (yet) present,
+    // the polled messages (which are all old) do not contain the result to a previous open message that the same client sent before the gateway rebooted
 
+    // if this is not the case, the filter will return all the messages from the result of the open message of the client which reconnects first
+    // however, this open message is old as it was sent by the client before the gateway rebooted and this is mistaken with
+    // the result of the new open message has not yet been pushed to the message queue of the canister (and thus not polled)
+
+    // TODO: figure out how to remove this assumption
     let len_before_filter = messages.len();
     messages.reverse();
     let mut keep = true;
@@ -370,6 +376,8 @@ fn filter_messages_of_first_polling_iteration<'a>(
         }
         false
     });
+    // in case the response to the open message to the first client that connects is not found, all messages have to be discarded
+    // as they correspond to messages sent before the gateway rebooted
     if keep == true {
         messages.retain(|_m| false);
     }
@@ -692,6 +700,48 @@ mod tests {
         messages
     }
 
+    fn mock_all_old_messages_to_be_filtered() -> Vec<CanisterOutputMessage> {
+        let old_client_principal = Principal::from_text("aaaaa-aa").unwrap();
+        let reconnecting_client_principal =
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+
+        let mut messages = Vec::new();
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(old_client_principal, 10);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_ack_message(old_client_principal, 11);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 1);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 2);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(reconnecting_client_principal, 3);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_ack_message(reconnecting_client_principal, 4);
+        messages.push(canister_message);
+
+        // this message should be filtered out as it was sent before the gateway rebooted
+        let canister_message = canister_output_message(old_client_principal, 12);
+        messages.push(canister_message);
+
+        // the gateway reboots and therefore all the previous connections are closed
+        // client 2chl6-4hpzw-vqaaa-aaaaa-c will reconnect but its open message is not ready for this polling iteration
+
+        // all messages should therefore be filtered out
+        messages
+    }
+
     fn mock_ordered_messages(
         client_principal: Principal,
         start_sequence_number: u64,
@@ -727,6 +777,17 @@ mod tests {
             }
         }
         assert_eq!(expected_sequence_number, 3);
+    }
+
+    #[tokio::test()]
+    /// Simulates the case in which polled messages are all from before the gateway rebooted.
+    /// The messages that are not fltered out should be relayed in the same order as when polled.
+    async fn should_filter_out_all_messages() {
+        let client_principal = Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap();
+
+        let mut messages = mock_all_old_messages_to_be_filtered();
+        filter_messages_of_first_polling_iteration(&mut messages, client_principal);
+        assert_eq!(messages.len(), 0);
     }
 
     #[tokio::test()]
