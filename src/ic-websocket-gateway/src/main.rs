@@ -17,6 +17,7 @@ mod canister_poller;
 mod client_connection_handler;
 mod events_analyzer;
 mod gateway_server;
+mod messages_demux;
 mod unit_tests;
 mod ws_listener;
 mod metrics {

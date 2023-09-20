@@ -4,11 +4,9 @@ use crate::{
         CanisterServiceMessage, CanisterToClientMessage, CanisterWsGetMessagesArguments,
         ClientPrincipal, WebsocketMessage,
     },
-    events_analyzer::{Events, EventsCollectionType, EventsImpl, EventsReference},
-    metrics::canister_poller_metrics::{
-        IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
-        PollerEventsMetrics,
-    },
+    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    messages_demux::MessagesDemux,
+    metrics::canister_poller_metrics::{PollerEvents, PollerEventsMetrics},
 };
 use candid::decode_one;
 use ic_agent::{export::Principal, Agent};
@@ -30,7 +28,7 @@ pub struct PollerChannelsPollerEnds {
     /// sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
     poller_to_main: Sender<TerminationInfo>,
     /// sending side of the channel used by the poller to send events to the event analyzer
-    poller_to_analyzer: Sender<Box<dyn Events + Send>>,
+    pub poller_to_analyzer: Sender<Box<dyn Events + Send>>,
 }
 
 impl PollerChannelsPollerEnds {
@@ -122,6 +120,8 @@ impl CanisterPoller {
 
         let mut polling_iteration = 0; // used as a reference for the PollerEvents
 
+        let messages_demux = MessagesDemux::new();
+
         let get_messages_operation = self.get_canister_updates(message_nonce, polling_iteration);
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
@@ -153,17 +153,42 @@ impl CanisterPoller {
                 }
                 // poll canister for updates across multiple select! iterations
                 res = &mut get_messages_operation => {
-                    if let Err(e) = relay_messages(self.canister_id,
-                        &mut clients_message_queues,
-                        &client_channels,
-                        res,
-                        &mut poller_channels,
-                        first_client_principal,
-                        &mut message_nonce,
-                        &mut polling_iteration).await {
+                    // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
+                    // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
+                    process_queues(&mut clients_message_queues, &client_channels).await;
+
+                    if let Some((mut msgs, mut poller_events)) = res {
+                        poller_events.metrics.set_start_relaying_messages();
+                        poller_channels
+                            .poller_to_analyzer
+                            .send(Box::new(poller_events))
+                            .await
+                            .expect("analyzer's side of the channel dropped");
+
+                        process_canister_messages(&mut msgs.messages, message_nonce, first_client_principal);
+
+                        if let Err(e) = messages_demux.relay_messages(
+                            msgs,
+                            &mut clients_message_queues,
+                            &client_channels,
+                            &mut poller_channels,
+                            &mut message_nonce,
+                        ).await {
                             error!(e);
+                            signal_termination_and_cleanup(
+                                &mut poller_channels.poller_to_main,
+                                self.canister_id,
+                                &client_channels,
+                                e,
+                            )
+                            .await;
                             break 'poller_loop;
                         }
+
+                        // counting only iterations which return at least one canister message
+                        polling_iteration += 1;
+                    }
+
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
                     get_messages_operation.set(self.get_canister_updates(message_nonce, polling_iteration));
@@ -215,128 +240,6 @@ fn process_canister_messages<'a>(
     }
     // this is not the first polling iteration and therefore the poller queried the canister starting from the nonce of the last message of the previous polling iteration
     // therefore, all the received messages are new and have to be relayed to the respective client handlers
-}
-
-async fn relay_messages(
-    canister_id: Principal,
-    clients_message_queues: &mut HashMap<Principal, Vec<CanisterToClientMessage>>,
-    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
-    res: Option<(
-        CanisterOutputCertifiedMessages,
-        EventsImpl<PollerEventsMetrics>,
-    )>,
-    poller_channels: &mut PollerChannelsPollerEnds,
-    first_client_principal: ClientPrincipal,
-    message_nonce: &mut u64,
-    polling_iteration: &mut u64,
-) -> Result<(), String> {
-    // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
-    // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
-    process_queues(clients_message_queues, &client_channels).await;
-
-    if let Some((mut msgs, mut poller_events)) = res {
-        poller_events.metrics.set_start_relaying_messages();
-        poller_channels
-            .poller_to_analyzer
-            .send(Box::new(poller_events))
-            .await
-            .expect("analyzer's side of the channel dropped");
-
-        process_canister_messages(&mut msgs.messages, *message_nonce, first_client_principal);
-        for canister_output_message in msgs.messages {
-            if let Err(e) = relay_message(
-                canister_output_message,
-                msgs.cert.clone(),
-                msgs.tree.clone(),
-                &client_channels,
-                &poller_channels,
-                clients_message_queues,
-                message_nonce,
-            )
-            .await
-            {
-                signal_termination_and_cleanup(
-                    &mut poller_channels.poller_to_main,
-                    canister_id,
-                    &client_channels,
-                    e.clone(),
-                )
-                .await;
-                return Err(format!("Terminating poller task due to CDK error: {}", e));
-            }
-        }
-        // counting only iterations which return at least one canister message
-        *polling_iteration += 1;
-    }
-    Ok(())
-}
-
-async fn relay_message(
-    canister_output_message: CanisterOutputMessage,
-    cert: Vec<u8>,
-    tree: Vec<u8>,
-    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
-    poller_channels: &PollerChannelsPollerEnds,
-    clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
-    message_nonce: &mut u64,
-) -> Result<(), String> {
-    let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
-        None,
-        EventsCollectionType::CanisterMessage,
-        IncomingCanisterMessageEventsMetrics::default(),
-    );
-    incoming_canister_message_events
-        .metrics
-        .set_start_relaying_message();
-    let client_principal = canister_output_message.client_principal;
-    let m = CanisterToClientMessage {
-        key: canister_output_message.key.clone(),
-        content: canister_output_message.content,
-        cert,
-        tree,
-    };
-
-    let last_message_nonce = get_nonce_from_message(&canister_output_message.key)?;
-    incoming_canister_message_events.reference =
-        Some(EventsReference::MessageNonce(last_message_nonce));
-    match client_channels.get(&client_principal) {
-        Some(client_channel_tx) => {
-            debug!("Received message with key: {:?} from canister", m.key);
-            if let Err(e) = client_channel_tx
-                .send(IcWsConnectionUpdate::Message(m))
-                .await
-            {
-                error!("Client's thread terminated: {}", e);
-                incoming_canister_message_events
-                    .metrics
-                    .set_no_message_relayed();
-            } else {
-                incoming_canister_message_events
-                    .metrics
-                    .set_message_relayed();
-            }
-            poller_channels
-                .poller_to_analyzer
-                .send(Box::new(incoming_canister_message_events))
-                .await
-                .expect("analyzer's side of the channel dropped");
-        },
-        None => {
-            // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-            //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
-            if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
-                message_queue.push(m);
-            } else {
-                clients_message_queues.insert(client_principal, vec![m]);
-            }
-        },
-    }
-    // TODO: check without panicking
-    // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
-
-    *message_nonce = last_message_nonce + 1;
-    Ok(())
 }
 
 /// Finds the response to the open message of the client that started the poller.
@@ -488,10 +391,11 @@ mod tests {
         CanisterServiceMessage, ClientPrincipal, WebsocketMessage,
     };
     use crate::canister_poller::{
-        filter_messages_of_first_polling_iteration, process_canister_messages, relay_message,
+        filter_messages_of_first_polling_iteration, process_canister_messages,
         CanisterToClientMessage, IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
     };
     use crate::events_analyzer::Events;
+    use crate::messages_demux::relay_message;
     use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::{from_slice, Serializer};
