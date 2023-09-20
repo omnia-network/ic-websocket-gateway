@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::CanisterWsOpenResultValue,
+    canister_methods::{CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
@@ -9,7 +9,7 @@ use crate::{
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
 };
-use candid::Principal;
+use candid::{decode_args, Principal};
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{
     agent::{Envelope, EnvelopeContentVariant},
@@ -68,7 +68,7 @@ pub enum IcWsConnectionState {
     /// IC WebSocket connection between client and gateway has been setup
     Setup(GatewaySession),
     /// client requested IC WebSocket connection
-    Requested(CanisterWsOpenResultValue),
+    Requested(ClientKey),
     /// WebSocket connection between client and WS Gateway closed
     Closed(u64),
 }
@@ -205,11 +205,11 @@ impl ClientConnectionHandler {
                                     if !ic_websocket_setup {
                                         match self.handle_ic_ws_setup(message).await {
                                             // if the IC WS connection is successfully established, register state in client manager
-                                            Ok(IcWsConnectionState::Requested(canister_ws_open_result_value)) => {
+                                            Ok(IcWsConnectionState::Requested(client_key)) => {
                                                 ic_websocket_setup = true;
                                                 let gateway_session = GatewaySession::new(
                                                     self.id,
-                                                    canister_ws_open_result_value.client_principal, // TODO: determine if this is still needed or we can use client_id instead
+                                                    client_key, // TODO: determine if this is still needed or we can use client_id instead
                                                     self.canister_id
                                                         .read()
                                                         .await
@@ -293,15 +293,29 @@ impl ClientConnectionHandler {
         }
         // from here on, self.canister_id must not be None
 
-        let client_principal = client_request.envelope.content.sender().clone();
+        let client_principal = client_request.envelope.content.sender().to_owned();
+        let envelope_arg =
+            client_request
+                .envelope
+                .content
+                .arg()
+                .ok_or(IcWsError::Initialization(String::from(
+                    "first message from client should contain arg in envelope's content",
+                )))?;
+        let (ws_open_arguments,): (CanisterWsOpenArguments,) =
+            decode_args(&envelope_arg).map_err(|e| {
+                IcWsError::Initialization(format!(
+                    "arg field of envelope's content has the wrong type: {:?}",
+                    e.to_string()
+                ))
+            })?;
+        let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
         // relay the request to the IC
         self.relay_request_to_ic(client_request).await?;
 
         // consider the IC WS connection as requested
-        Ok(IcWsConnectionState::Requested(CanisterWsOpenResultValue {
-            client_principal,
-        }))
+        Ok(IcWsConnectionState::Requested(client_key))
     }
 
     /// relays relays the client's request to the IC and then sends the response back to the client via WS

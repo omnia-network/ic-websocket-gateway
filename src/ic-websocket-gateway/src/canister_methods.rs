@@ -4,24 +4,47 @@ use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 pub type ClientPrincipal = Principal;
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]
+pub struct ClientKey {
+    client_principal: ClientPrincipal,
+    client_nonce: u64,
+}
+
+impl ClientKey {
+    /// Creates a new instance of ClientKey.
+    pub fn new(client_principal: ClientPrincipal, client_nonce: u64) -> Self {
+        Self {
+            client_principal,
+            client_nonce,
+        }
+    }
+}
+
+impl fmt::Display for ClientKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}_{}", self.client_principal, self.client_nonce)
+    }
+}
 
 /// The result of [ws_close].
 pub type CanisterWsCloseResult = Result<(), String>;
 /// The result of [ws_get_messages].
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
-/// The Ok value of CanisterWsOpenResult returned by [ws_open].
+/// The arguments for [ws_open].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterWsOpenResultValue {
-    pub client_principal: ClientPrincipal,
+pub struct CanisterWsOpenArguments {
+    pub client_nonce: u64,
 }
 
 /// The arguments for [ws_close].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsCloseArguments {
-    pub client_principal: ClientPrincipal,
+    pub client_key: ClientKey,
 }
 
 /// The arguments for [ws_status].
@@ -52,7 +75,7 @@ pub struct CanisterToClientMessage {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct WebsocketMessage {
     /// The client that the gateway will forward the message to or that sent the message.
-    pub client_principal: ClientPrincipal,
+    pub client_key: ClientKey,
     /// Both ways, messages should arrive with sequence numbers 0, 1, 2...
     pub sequence_num: u64,
     /// Timestamp of when the message was made for the recipient to inspect.
@@ -68,7 +91,7 @@ pub struct WebsocketMessage {
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputMessage {
     /// The client that the gateway will forward the message to or that sent the message.
-    pub client_principal: ClientPrincipal,
+    pub client_key: ClientKey,
     /// Key for certificate verification.
     pub key: String,
     /// The message to be relayed, that contains the application message of type WesocketMessage.
@@ -78,7 +101,7 @@ pub struct CanisterOutputMessage {
 
 #[derive(CandidType, Deserialize, Serialize)]
 pub struct CanisterOpenMessageContent {
-    pub client_principal: ClientPrincipal,
+    pub client_key: ClientKey,
 }
 
 #[derive(CandidType, Deserialize, Serialize)]

@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, CanisterWsCloseArguments, ClientPrincipal},
+    canister_methods::{self, CanisterWsCloseArguments, ClientKey},
     canister_poller::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
@@ -37,7 +37,7 @@ static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     client_id: u64,
-    client_principal: ClientPrincipal,
+    client_key: ClientKey,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
 }
@@ -48,7 +48,7 @@ pub struct GatewaySession {
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     pub client_id: u64,
-    pub client_principal: ClientPrincipal,
+    pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
 }
@@ -56,13 +56,13 @@ pub struct GatewaySession {
 impl GatewaySession {
     pub fn new(
         client_id: u64,
-        client_principal: ClientPrincipal,
+        client_key: ClientKey,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) -> Self {
         Self {
             client_id,
-            client_principal,
+            client_key,
             canister_id,
             message_for_client_tx,
         }
@@ -213,7 +213,7 @@ impl GatewayServer {
             call_ws_close_in_background(
                 self.agent.clone(),
                 gateway_session.canister_id,
-                gateway_session.client_principal.clone(),
+                gateway_session.client_key.clone(),
             );
         }
         error!("Removed all client data for canister");
@@ -272,13 +272,13 @@ impl GatewayServer {
 struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
     connected_canisters: HashMap<Principal, Sender<PollerToClientChannelData>>,
-    /// maps the client's public key to the state of the client's session
+    /// maps the client key to the state of the client's session
     /// clients are grouped by the principal of the canister they are connected to
-    client_session_map: HashMap<Principal, HashMap<ClientPrincipal, GatewaySession>>,
-    /// maps the client id to a tuple containing its public key and the principal of the canister it's connected to
+    client_session_map: HashMap<Principal, HashMap<ClientKey, GatewaySession>>,
+    /// maps the client id to a tuple containing its client key and the principal of the canister it's connected to
     // needed because when a client disconnects, we only know its id but in order to clean the state of the client's session
-    // we need to know the public key of the client
-    client_info_map: HashMap<u64, (ClientPrincipal, Principal)>,
+    // we need to know the client key
+    client_info_map: HashMap<u64, (ClientKey, Principal)>,
 }
 
 impl GatewayState {
@@ -305,7 +305,7 @@ impl GatewayState {
                     EventsCollectionType::NewClientConnection,
                     ConnectionEstablishmentEventsMetrics::default(),
                 );
-                let client_principal = gateway_session.client_principal.clone();
+                let client_key = gateway_session.client_key.clone();
                 let canister_id = gateway_session.canister_id;
 
                 // add client's session state to the WS Gateway state
@@ -317,7 +317,7 @@ impl GatewayState {
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
-                    client_principal.clone(),
+                    client_key.clone(),
                     gateway_session.message_for_client_tx.clone(),
                 );
                 // check if client is connecting to a canister that is not yet being polled
@@ -369,7 +369,7 @@ impl GatewayState {
                         poller
                             .run_polling(
                                 poller_channels_poller_ends,
-                                client_principal.clone(),
+                                client_key,
                                 gateway_session.message_for_client_tx.clone(),
                             )
                             .await;
@@ -405,20 +405,20 @@ impl GatewayState {
         )
     )]
     fn add_client(&mut self, gateway_session: GatewaySession) {
-        let client_principal = gateway_session.client_principal.clone();
+        let client_key = gateway_session.client_key.clone();
         let client_id = gateway_session.client_id;
         let canister_id = gateway_session.canister_id;
 
         if let Some(clients_of_canister) = self.client_session_map.get_mut(&canister_id) {
-            clients_of_canister.insert(client_principal.clone(), gateway_session);
+            clients_of_canister.insert(client_key.clone(), gateway_session);
         } else {
             let mut client_of_new_canister = HashMap::new();
-            client_of_new_canister.insert(client_principal.clone(), gateway_session);
+            client_of_new_canister.insert(client_key.clone(), gateway_session);
             self.client_session_map
                 .insert(canister_id, client_of_new_canister);
         }
         self.client_info_map
-            .insert(client_id, (client_principal, canister_id));
+            .insert(client_id, (client_key, canister_id));
         CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         debug!("Client added to gateway state");
     }
@@ -430,11 +430,11 @@ impl GatewayState {
     )]
     async fn remove_client(&mut self, client_id: u64, agent: Arc<Agent>) {
         match self.client_info_map.remove(&client_id) {
-            Some((client_principal, canister_id)) => {
+            Some((client_key, canister_id)) => {
                 let gateway_session = self
                     .client_session_map
                     .get_mut(&canister_id)
-                    .and_then(|clients_of_canister| clients_of_canister.remove(&client_principal))
+                    .and_then(|clients_of_canister| clients_of_canister.remove(&client_key))
                     // TODO: this error should never happen but must still be handled
                     .expect("clients of canister must be registered");
                 debug!("Client removed from gateway state");
@@ -442,7 +442,7 @@ impl GatewayState {
                 call_ws_close_in_background(
                     agent.clone(),
                     gateway_session.canister_id,
-                    gateway_session.client_principal.clone(),
+                    gateway_session.client_key.clone(),
                 );
 
                 // remove client's channel from poller, if it exists and is not finished
@@ -452,9 +452,7 @@ impl GatewayState {
                 {
                     // try sending message to poller task
                     if poller_channel_for_client_channel_sender_tx
-                        .send(PollerToClientChannelData::ClientDisconnected(
-                            client_principal,
-                        ))
+                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
                         .await
                         .is_err()
                     {
@@ -516,11 +514,7 @@ impl GatewayState {
     }
 }
 
-fn call_ws_close_in_background(
-    agent: Arc<Agent>,
-    canister_id: Principal,
-    client_principal: ClientPrincipal,
-) {
+fn call_ws_close_in_background(agent: Arc<Agent>, canister_id: Principal, client_key: ClientKey) {
     // close client connection on canister
     // sending the request to the canister takes a few seconds
     // therefore this is done in a separate task
@@ -529,7 +523,7 @@ fn call_ws_close_in_background(
         if let Err(e) = canister_methods::ws_close(
             &agent,
             &canister_id,
-            CanisterWsCloseArguments { client_principal },
+            CanisterWsCloseArguments { client_key },
         )
         .await
         {

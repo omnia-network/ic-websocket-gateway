@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
-use candid::Principal;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};
 
 use crate::{
-    canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientPrincipal},
+    canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
     canister_poller::{IcWsConnectionUpdate, PollerChannelsPollerEnds},
     events_analyzer::{EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
@@ -23,13 +22,12 @@ impl MessagesDemux {
     pub async fn relay_messages(
         &self,
         msgs: CanisterOutputCertifiedMessages,
-        clients_message_queues: &mut HashMap<Principal, Vec<CanisterToClientMessage>>,
-        client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+        clients_message_queues: &mut HashMap<ClientKey, Vec<CanisterToClientMessage>>,
+        client_channels: &HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
         poller_channels: &mut PollerChannelsPollerEnds,
         message_nonce: &mut u64,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
-            let client_principal = canister_output_message.client_principal;
             let canister_to_client_message = CanisterToClientMessage {
                 key: canister_output_message.key,
                 content: canister_output_message.content,
@@ -37,7 +35,7 @@ impl MessagesDemux {
                 tree: msgs.tree.clone(),
             };
             if let Err(e) = relay_message(
-                client_principal,
+                canister_output_message.client_key,
                 canister_to_client_message,
                 &client_channels,
                 &poller_channels,
@@ -54,11 +52,11 @@ impl MessagesDemux {
 }
 
 pub async fn relay_message(
-    client_principal: ClientPrincipal,
+    client_key: ClientKey,
     canister_to_client_message: CanisterToClientMessage,
-    client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
+    client_channels: &HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
     poller_channels: &PollerChannelsPollerEnds,
-    clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
+    clients_message_queues: &mut HashMap<ClientKey, Vec<CanisterToClientMessage>>,
     message_nonce: &mut u64,
 ) -> Result<(), String> {
     let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
@@ -73,7 +71,7 @@ pub async fn relay_message(
     let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
     incoming_canister_message_events.reference =
         Some(EventsReference::MessageNonce(last_message_nonce));
-    match client_channels.get(&client_principal) {
+    match client_channels.get(&client_key) {
         Some(client_channel_tx) => {
             trace!(
                 "Received message with key: {:?} from canister",
@@ -101,11 +99,11 @@ pub async fn relay_message(
         None => {
             // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
             //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, client_principal);
-            if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
+            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, client_key);
+            if let Some(message_queue) = clients_message_queues.get_mut(&client_key) {
                 message_queue.push(canister_to_client_message);
             } else {
-                clients_message_queues.insert(client_principal, vec![canister_to_client_message]);
+                clients_message_queues.insert(client_key, vec![canister_to_client_message]);
             }
         },
     }
