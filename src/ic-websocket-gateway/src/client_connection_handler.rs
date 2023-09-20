@@ -138,7 +138,7 @@ impl ClientConnectionHandler {
                 let wait_for_cancellation = self.token.cancelled();
                 tokio::pin!(wait_for_cancellation);
                 let mut ic_websocket_setup = false;
-                loop {
+                'handler_loop: loop {
                     select! {
                         // bias select! to check token cancellation first
                         // with 'biased', async functions are polled in the order in which they appear
@@ -154,7 +154,7 @@ impl ClientConnectionHandler {
                                 error!("Error closing the WS connection: {:?}", e);
                             }
                             debug!("Terminating client connection handler task");
-                            break;
+                            break 'handler_loop;
                         },
                         // wait for canister message to send to client
                         Some(poller_message) = message_for_client_rx.recv() => {
@@ -183,7 +183,7 @@ impl ClientConnectionHandler {
                                     // close the WebSocket connection
                                     ws_write.close().await.unwrap();
                                     error!("Terminating client connection handler task. Error: {}", e);
-                                    break;
+                                    break 'handler_loop;
                                 }
                             }
                         },
@@ -199,7 +199,7 @@ impl ClientConnectionHandler {
                                             self.id,
                                         ))
                                         .await;
-                                        break;
+                                        break 'handler_loop;
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
@@ -233,7 +233,7 @@ impl ClientConnectionHandler {
                                             // in case of other errors, we report them and terminate the connection handler task
                                             Err(e) => {
                                                 warn!("{:?}", e);
-                                                break;
+                                                break 'handler_loop;
                                             }
                                             Ok(variant) => error!("handle_ic_ws_setup should not return variant: {:?}", variant)
                                         }
@@ -241,7 +241,7 @@ impl ClientConnectionHandler {
                                         // relay the envelope to the IC and the response back to the client
                                         if let Err(e) = self.handle_ws_message(message).await {
                                             warn!("{:?}", e);
-                                            break;
+                                            break 'handler_loop;
                                         }
                                     }
                                 },
@@ -253,6 +253,7 @@ impl ClientConnectionHandler {
                                     self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
                                         .await;
                                     warn!("Client WebSocket connection already closed");
+                                    break 'handler_loop;
                                 },
                                 // the client's still needs to be cleaned up so it is necessary to return the client id
                                 Err(e) => {
@@ -260,6 +261,7 @@ impl ClientConnectionHandler {
                                     self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
                                         .await;
                                     warn!("Client WebSocket connection error: {:?}", e);
+                                    break 'handler_loop;
                                 }
                             };
                         }
