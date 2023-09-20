@@ -13,10 +13,10 @@ use ic_agent::Agent;
 use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
-    join, select,
+    select,
     sync::mpsc::{Receiver, Sender},
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
@@ -104,13 +104,12 @@ impl CanisterPoller {
         // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
         let mut message_nonce = 0;
 
-        // channels used to communicate with the connection handler task of the client identified by the principal
-        let mut client_channels: HashMap<ClientKey, Sender<IcWsConnectionUpdate>> = HashMap::new();
+        let mut messages_demux = MessagesDemux::new();
         // the channel used to send updates to the first client is passed as an argument to the poller
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
         // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
         // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
-        client_channels.insert(first_client_key.clone(), message_for_client_tx);
+        messages_demux.add_client_channel(first_client_key.clone(), message_for_client_tx);
 
         // queues where the poller temporarily stores messages received from the canister before a client is registered
         // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
@@ -118,8 +117,6 @@ impl CanisterPoller {
             HashMap::new();
 
         let mut polling_iteration = 0; // used as a reference for the PollerEvents
-
-        let messages_demux = MessagesDemux::new();
 
         let get_messages_operation =
             self.get_canister_updates(message_nonce, polling_iteration, first_client_key.clone());
@@ -133,17 +130,14 @@ impl CanisterPoller {
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
                         PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
-                            debug!("Added new channel to poller for client: {:?}", client_key);
-                            client_channels.insert(client_key.clone(), client_channel);
+                            messages_demux.add_client_channel(client_key, client_channel);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            debug!("Removed client channel from poller for client {:?}", client_key);
-                            client_channels.remove(&client_key);
+                            messages_demux.remove_client_channel(&client_key);
                             debug!("Removed message queue from poller for client {:?}", client_key);
                             clients_message_queues.remove(&client_key);
-                            debug!("{} clients connected to poller", client_channels.len());
                             // exit task if last client disconnected
-                            if client_channels.is_empty() {
+                            if messages_demux.count_client_channels() == 0 {
                                 info!("Terminating poller task as no clients are connected");
                                 signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
                                 break;
@@ -155,7 +149,7 @@ impl CanisterPoller {
                 res = &mut get_messages_operation => {
                     // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
                     // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
-                    process_queues(&mut clients_message_queues, &client_channels).await;
+                    messages_demux.process_queues(&mut clients_message_queues).await;
 
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
@@ -168,7 +162,6 @@ impl CanisterPoller {
                         if let Err(e) = messages_demux.relay_messages(
                             msgs,
                             &mut clients_message_queues,
-                            &client_channels,
                             &mut poller_channels,
                             &mut message_nonce,
                         ).await {
@@ -176,7 +169,7 @@ impl CanisterPoller {
                             signal_termination_and_cleanup(
                                 &mut poller_channels.poller_to_main,
                                 self.canister_id,
-                                &client_channels,
+                                messages_demux,
                                 e,
                             )
                             .await;
@@ -297,46 +290,10 @@ fn filter_messages_of_first_polling_iteration<'a>(
     );
 }
 
-async fn process_queues(
-    clients_message_queues: &mut HashMap<ClientKey, Vec<CanisterToClientMessage>>,
-    client_channels: &HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
-) {
-    let mut handles = Vec::new();
-    clients_message_queues.retain(|client_key, message_queue| {
-        if let Some(client_channel_tx) = client_channels.get(&client_key) {
-            // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
-            // thus the respective queue does not need to be retained
-            // relay all the messages previously received for the corresponding client
-            let client_channel_tx = client_channel_tx.clone();
-            let message_queue = message_queue.to_owned();
-            let handle = tokio::spawn(async move {
-                // make sure that messages are delivered to each client in the order defined by their sequence numbers
-                for m in message_queue {
-                    warn!("Processing message with key: {:?} from queue", m.key);
-                    if let Err(e) = client_channel_tx
-                        .send(IcWsConnectionUpdate::Message(m))
-                        .await
-                    {
-                        error!("Client's thread terminated: {}", e);
-                    }
-                }
-            });
-            handles.push(handle);
-            return false;
-        }
-        // if the client channel has not been received yet, keep the messages in the queue
-        true
-    });
-    // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-    for handle in handles {
-        let (_,) = join!(handle);
-    }
-}
-
 async fn signal_termination_and_cleanup(
     poller_to_main_channel: &mut Sender<TerminationInfo>,
     canister_id: Principal,
-    client_channels: &HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
+    messages_demux: MessagesDemux,
     e: String,
 ) {
     // let the main task know that this poller will terminate due to a CDK error
@@ -347,7 +304,7 @@ async fn signal_termination_and_cleanup(
     .await;
     // let each client connection handler task connected to this poller know that the poller will terminate
     // and thus they also have to close the WebSocket connection and terminate
-    for client_channel_tx in client_channels.values() {
+    for client_channel_tx in messages_demux.client_channels() {
         if let Err(channel_err) = client_channel_tx
             .send(IcWsConnectionUpdate::Error(format!(
                 "Terminating poller task due to error: {}",
@@ -389,18 +346,17 @@ mod tests {
         CanisterToClientMessage, IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
     };
     use crate::events_analyzer::Events;
-    use crate::messages_demux::relay_message;
+    use crate::messages_demux::MessagesDemux;
     use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::{from_slice, Serializer};
     use tokio::sync::mpsc::{self, Receiver, Sender};
 
-    use super::{process_queues, PollerToClientChannelData};
+    use super::PollerToClientChannelData;
 
     fn init_poller() -> (
         Sender<IcWsConnectionUpdate>,
         Receiver<IcWsConnectionUpdate>,
-        HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
         PollerChannelsPollerEnds,
         HashMap<ClientKey, Vec<CanisterToClientMessage>>,
         Receiver<Box<dyn Events + Send>>,
@@ -411,8 +367,6 @@ mod tests {
             Sender<IcWsConnectionUpdate>,
             Receiver<IcWsConnectionUpdate>,
         ) = mpsc::channel(100);
-
-        let client_channels: HashMap<ClientKey, Sender<IcWsConnectionUpdate>> = HashMap::new();
 
         let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
@@ -438,13 +392,16 @@ mod tests {
         (
             message_for_client_tx,
             message_for_client_rx,
-            client_channels,
             poller_channels_poller_ends,
             clients_message_queues,
             events_channel_rx,
             poller_channel_for_client_channel_sender_tx,
             poller_channel_for_completion_rx,
         )
+    }
+
+    fn init_messages_demux() -> MessagesDemux {
+        MessagesDemux::new()
     }
 
     fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
@@ -699,7 +656,6 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            mut client_channels,
             poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -708,11 +664,13 @@ mod tests {
             _poller_channel_for_completion_rx,
         ) = init_poller();
 
+        let mut messages_demux = init_messages_demux();
+
         let reconnecting_client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
             0,
         );
-        client_channels.insert(
+        messages_demux.add_client_channel(
             reconnecting_client_key.clone(),
             message_for_client_tx.clone(),
         );
@@ -740,16 +698,16 @@ mod tests {
                 cert: Vec::new(),
                 tree: Vec::new(),
             };
-            relay_message(
-                client_key,
-                canister_to_client_message,
-                &client_channels,
-                &poller_channels_poller_ends,
-                &mut clients_message_queues,
-                &mut message_nonce,
-            )
-            .await
-            .unwrap();
+            messages_demux
+                .relay_message(
+                    client_key,
+                    canister_to_client_message,
+                    &poller_channels_poller_ends,
+                    &mut clients_message_queues,
+                    &mut message_nonce,
+                )
+                .await
+                .unwrap();
 
             match message_for_client_rx.try_recv() {
                 Ok(update) => {
@@ -786,7 +744,6 @@ mod tests {
         let (
             _message_for_client_tx,
             _message_for_client_rx,
-            client_channels,
             poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -794,6 +751,8 @@ mod tests {
             _poller_channel_for_client_channel_sender_tx,
             _poller_channel_for_completion_rx,
         ) = init_poller();
+
+        let messages_demux = init_messages_demux();
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -809,16 +768,16 @@ mod tests {
             cert: Vec::new(),
             tree: Vec::new(),
         };
-        relay_message(
-            client_key,
-            canister_to_client_message,
-            &client_channels,
-            &poller_channels_poller_ends,
-            &mut clients_message_queues,
-            &mut message_nonce,
-        )
-        .await
-        .unwrap();
+        messages_demux
+            .relay_message(
+                client_key,
+                canister_to_client_message,
+                &poller_channels_poller_ends,
+                &mut clients_message_queues,
+                &mut message_nonce,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(clients_message_queues.len(), 1);
     }
@@ -830,7 +789,6 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            mut client_channels,
             _poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -838,6 +796,8 @@ mod tests {
             _poller_channel_for_client_channel_sender_tx,
             _poller_channel_for_completion_rx,
         ) = init_poller();
+
+        let mut messages_demux = init_messages_demux();
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -855,9 +815,11 @@ mod tests {
         clients_message_queues.insert(client_key.clone(), vec![m]);
 
         // simulates the client being registered in the poller
-        client_channels.insert(client_key, message_for_client_tx);
+        messages_demux.add_client_channel(client_key, message_for_client_tx);
 
-        process_queues(&mut clients_message_queues, &client_channels).await;
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
         if let None = message_for_client_rx.recv().await {
             panic!("should receive message");
@@ -873,7 +835,6 @@ mod tests {
         let (
             _message_for_client_tx,
             _message_for_client_rx,
-            client_channels,
             _poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -881,6 +842,8 @@ mod tests {
             _poller_channel_for_client_channel_sender_tx,
             _poller_channel_for_completion_rx,
         ) = init_poller();
+
+        let messages_demux = init_messages_demux();
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -897,7 +860,9 @@ mod tests {
         };
         clients_message_queues.insert(client_key, vec![m]);
 
-        process_queues(&mut clients_message_queues, &client_channels).await;
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
         assert_eq!(clients_message_queues.len(), 1);
     }
@@ -909,7 +874,6 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            mut client_channels,
             _poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -917,6 +881,8 @@ mod tests {
             _poller_channel_for_client_channel_sender_tx,
             _poller_channel_for_completion_rx,
         ) = init_poller();
+
+        let mut messages_demux = init_messages_demux();
 
         let mut messages = Vec::new();
         let client_key = ClientKey::new(
@@ -938,9 +904,11 @@ mod tests {
         clients_message_queues.insert(client_key.clone(), messages);
 
         // simulates the client being registered in the poller
-        client_channels.insert(client_key.clone(), message_for_client_tx);
+        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
 
-        process_queues(&mut clients_message_queues, &client_channels).await;
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
         let mut expected_sequence_number = 0;
         while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
@@ -963,7 +931,6 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            mut client_channels,
             poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -972,11 +939,13 @@ mod tests {
             _poller_channel_for_completion_rx,
         ) = init_poller();
 
+        let mut messages_demux = init_messages_demux();
+
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
             0,
         );
-        client_channels.insert(client_key.clone(), message_for_client_tx);
+        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
 
         let start_sequence_number = 0;
         let messages = mock_ordered_messages(&client_key, start_sequence_number);
@@ -989,16 +958,16 @@ mod tests {
                 cert: Vec::new(),
                 tree: Vec::new(),
             };
-            relay_message(
-                client_key.clone(),
-                canister_to_client_message,
-                &client_channels,
-                &poller_channels_poller_ends,
-                &mut clients_message_queues,
-                &mut message_nonce,
-            )
-            .await
-            .unwrap();
+            messages_demux
+                .relay_message(
+                    client_key.clone(),
+                    canister_to_client_message,
+                    &poller_channels_poller_ends,
+                    &mut clients_message_queues,
+                    &mut message_nonce,
+                )
+                .await
+                .unwrap();
         }
 
         let mut expected_sequence_number = 0;
@@ -1022,7 +991,6 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            mut client_channels,
             poller_channels_poller_ends,
             mut clients_message_queues,
             // the following have to be returned in order not to drop them
@@ -1031,11 +999,13 @@ mod tests {
             _poller_channel_for_completion_rx,
         ) = init_poller();
 
+        let mut messages_demux = init_messages_demux();
+
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
             0,
         );
-        client_channels.insert(client_key, message_for_client_tx);
+        messages_demux.add_client_channel(client_key, message_for_client_tx);
 
         let mut messages_in_queue = Vec::new();
         let client_key = ClientKey::new(
@@ -1056,7 +1026,9 @@ mod tests {
         let count_messages_in_queue = messages_in_queue.len() as u64;
         clients_message_queues.insert(client_key.clone(), messages_in_queue);
 
-        process_queues(&mut clients_message_queues, &client_channels).await;
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
         let start_sequence_number = count_messages_in_queue;
         let polled_messages = mock_ordered_messages(&client_key, start_sequence_number);
@@ -1070,16 +1042,16 @@ mod tests {
                 cert: Vec::new(),
                 tree: Vec::new(),
             };
-            relay_message(
-                client_key,
-                canister_to_client_message,
-                &client_channels,
-                &poller_channels_poller_ends,
-                &mut clients_message_queues,
-                &mut message_nonce,
-            )
-            .await
-            .unwrap();
+            messages_demux
+                .relay_message(
+                    client_key,
+                    canister_to_client_message,
+                    &poller_channels_poller_ends,
+                    &mut clients_message_queues,
+                    &mut message_nonce,
+                )
+                .await
+                .unwrap();
         }
 
         let mut expected_sequence_number = 0;
