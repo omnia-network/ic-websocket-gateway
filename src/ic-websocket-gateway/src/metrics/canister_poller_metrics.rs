@@ -9,6 +9,7 @@ pub struct PollerEventsMetrics {
     start_polling: TimeableEvent,
     received_messages: TimeableEvent,
     start_relaying_messages: TimeableEvent,
+    finished_relaying_messages: TimeableEvent,
 }
 
 impl PollerEventsMetrics {
@@ -17,6 +18,7 @@ impl PollerEventsMetrics {
             start_polling: TimeableEvent::default(),
             received_messages: TimeableEvent::default(),
             start_relaying_messages: TimeableEvent::default(),
+            finished_relaying_messages: TimeableEvent::default(),
         }
     }
 
@@ -31,6 +33,10 @@ impl PollerEventsMetrics {
     pub fn set_start_relaying_messages(&mut self) {
         self.start_relaying_messages.set_now();
     }
+
+    pub fn set_finished_relaying_messages(&mut self) {
+        self.finished_relaying_messages.set_now();
+    }
 }
 
 impl EventsMetrics for PollerEventsMetrics {
@@ -44,12 +50,16 @@ impl EventsMetrics for PollerEventsMetrics {
             let time_to_start_relaying = self
                 .start_relaying_messages
                 .duration_since(&self.received_messages)?;
+            let time_to_relay = self
+                .finished_relaying_messages
+                .duration_since(&self.start_relaying_messages)?;
             let latency = self.compute_latency()?;
 
             return Some(Box::new(PollerDeltas::new(
                 reference,
                 time_to_receive,
                 time_to_start_relaying,
+                time_to_relay,
                 latency,
             )));
         }
@@ -57,7 +67,7 @@ impl EventsMetrics for PollerEventsMetrics {
     }
 
     fn compute_latency(&self) -> Option<Duration> {
-        self.start_relaying_messages
+        self.finished_relaying_messages
             .duration_since(&self.start_polling)
     }
 }
@@ -67,6 +77,7 @@ struct PollerDeltas {
     reference: EventsReference,
     time_to_receive: Duration,
     time_to_start_relaying: Duration,
+    time_to_relay: Duration,
     latency: Duration,
 }
 
@@ -75,12 +86,14 @@ impl PollerDeltas {
         reference: EventsReference,
         time_to_receive: Duration,
         time_to_start_relaying: Duration,
+        time_to_relay: Duration,
         latency: Duration,
     ) -> Self {
         Self {
             reference,
             time_to_receive,
             time_to_start_relaying,
+            time_to_relay,
             latency,
         }
     }
@@ -89,9 +102,10 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         trace!(
-            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\nlatency: {:?}",
+            "\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
             self.time_to_receive,
             self.time_to_start_relaying,
+            self.time_to_relay,
             self.latency
         );
     }

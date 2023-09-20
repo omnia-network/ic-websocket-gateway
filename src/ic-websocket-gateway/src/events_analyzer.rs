@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::{debug, info};
+use tracing::{info, trace};
 
 type EventsType = String;
 
@@ -366,9 +366,10 @@ impl EventsAnalyzer {
                 let intervals = events_data.aggregated_metrics_map.iter().fold(
                     Vec::new(),
                     |mut intervals, (_, aggregated_metrics)| {
-                        debug!(
+                        trace!(
                             "Deltas for {:?}: {:?}",
-                            events_type, aggregated_metrics.deltas
+                            events_type,
+                            aggregated_metrics.deltas
                         );
                         intervals.push(aggregated_metrics.interval);
                         intervals

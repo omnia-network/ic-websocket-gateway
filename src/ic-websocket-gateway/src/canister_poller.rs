@@ -160,11 +160,6 @@ impl CanisterPoller {
 
                     if let Some((msgs, mut poller_events)) = res {
                         poller_events.metrics.set_start_relaying_messages();
-                        poller_channels
-                            .poller_to_analyzer
-                            .send(Box::new(poller_events))
-                            .await
-                            .expect("analyzer's side of the channel dropped");
 
                         if let Err(e) = messages_demux.relay_messages(
                             msgs,
@@ -182,6 +177,12 @@ impl CanisterPoller {
                             break 'poller_loop;
                         }
 
+                        poller_events.metrics.set_finished_relaying_messages();
+                        poller_channels
+                            .poller_to_analyzer
+                            .send(Box::new(poller_events))
+                            .await
+                            .expect("analyzer's side of the channel dropped");
                         // counting only iterations which return at least one canister message
                         polling_iteration += 1;
                     }
