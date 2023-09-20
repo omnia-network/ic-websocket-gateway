@@ -344,15 +344,18 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::canister_methods::{
-        CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputMessage,
-        CanisterServiceMessage, ClientKey, WebsocketMessage,
+        CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputCertifiedMessages,
+        CanisterOutputMessage, CanisterServiceMessage, ClientKey, WebsocketMessage,
     };
     use crate::canister_poller::{
         filter_canister_messages, filter_messages_of_first_polling_iteration,
         CanisterToClientMessage, IcWsConnectionUpdate, PollerChannelsPollerEnds, TerminationInfo,
     };
-    use crate::events_analyzer::Events;
+    use crate::events_analyzer::{Events, EventsCollectionType, EventsImpl};
     use crate::messages_demux::MessagesDemux;
+    use crate::metrics::canister_poller_metrics::{
+        IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
+    };
     use candid::{encode_one, Principal};
     use serde::Serialize;
     use serde_cbor::{from_slice, Serializer};
@@ -364,7 +367,13 @@ mod tests {
         Sender<IcWsConnectionUpdate>,
         Receiver<IcWsConnectionUpdate>,
         PollerChannelsPollerEnds,
-        HashMap<ClientKey, Vec<CanisterToClientMessage>>,
+        HashMap<
+            ClientKey,
+            Vec<(
+                CanisterToClientMessage,
+                EventsImpl<IncomingCanisterMessageEventsMetrics>,
+            )>,
+        >,
         Receiver<Box<dyn Events + Send>>,
         Sender<PollerToClientChannelData>,
         Receiver<TerminationInfo>,
@@ -392,8 +401,13 @@ mod tests {
             events_channel_tx.clone(),
         );
 
-        let clients_message_queues: HashMap<ClientKey, Vec<CanisterToClientMessage>> =
-            HashMap::new();
+        let clients_message_queues: HashMap<
+            ClientKey,
+            Vec<(
+                CanisterToClientMessage,
+                EventsImpl<IncomingCanisterMessageEventsMetrics>,
+            )>,
+        > = HashMap::new();
 
         (
             message_for_client_tx,
@@ -616,6 +630,14 @@ mod tests {
         messages
     }
 
+    fn mock_incoming_canister_message_events() -> IncomingCanisterMessageEvents {
+        IncomingCanisterMessageEvents::new(
+            None,
+            EventsCollectionType::CanisterMessage,
+            IncomingCanisterMessageEventsMetrics::default(),
+        )
+    }
+
     #[tokio::test()]
     /// Simulates the case in which polled messages are filtered before being relayed.
     /// The messages that are not fltered out should be relayed in the same order as when polled.
@@ -655,91 +677,89 @@ mod tests {
         assert_eq!(messages.len(), 0);
     }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which the poller starts and the canister's queue contains some old messages.
-    // /// Relays only open messages for the connected clients.
-    // async fn filterprocess_canister_messages() {
-    //     let (
-    //         message_for_client_tx,
-    //         mut message_for_client_rx,
-    //         poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+    #[tokio::test()]
+    /// Simulates the case in which the poller starts and the canister's queue contains some old messages.
+    /// Relays only open messages for the connected clients.
+    async fn should_process_canister_messages() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let mut messages_demux =
-    //         init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+        let mut messages_demux =
+            init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     let reconnecting_client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     messages_demux.add_client_channel(
-    //         reconnecting_client_key.clone(),
-    //         message_for_client_tx.clone(),
-    //     );
-    //     // messages from 2chl6-4hpzw-vqaaa-aaaaa-c must be relayed as the client is registered in the poller
+        let reconnecting_client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        messages_demux.add_client_channel(
+            reconnecting_client_key.clone(),
+            message_for_client_tx.clone(),
+        );
+        // messages from 2chl6-4hpzw-vqaaa-aaaaa-c must be relayed as the client is registered in the poller
 
-    //     // simulating the case in which the poller did not yet receive the client channel for client ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
-    //     // messages from ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae should be pushed to the queue
+        // simulating the case in which the poller did not yet receive the client channel for client ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
+        // messages from ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae should be pushed to the queue
 
-    //     let mut messages = mock_messages_to_be_filtered();
-    //     let mut message_nonce = 0;
-    //     filter_canister_messages(
-    //         &mut messages,
-    //         message_nonce,
-    //         reconnecting_client_key.clone(),
-    //     );
-    //     assert_eq!(messages.len(), 5);
+        let mut messages = mock_messages_to_be_filtered();
+        let mut message_nonce = 0;
+        filter_canister_messages(
+            &mut messages,
+            message_nonce,
+            reconnecting_client_key.clone(),
+        );
+        assert_eq!(messages.len(), 5);
 
-    //     let mut received = 0;
-    //     let mut queued = 0;
-    //     for canister_output_message in messages {
-    //         let client_key = canister_output_message.client_key;
-    //         let canister_to_client_message = CanisterToClientMessage {
-    //             key: canister_output_message.key,
-    //             content: canister_output_message.content,
-    //             cert: Vec::new(),
-    //             tree: Vec::new(),
-    //         };
-    //         messages_demux
-    //             .relay_message(
-    //                 canister_to_client_message,
-    //                 &mut clients_message_queues,
-    //                 &mut message_nonce,
-    //             )
-    //             .await;
+        let msgs = CanisterOutputCertifiedMessages {
+            messages: messages.clone(),
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
 
-    //         match message_for_client_rx.try_recv() {
-    //             Ok(update) => {
-    //                 if let IcWsConnectionUpdate::Message(m) = update {
-    //                     // counts the messages relayed should only be for client 2chl6-4hpzw-vqaaa-aaaaa-c
-    //                     // as it is the only one registered in the poller
-    //                     let websocket_message: WebsocketMessage = from_slice(&m.content)
-    //                         .expect("content must be of type WebsocketMessage");
-    //                     // only client 2chl6-4hpzw-vqaaa-aaaaa-c should be registered in poller
-    //                     assert_eq!(websocket_message.client_key, reconnecting_client_key);
-    //                     received += 1
-    //                 } else {
-    //                     panic!("updates must be of variant Message")
-    //                 }
-    //             },
-    //             Err(_) => queued += 1,
-    //         }
-    //     }
-    //     let expected_received = 3; // number of messages for 2chl6-4hpzw-vqaaa-aaaaa-c in mock_messages_to_be_filtered after gateway reboots
-    //     assert_eq!(received, expected_received);
-    //     let expected_queued = 2; // number of messages for ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
-    //     assert_eq!(queued, expected_queued);
+        if let Err(e) = messages_demux
+            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .await
+        {
+            panic!("{:?}", e);
+        }
 
-    //     let mut messages = mock_messages_to_be_filtered();
-    //     // here message_nonce is > 0, so messages will not be filtered
-    //     filter_canister_messages(&mut messages, message_nonce, reconnecting_client_key);
-    //     assert_eq!(messages.len(), 13);
-    // }
+        let mut received = 0;
+        let mut queued = 0;
+        for _ in 0..messages.len() {
+            match message_for_client_rx.try_recv() {
+                Ok(update) => {
+                    if let IcWsConnectionUpdate::Message(m) = update {
+                        // counts the messages relayed should only be for client 2chl6-4hpzw-vqaaa-aaaaa-c
+                        // as it is the only one registered in the poller
+                        let websocket_message: WebsocketMessage = from_slice(&m.content)
+                            .expect("content must be of type WebsocketMessage");
+                        // only client 2chl6-4hpzw-vqaaa-aaaaa-c should be registered in poller
+                        assert_eq!(websocket_message.client_key, reconnecting_client_key);
+                        received += 1
+                    } else {
+                        panic!("updates must be of variant Message")
+                    }
+                },
+                Err(_) => queued += 1,
+            }
+        }
+        let expected_received = 3; // number of messages for 2chl6-4hpzw-vqaaa-aaaaa-c in mock_messages_to_be_filtered after gateway reboots
+        assert_eq!(received, expected_received);
+        let expected_queued = 2; // number of messages for ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae
+        assert_eq!(queued, expected_queued);
+
+        let mut messages = mock_messages_to_be_filtered();
+        // here message_nonce is > 0, so messages will not be filtered
+        filter_canister_messages(&mut messages, message_nonce, reconnecting_client_key);
+        assert_eq!(messages.len(), 13);
+    }
 
     // #[tokio::test()]
     // /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
