@@ -761,341 +761,335 @@ mod tests {
         assert_eq!(messages.len(), 13);
     }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
-    // /// Stores the message in the queue so that it can be processed later.
-    // async fn should_push_message_to_queue() {
-    //     let (
-    //         _message_for_client_tx,
-    //         _message_for_client_rx,
-    //         poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+    #[tokio::test()]
+    /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
+    /// Stores the message in the queue so that it can be processed later.
+    async fn should_push_message_to_queue() {
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let messages_demux = init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+        let messages_demux = init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     let sequence_number = 0;
-    //     let canister_output_message = canister_open_message(&client_key, sequence_number);
-    //     let mut message_nonce = 0;
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(&client_key, sequence_number);
+        let mut message_nonce = 0;
 
-    //     let canister_to_client_message = CanisterToClientMessage {
-    //         key: canister_output_message.key,
-    //         content: canister_output_message.content,
-    //         cert: Vec::new(),
-    //         tree: Vec::new(),
-    //     };
-    //     messages_demux
-    //         .relay_message(
-    //             client_key,
-    //             canister_to_client_message,
-    //             &poller_channels_poller_ends,
-    //             &mut clients_message_queues,
-    //             &mut message_nonce,
-    //         )
-    //         .await
-    //         .unwrap();
+        let msgs = CanisterOutputCertifiedMessages {
+            messages: vec![canister_output_message],
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
 
-    //     assert_eq!(clients_message_queues.len(), 1);
-    // }
+        if let Err(e) = messages_demux
+            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .await
+        {
+            panic!("{:?}", e);
+        }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which there is a message in the queue for a client that is connected.
-    // /// Relays the message to the client and empties the queue.
-    // async fn should_process_message_in_queue() {
-    //     let (
-    //         message_for_client_tx,
-    //         mut message_for_client_rx,
-    //         _poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+        assert_eq!(clients_message_queues.len(), 1);
+    }
 
-    //     let mut messages_demux =
-    //         init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+    #[tokio::test()]
+    /// Simulates the case in which there is a message in the queue for a client that is connected.
+    /// Relays the message to the client and empties the queue.
+    async fn should_process_message_in_queue() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     let sequence_number = 0;
-    //     let canister_output_message = canister_open_message(&client_key, sequence_number);
-    //     let client_key = canister_output_message.client_key;
-    //     let m = CanisterToClientMessage {
-    //         key: canister_output_message.key.clone(),
-    //         content: canister_output_message.content,
-    //         cert: Vec::new(),
-    //         tree: Vec::new(),
-    //     };
-    //     clients_message_queues.insert(client_key.clone(), vec![m]);
+        let mut messages_demux =
+            init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     // simulates the client being registered in the poller
-    //     messages_demux.add_client_channel(client_key, message_for_client_tx);
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(&client_key, sequence_number);
+        let client_key = canister_output_message.client_key;
+        let m = CanisterToClientMessage {
+            key: canister_output_message.key.clone(),
+            content: canister_output_message.content,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
+        let incoming_canister_message_events = mock_incoming_canister_message_events();
+        clients_message_queues.insert(
+            client_key.clone(),
+            vec![(m, incoming_canister_message_events)],
+        );
 
-    //     messages_demux
-    //         .process_queues(&mut clients_message_queues)
-    //         .await;
+        // simulates the client being registered in the poller
+        messages_demux.add_client_channel(client_key, message_for_client_tx);
 
-    //     if let None = message_for_client_rx.recv().await {
-    //         panic!("should receive message");
-    //     }
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
-    //     assert_eq!(clients_message_queues.len(), 0);
-    // }
+        if let None = message_for_client_rx.recv().await {
+            panic!("should receive message");
+        }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which there is a message in the queue for a client that is not yet connected.
-    // /// Keeps the message in the queue.
-    // async fn should_keep_message_in_queue() {
-    //     let (
-    //         _message_for_client_tx,
-    //         _message_for_client_rx,
-    //         poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+        assert_eq!(clients_message_queues.len(), 0);
+    }
 
-    //     let messages_demux = init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+    #[tokio::test()]
+    /// Simulates the case in which there is a message in the queue for a client that is not yet connected.
+    /// Keeps the message in the queue.
+    async fn should_keep_message_in_queue() {
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     let sequence_number = 0;
-    //     let canister_output_message = canister_open_message(&client_key, sequence_number);
-    //     let client_key = canister_output_message.client_key;
-    //     let m = CanisterToClientMessage {
-    //         key: canister_output_message.key.clone(),
-    //         content: canister_output_message.content,
-    //         cert: Vec::new(),
-    //         tree: Vec::new(),
-    //     };
-    //     clients_message_queues.insert(client_key, vec![m]);
+        let messages_demux = init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     messages_demux
-    //         .process_queues(&mut clients_message_queues)
-    //         .await;
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        let sequence_number = 0;
+        let canister_output_message = canister_open_message(&client_key, sequence_number);
+        let client_key = canister_output_message.client_key;
+        let m = CanisterToClientMessage {
+            key: canister_output_message.key.clone(),
+            content: canister_output_message.content,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
+        let incoming_canister_message_events = mock_incoming_canister_message_events();
+        clients_message_queues.insert(
+            client_key.clone(),
+            vec![(m, incoming_canister_message_events)],
+        );
 
-    //     assert_eq!(clients_message_queues.len(), 1);
-    // }
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
-    // #[tokio::test()]
-    // /// Simulates the case in which there are multiple messages in the queue for a client that is connected.
-    // /// Relays the messages to the client in ascending order specified by the sequence number.
-    // async fn should_receive_messages_from_queue_in_order() {
-    //     let (
-    //         message_for_client_tx,
-    //         mut message_for_client_rx,
-    //         _poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+        assert_eq!(clients_message_queues.len(), 1);
+    }
 
-    //     let mut messages_demux =
-    //         init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+    #[tokio::test()]
+    /// Simulates the case in which there are multiple messages in the queue for a client that is connected.
+    /// Relays the messages to the client in ascending order specified by the sequence number.
+    async fn should_receive_messages_from_queue_in_order() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let mut messages = Vec::new();
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     let start_sequence_number = 0;
-    //     for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
-    //         let m = CanisterToClientMessage {
-    //             key: canister_output_message.key.clone(),
-    //             content: canister_output_message.content,
-    //             cert: Vec::new(),
-    //             tree: Vec::new(),
-    //         };
-    //         messages.push(m);
-    //     }
+        let mut messages_demux =
+            init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     let count_messages = messages.len() as u64;
-    //     clients_message_queues.insert(client_key.clone(), messages);
+        let mut messages = Vec::new();
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        let start_sequence_number = 0;
+        for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
+            let m = CanisterToClientMessage {
+                key: canister_output_message.key.clone(),
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
+            let incoming_canister_message_events = mock_incoming_canister_message_events();
+            messages.push((m, incoming_canister_message_events));
+        }
 
-    //     // simulates the client being registered in the poller
-    //     messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
+        let count_messages = messages.len() as u64;
+        clients_message_queues.insert(client_key.clone(), messages);
 
-    //     messages_demux
-    //         .process_queues(&mut clients_message_queues)
-    //         .await;
+        // simulates the client being registered in the poller
+        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
 
-    //     let mut expected_sequence_number = 0;
-    //     while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
-    //         let websocket_message: WebsocketMessage = from_slice(&m.content)
-    //             .expect("content of canister_output_message is not of type WebsocketMessage");
-    //         assert_eq!(websocket_message.sequence_num, expected_sequence_number);
-    //         expected_sequence_number += 1;
-    //     }
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
-    //     // make sure that all messages are received
-    //     assert_eq!(count_messages, expected_sequence_number);
-    //     // make sure that no messages are pushed into the queue
-    //     assert_eq!(clients_message_queues.len(), 0);
-    // }
+        let mut expected_sequence_number = 0;
+        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+            let websocket_message: WebsocketMessage = from_slice(&m.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+            expected_sequence_number += 1;
+        }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which the gateway polls multiple messages for a client that is connected.
-    // /// Relays the messages to the client in ascending order specified by the sequence number.
-    // async fn should_relay_polled_messages_in_order() {
-    //     let (
-    //         message_for_client_tx,
-    //         mut message_for_client_rx,
-    //         poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+        // make sure that all messages are received
+        assert_eq!(count_messages, expected_sequence_number);
+        // make sure that no messages are pushed into the queue
+        assert_eq!(clients_message_queues.len(), 0);
+    }
 
-    //     let mut messages_demux =
-    //         init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+    #[tokio::test()]
+    /// Simulates the case in which the gateway polls multiple messages for a client that is connected.
+    /// Relays the messages to the client in ascending order specified by the sequence number.
+    async fn should_relay_polled_messages_in_order() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
+        let mut messages_demux =
+            init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     let start_sequence_number = 0;
-    //     let messages = mock_ordered_messages(&client_key, start_sequence_number);
-    //     let count_messages = messages.len() as u64;
-    //     let mut message_nonce = 0;
-    //     for canister_output_message in messages {
-    //         let canister_to_client_message = CanisterToClientMessage {
-    //             key: canister_output_message.key,
-    //             content: canister_output_message.content,
-    //             cert: Vec::new(),
-    //             tree: Vec::new(),
-    //         };
-    //         messages_demux
-    //             .relay_message(
-    //                 client_key.clone(),
-    //                 canister_to_client_message,
-    //                 &poller_channels_poller_ends,
-    //                 &mut clients_message_queues,
-    //                 &mut message_nonce,
-    //             )
-    //             .await
-    //             .unwrap();
-    //     }
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
 
-    //     let mut expected_sequence_number = 0;
-    //     while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
-    //         let websocket_message: WebsocketMessage = from_slice(&m.content)
-    //             .expect("content of canister_output_message is not of type WebsocketMessage");
-    //         assert_eq!(websocket_message.sequence_num, expected_sequence_number);
-    //         expected_sequence_number += 1;
-    //     }
+        let start_sequence_number = 0;
+        let messages = mock_ordered_messages(&client_key, start_sequence_number);
+        let count_messages = messages.len() as u64;
+        let mut message_nonce = 0;
+        let msgs = CanisterOutputCertifiedMessages {
+            messages,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
 
-    //     // make sure that all messages are received
-    //     assert_eq!(count_messages, expected_sequence_number);
-    //     // make sure that no messages are pushed into the queue
-    //     assert_eq!(clients_message_queues.len(), 0);
-    // }
+        if let Err(e) = messages_demux
+            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .await
+        {
+            panic!("{:?}", e);
+        }
 
-    // #[tokio::test()]
-    // /// Simulates the case in which the gateway polls multiple messages for a client that is connected while there are already multiple messages in the queue.
-    // /// Relays the messages to the client in ascending order specified by the sequence number.
-    // async fn should_relay_polled_messages_in_order_after_processing_queue() {
-    //     let (
-    //         message_for_client_tx,
-    //         mut message_for_client_rx,
-    //         poller_channels_poller_ends,
-    //         mut clients_message_queues,
-    //         // the following have to be returned in order not to drop them
-    //         _events_channel_rx,
-    //         _poller_channel_for_client_channel_sender_tx,
-    //         _poller_channel_for_completion_rx,
-    //     ) = init_poller();
+        let mut expected_sequence_number = 0;
+        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+            let websocket_message: WebsocketMessage = from_slice(&m.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+            expected_sequence_number += 1;
+        }
 
-    //     let mut messages_demux =
-    //         init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
+        // make sure that all messages are received
+        assert_eq!(count_messages, expected_sequence_number);
+        // make sure that no messages are pushed into the queue
+        assert_eq!(clients_message_queues.len(), 0);
+    }
 
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     messages_demux.add_client_channel(client_key, message_for_client_tx);
+    #[tokio::test()]
+    /// Simulates the case in which the gateway polls multiple messages for a client that is connected while there are already multiple messages in the queue.
+    /// Relays the messages to the client in ascending order specified by the sequence number.
+    async fn should_relay_polled_messages_in_order_after_processing_queue() {
+        let (
+            message_for_client_tx,
+            mut message_for_client_rx,
+            poller_channels_poller_ends,
+            mut clients_message_queues,
+            // the following have to be returned in order not to drop them
+            _events_channel_rx,
+            _poller_channel_for_client_channel_sender_tx,
+            _poller_channel_for_completion_rx,
+        ) = init_poller();
 
-    //     let mut messages_in_queue = Vec::new();
-    //     let client_key = ClientKey::new(
-    //         Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
-    //         0,
-    //     );
-    //     let start_sequence_number = 0;
-    //     for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
-    //         let m = CanisterToClientMessage {
-    //             key: canister_output_message.key.clone(),
-    //             content: canister_output_message.content,
-    //             cert: Vec::new(),
-    //             tree: Vec::new(),
-    //         };
-    //         messages_in_queue.push(m);
-    //     }
+        let mut messages_demux =
+            init_messages_demux(poller_channels_poller_ends.poller_to_analyzer);
 
-    //     let count_messages_in_queue = messages_in_queue.len() as u64;
-    //     clients_message_queues.insert(client_key.clone(), messages_in_queue);
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        messages_demux.add_client_channel(client_key, message_for_client_tx);
 
-    //     messages_demux
-    //         .process_queues(&mut clients_message_queues)
-    //         .await;
+        let mut messages_in_queue = Vec::new();
+        let client_key = ClientKey::new(
+            Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
+            0,
+        );
+        let start_sequence_number = 0;
+        for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
+            let m = CanisterToClientMessage {
+                key: canister_output_message.key.clone(),
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
+            let incoming_canister_message_events = mock_incoming_canister_message_events();
+            messages_in_queue.push((m, incoming_canister_message_events));
+        }
 
-    //     let start_sequence_number = count_messages_in_queue;
-    //     let polled_messages = mock_ordered_messages(&client_key, start_sequence_number);
-    //     let count_polled_messages = polled_messages.len() as u64;
-    //     let mut message_nonce = 0;
-    //     for canister_output_message in polled_messages {
-    //         let client_key = canister_output_message.client_key;
-    //         let canister_to_client_message = CanisterToClientMessage {
-    //             key: canister_output_message.key,
-    //             content: canister_output_message.content,
-    //             cert: Vec::new(),
-    //             tree: Vec::new(),
-    //         };
-    //         messages_demux
-    //             .relay_message(
-    //                 client_key,
-    //                 canister_to_client_message,
-    //                 &poller_channels_poller_ends,
-    //                 &mut clients_message_queues,
-    //                 &mut message_nonce,
-    //             )
-    //             .await
-    //             .unwrap();
-    //     }
+        let count_messages_in_queue = messages_in_queue.len() as u64;
+        clients_message_queues.insert(client_key.clone(), messages_in_queue);
 
-    //     let mut expected_sequence_number = 0;
-    //     while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
-    //         let websocket_message: WebsocketMessage = from_slice(&m.content)
-    //             .expect("content of canister_output_message is not of type WebsocketMessage");
-    //         assert_eq!(websocket_message.sequence_num, expected_sequence_number);
-    //         expected_sequence_number += 1;
-    //     }
+        messages_demux
+            .process_queues(&mut clients_message_queues)
+            .await;
 
-    //     // make sure that all messages are received
-    //     assert_eq!(
-    //         count_messages_in_queue + count_polled_messages,
-    //         expected_sequence_number
-    //     );
-    //     // make sure that no messages are pushed into the queue
-    //     assert_eq!(clients_message_queues.len(), 0);
-    // }
+        let start_sequence_number = count_messages_in_queue;
+        let polled_messages = mock_ordered_messages(&client_key, start_sequence_number);
+        let count_polled_messages = polled_messages.len() as u64;
+        let mut message_nonce = 0;
+
+        let msgs = CanisterOutputCertifiedMessages {
+            messages: polled_messages,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
+
+        if let Err(e) = messages_demux
+            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .await
+        {
+            panic!("{:?}", e);
+        }
+
+        let mut expected_sequence_number = 0;
+        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+            let websocket_message: WebsocketMessage = from_slice(&m.content)
+                .expect("content of canister_output_message is not of type WebsocketMessage");
+            assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+            expected_sequence_number += 1;
+        }
+
+        // make sure that all messages are received
+        assert_eq!(
+            count_messages_in_queue + count_polled_messages,
+            expected_sequence_number
+        );
+        // make sure that no messages are pushed into the queue
+        assert_eq!(clients_message_queues.len(), 0);
+    }
 }
