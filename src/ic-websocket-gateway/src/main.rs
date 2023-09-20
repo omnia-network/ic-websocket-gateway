@@ -70,7 +70,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
 
     let env_filter_file =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("trace"));
 
     let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()

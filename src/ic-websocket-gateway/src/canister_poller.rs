@@ -16,7 +16,7 @@ use tokio::{
     join, select,
     sync::mpsc::{Receiver, Sender},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
@@ -292,7 +292,7 @@ fn filter_messages_of_first_polling_iteration<'a>(
         messages.retain(|_m| false);
     }
     messages.reverse();
-    debug!(
+    trace!(
         "Filtered out {} polled messages",
         len_before_filter - messages.len()
     );
@@ -332,18 +332,6 @@ async fn process_queues(
     for handle in handles {
         let (_,) = join!(handle);
     }
-}
-
-pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
-    if let Some(message_nonce_str) = key.split('_').last() {
-        let message_nonce = message_nonce_str
-            .parse()
-            .map_err(|e| format!("Could not parse nonce. Error: {:?}", e))?;
-        return Ok(message_nonce);
-    }
-    Err(String::from(
-        "Key in canister message is not formatted correctly",
-    ))
 }
 
 async fn signal_termination_and_cleanup(
@@ -733,10 +721,16 @@ mod tests {
         let mut received = 0;
         let mut queued = 0;
         for canister_output_message in messages {
+            let client_principal = canister_output_message.client_principal;
+            let canister_to_client_message = CanisterToClientMessage {
+                key: canister_output_message.key,
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
             relay_message(
-                canister_output_message,
-                Vec::new(),
-                Vec::new(),
+                client_principal,
+                canister_to_client_message,
                 &client_channels,
                 &poller_channels_poller_ends,
                 &mut clients_message_queues,
@@ -797,10 +791,15 @@ mod tests {
         let canister_output_message = canister_open_message(client_principal, sequence_number);
         let mut message_nonce = 0;
 
+        let canister_to_client_message = CanisterToClientMessage {
+            key: canister_output_message.key,
+            content: canister_output_message.content,
+            cert: Vec::new(),
+            tree: Vec::new(),
+        };
         relay_message(
-            canister_output_message,
-            Vec::new(),
-            Vec::new(),
+            client_principal,
+            canister_to_client_message,
             &client_channels,
             &poller_channels_poller_ends,
             &mut clients_message_queues,
@@ -962,10 +961,15 @@ mod tests {
         let count_messages = messages.len() as u64;
         let mut message_nonce = 0;
         for canister_output_message in messages {
+            let canister_to_client_message = CanisterToClientMessage {
+                key: canister_output_message.key,
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
             relay_message(
-                canister_output_message,
-                Vec::new(),
-                Vec::new(),
+                client_principal,
+                canister_to_client_message,
                 &client_channels,
                 &poller_channels_poller_ends,
                 &mut clients_message_queues,
@@ -1033,10 +1037,16 @@ mod tests {
         let count_polled_messages = polled_messages.len() as u64;
         let mut message_nonce = 0;
         for canister_output_message in polled_messages {
+            let client_principal = canister_output_message.client_principal;
+            let canister_to_client_message = CanisterToClientMessage {
+                key: canister_output_message.key,
+                content: canister_output_message.content,
+                cert: Vec::new(),
+                tree: Vec::new(),
+            };
             relay_message(
-                canister_output_message,
-                Vec::new(),
-                Vec::new(),
+                client_principal,
+                canister_to_client_message,
                 &client_channels,
                 &poller_channels_poller_ends,
                 &mut clients_message_queues,

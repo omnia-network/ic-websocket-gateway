@@ -1,8 +1,9 @@
 use crate::{
     canister_methods::CanisterWsOpenResultValue,
-    canister_poller::{get_nonce_from_message, IcWsConnectionUpdate},
+    canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::GatewaySession,
+    messages_demux::get_nonce_from_message,
     metrics::client_connection_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
@@ -27,7 +28,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -163,13 +164,12 @@ impl ClientConnectionHandler {
                                     let message_nonce = get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted");
                                     let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageNonce(message_nonce)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
                                     outgoing_canister_message_events.metrics.set_received_canister_message();
-                                    debug!("Sending message with key: {:?} to client", canister_message.key);
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
                                         Ok(bytes) => {
                                             send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
                                             outgoing_canister_message_events.metrics.set_message_sent_to_client();
-                                            debug!("Message with key: {:?} sent to client", canister_message.key);
+                                            trace!("Message with key: {:?} sent to client", canister_message.key);
                                         },
                                         Err(e) => {
                                             outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
@@ -331,8 +331,8 @@ impl ClientConnectionHandler {
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
-            debug!(
-                "relayed serialized envelope of type Call to canister with principal: {:?}",
+            trace!(
+                "Relayed serialized envelope of type Call to canister with principal: {:?}",
                 canister_id.to_string()
             );
             Ok(())

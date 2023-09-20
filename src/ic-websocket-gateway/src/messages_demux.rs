@@ -2,14 +2,11 @@ use std::collections::HashMap;
 
 use candid::Principal;
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, error, warn};
+use tracing::{error, trace, warn};
 
 use crate::{
-    canister_methods::{
-        CanisterOutputCertifiedMessages, CanisterOutputMessage, CanisterToClientMessage,
-        ClientPrincipal,
-    },
-    canister_poller::{get_nonce_from_message, IcWsConnectionUpdate, PollerChannelsPollerEnds},
+    canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientPrincipal},
+    canister_poller::{IcWsConnectionUpdate, PollerChannelsPollerEnds},
     events_analyzer::{EventsCollectionType, EventsReference},
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
@@ -32,10 +29,16 @@ impl MessagesDemux {
         message_nonce: &mut u64,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
+            let client_principal = canister_output_message.client_principal;
+            let canister_to_client_message = CanisterToClientMessage {
+                key: canister_output_message.key,
+                content: canister_output_message.content,
+                cert: msgs.cert.clone(),
+                tree: msgs.tree.clone(),
+            };
             if let Err(e) = relay_message(
-                canister_output_message,
-                msgs.cert.clone(),
-                msgs.tree.clone(),
+                client_principal,
+                canister_to_client_message,
                 &client_channels,
                 &poller_channels,
                 clients_message_queues,
@@ -51,9 +54,8 @@ impl MessagesDemux {
 }
 
 pub async fn relay_message(
-    canister_output_message: CanisterOutputMessage,
-    cert: Vec<u8>,
-    tree: Vec<u8>,
+    client_principal: ClientPrincipal,
+    canister_to_client_message: CanisterToClientMessage,
     client_channels: &HashMap<ClientPrincipal, Sender<IcWsConnectionUpdate>>,
     poller_channels: &PollerChannelsPollerEnds,
     clients_message_queues: &mut HashMap<ClientPrincipal, Vec<CanisterToClientMessage>>,
@@ -67,22 +69,18 @@ pub async fn relay_message(
     incoming_canister_message_events
         .metrics
         .set_start_relaying_message();
-    let client_principal = canister_output_message.client_principal;
-    let m = CanisterToClientMessage {
-        key: canister_output_message.key.clone(),
-        content: canister_output_message.content,
-        cert,
-        tree,
-    };
 
-    let last_message_nonce = get_nonce_from_message(&canister_output_message.key)?;
+    let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
     incoming_canister_message_events.reference =
         Some(EventsReference::MessageNonce(last_message_nonce));
     match client_channels.get(&client_principal) {
         Some(client_channel_tx) => {
-            debug!("Received message with key: {:?} from canister", m.key);
+            trace!(
+                "Received message with key: {:?} from canister",
+                canister_to_client_message.key
+            );
             if let Err(e) = client_channel_tx
-                .send(IcWsConnectionUpdate::Message(m))
+                .send(IcWsConnectionUpdate::Message(canister_to_client_message))
                 .await
             {
                 error!("Client's thread terminated: {}", e);
@@ -103,11 +101,11 @@ pub async fn relay_message(
         None => {
             // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
             //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", m.key, client_principal);
+            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, client_principal);
             if let Some(message_queue) = clients_message_queues.get_mut(&client_principal) {
-                message_queue.push(m);
+                message_queue.push(canister_to_client_message);
             } else {
-                clients_message_queues.insert(client_principal, vec![m]);
+                clients_message_queues.insert(client_principal, vec![canister_to_client_message]);
             }
         },
     }
@@ -116,4 +114,16 @@ pub async fn relay_message(
 
     *message_nonce = last_message_nonce + 1;
     Ok(())
+}
+
+pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
+    if let Some(message_nonce_str) = key.split('_').last() {
+        let message_nonce = message_nonce_str
+            .parse()
+            .map_err(|e| format!("Could not parse nonce. Error: {:?}", e))?;
+        return Ok(message_nonce);
+    }
+    Err(String::from(
+        "Key in canister message is not formatted correctly",
+    ))
 }
