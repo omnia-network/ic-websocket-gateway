@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "ic-websocket-cdk"
 version = "0.1.0"
-source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=70ed828a4b77e8d1bb01db6afcc9a88cabf773ac#70ed828a4b77e8d1bb01db6afcc9a88cabf773ac"
+source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs?rev=ca118f23fc5ae52cc195e708eaa51e1dd8638c63#ca118f23fc5ae52cc195e708eaa51e1dd8638c63"
 dependencies = [
  "base64",
  "candid",
@@ -737,9 +737,9 @@ checksum = "1dd624098567895118886609431a7c3b8f516e41d30e0643f03d94592a147e36"
 
 [[package]]
 name = "unicode-width"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0edd1e5b14653f783770bce4a4dabb4a5108a5370a5f5d8cfe8710c361f6c8b"
+checksum = "e51733f11c9c4f72aa0c160008246859e340b00807569a0da0e7a1079b27ba85"
 
 [[package]]
 name = "version_check"
