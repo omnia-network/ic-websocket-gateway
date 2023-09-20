@@ -8,7 +8,7 @@ echo "Building gateway"
 cargo build
 
 echo "Starting gateway in the background"
-RUST_LOG=ic_websocket_gateway=debug cargo run -- --send-status-interval 5000 > scripts/gateway_test.log &
+RUST_LOG=ic_websocket_gateway=debug cargo run > scripts/gateway_test.log &
 pid=$!
 
 echo "Deploying test canister"

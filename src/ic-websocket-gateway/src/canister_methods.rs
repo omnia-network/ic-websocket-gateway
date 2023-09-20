@@ -47,12 +47,6 @@ pub struct CanisterWsCloseArguments {
     pub client_key: ClientKey,
 }
 
-/// The arguments for [ws_status].
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct CanisterWsStatusArguments {
-    pub status_index: u64,
-}
-
 /// The arguments for [ws_get_messages].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsGetMessagesArguments {
