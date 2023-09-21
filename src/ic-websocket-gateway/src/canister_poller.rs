@@ -80,6 +80,8 @@ pub struct CanisterPoller {
     canister_id: Principal,
     /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
     message_nonce: Arc<RwLock<u64>>,
+    /// reference of the PollerEvents
+    polling_iteration: Arc<RwLock<u64>>,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
 }
@@ -92,6 +94,7 @@ impl CanisterPoller {
             // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
             message_nonce: Arc::new(RwLock::new(0)),
+            polling_iteration: Arc::new(RwLock::new(0)),
             agent,
             polling_interval_ms,
         }
@@ -127,10 +130,7 @@ impl CanisterPoller {
             )>,
         > = HashMap::new();
 
-        let mut polling_iteration = 0; // used as a reference for the PollerEvents
-
-        let get_messages_operation =
-            self.get_canister_updates(polling_iteration, first_client_key.clone());
+        let get_messages_operation = self.get_canister_updates(first_client_key.clone());
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
@@ -188,12 +188,12 @@ impl CanisterPoller {
                             .await
                             .expect("analyzer's side of the channel dropped");
                         // counting only iterations which return at least one canister message
-                        polling_iteration += 1;
+                        *self.polling_iteration.write().await += 1;
                     }
 
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-                    get_messages_operation.set(self.get_canister_updates(polling_iteration, first_client_key.clone()));
+                    get_messages_operation.set(self.get_canister_updates(first_client_key.clone()));
                 },
             }
         }
@@ -201,11 +201,12 @@ impl CanisterPoller {
 
     async fn get_canister_updates(
         &self,
-        polling_iteration: u64,
         first_client_key: ClientKey,
     ) -> Option<CanisterGetMessagesWithEvents> {
         let mut poller_events = PollerEvents::new(
-            Some(EventsReference::Iteration(polling_iteration)),
+            Some(EventsReference::Iteration(
+                *self.polling_iteration.read().await,
+            )),
             EventsCollectionType::PollerStatus,
             PollerEventsMetrics::default(),
         );
