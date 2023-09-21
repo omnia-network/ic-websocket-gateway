@@ -44,7 +44,7 @@ pub struct GatewaySession {
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
 // set properties as public only for tests
-#[cfg(test)] // only compile and run the following block when not running tests
+#[cfg(test)] // only compile and run the following block when running tests
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     pub client_id: u64,
