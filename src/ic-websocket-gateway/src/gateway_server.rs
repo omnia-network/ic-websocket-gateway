@@ -363,7 +363,7 @@ impl GatewayState {
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(canister_id, agent, polling_interval);
+                        let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
                         // the channel used to send updates to the first client is passed as an argument to the poller
                         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
                         poller

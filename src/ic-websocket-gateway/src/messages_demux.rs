@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
@@ -103,7 +103,7 @@ impl MessagesDemux {
                 EventsImpl<IncomingCanisterMessageEventsMetrics>,
             )>,
         >,
-        message_nonce: &mut u64,
+        message_nonce: Arc<RwLock<u64>>,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
             let canister_to_client_message = CanisterToClientMessage {
@@ -143,7 +143,7 @@ impl MessagesDemux {
                     // TODO: check without panicking
                     // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
 
-                    *message_nonce = last_message_nonce + 1;
+                    *message_nonce.write().await = last_message_nonce + 1;
                 },
                 None => {
                     // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)

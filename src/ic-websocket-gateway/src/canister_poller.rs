@@ -16,7 +16,10 @@ use serde_cbor::from_slice;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        RwLock,
+    },
 };
 use tracing::{debug, error, info, trace};
 
@@ -30,7 +33,7 @@ pub struct PollerChannelsPollerEnds {
     /// sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
     poller_to_main: Sender<TerminationInfo>,
     /// sending side of the channel used by the poller to send events to the event analyzer
-    pub poller_to_analyzer: Sender<Box<dyn Events + Send>>,
+    poller_to_analyzer: Sender<Box<dyn Events + Send>>,
 }
 
 impl PollerChannelsPollerEnds {
@@ -75,6 +78,8 @@ pub enum TerminationInfo {
 /// periodically polls the canister for updates to be relayed to clients
 pub struct CanisterPoller {
     canister_id: Principal,
+    /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
+    message_nonce: Arc<RwLock<u64>>,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
 }
@@ -83,6 +88,10 @@ impl CanisterPoller {
     pub fn new(canister_id: Principal, agent: Arc<Agent>, polling_interval_ms: u64) -> Self {
         Self {
             canister_id,
+            // once the poller starts running, it requests messages from nonce 0.
+            // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
+            // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
+            message_nonce: Arc::new(RwLock::new(0)),
             agent,
             polling_interval_ms,
         }
@@ -96,16 +105,11 @@ impl CanisterPoller {
         )
     )]
     pub async fn run_polling(
-        &self,
+        &mut self,
         mut poller_channels: PollerChannelsPollerEnds,
         first_client_key: ClientKey,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) {
-        // once the poller starts running, it requests messages from nonce 0.
-        // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
-        // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
-        let mut message_nonce = 0;
-
         let mut messages_demux = MessagesDemux::new(poller_channels.poller_to_analyzer.clone());
         // the channel used to send updates to the first client is passed as an argument to the poller
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
@@ -126,7 +130,7 @@ impl CanisterPoller {
         let mut polling_iteration = 0; // used as a reference for the PollerEvents
 
         let get_messages_operation =
-            self.get_canister_updates(message_nonce, polling_iteration, first_client_key.clone());
+            self.get_canister_updates(polling_iteration, first_client_key.clone());
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_messages_operation);
@@ -164,7 +168,7 @@ impl CanisterPoller {
                         if let Err(e) = messages_demux.relay_messages(
                             msgs,
                             &mut clients_message_queues,
-                            &mut message_nonce,
+                            self.message_nonce.clone()
                         ).await {
                             error!("Terminating poller task due to CDK error: {}", e);
                             signal_termination_and_cleanup(
@@ -189,7 +193,7 @@ impl CanisterPoller {
 
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-                    get_messages_operation.set(self.get_canister_updates(message_nonce, polling_iteration, first_client_key.clone()));
+                    get_messages_operation.set(self.get_canister_updates(polling_iteration, first_client_key.clone()));
                 },
             }
         }
@@ -197,7 +201,6 @@ impl CanisterPoller {
 
     async fn get_canister_updates(
         &self,
-        message_nonce: u64,
         polling_iteration: u64,
         first_client_key: ClientKey,
     ) -> Option<CanisterGetMessagesWithEvents> {
@@ -213,7 +216,7 @@ impl CanisterPoller {
             &self.agent,
             &self.canister_id,
             CanisterWsGetMessagesArguments {
-                nonce: message_nonce,
+                nonce: *self.message_nonce.read().await,
             },
         )
         .await
@@ -222,7 +225,7 @@ impl CanisterPoller {
 
         filter_canister_messages(
             &mut canister_result.messages,
-            message_nonce,
+            *self.message_nonce.read().await,
             first_client_key,
         );
 
@@ -343,6 +346,7 @@ async fn sleep(millis: u64) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use crate::canister_methods::{
         CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputCertifiedMessages,
@@ -361,6 +365,7 @@ mod tests {
     use serde::Serialize;
     use serde_cbor::{from_slice, Serializer};
     use tokio::sync::mpsc::{self, Receiver, Sender};
+    use tokio::sync::RwLock;
 
     use super::PollerToClientChannelData;
 
@@ -710,10 +715,10 @@ mod tests {
         // messages from ygoe7-xpj6n-24gsd-zksfw-2mywm-xfyop-yvlsp-ctlwa-753xv-wz6rk-uae should be pushed to the queue
 
         let mut messages = mock_messages_to_be_filtered();
-        let mut message_nonce = 0;
+        let message_nonce = Arc::new(RwLock::new(0));
         filter_canister_messages(
             &mut messages,
-            message_nonce,
+            *message_nonce.read().await,
             reconnecting_client_key.clone(),
         );
         assert_eq!(messages.len(), 5);
@@ -725,7 +730,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .relay_messages(msgs, &mut clients_message_queues, message_nonce.clone())
             .await
         {
             panic!("{:?}", e);
@@ -758,7 +763,11 @@ mod tests {
 
         let mut messages = mock_messages_to_be_filtered();
         // here message_nonce is > 0, so messages will not be filtered
-        filter_canister_messages(&mut messages, message_nonce, reconnecting_client_key);
+        filter_canister_messages(
+            &mut messages,
+            *message_nonce.read().await,
+            reconnecting_client_key,
+        );
         assert_eq!(messages.len(), 13);
     }
 
@@ -785,7 +794,7 @@ mod tests {
         );
         let sequence_number = 0;
         let canister_output_message = canister_open_message(&client_key, sequence_number);
-        let mut message_nonce = 0;
+        let message_nonce = Arc::new(RwLock::new(0));
 
         let msgs = CanisterOutputCertifiedMessages {
             messages: vec![canister_output_message],
@@ -794,7 +803,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .relay_messages(msgs, &mut clients_message_queues, message_nonce.clone())
             .await
         {
             panic!("{:?}", e);
@@ -983,7 +992,7 @@ mod tests {
         let start_sequence_number = 0;
         let messages = mock_ordered_messages(&client_key, start_sequence_number);
         let count_messages = messages.len() as u64;
-        let mut message_nonce = 0;
+        let message_nonce = Arc::new(RwLock::new(0));
         let msgs = CanisterOutputCertifiedMessages {
             messages,
             cert: Vec::new(),
@@ -991,7 +1000,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .relay_messages(msgs, &mut clients_message_queues, message_nonce.clone())
             .await
         {
             panic!("{:?}", e);
@@ -1062,7 +1071,7 @@ mod tests {
         let start_sequence_number = count_messages_in_queue;
         let polled_messages = mock_ordered_messages(&client_key, start_sequence_number);
         let count_polled_messages = polled_messages.len() as u64;
-        let mut message_nonce = 0;
+        let message_nonce = Arc::new(RwLock::new(0));
 
         let msgs = CanisterOutputCertifiedMessages {
             messages: polled_messages,
@@ -1071,7 +1080,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, &mut clients_message_queues, &mut message_nonce)
+            .relay_messages(msgs, &mut clients_message_queues, message_nonce.clone())
             .await
         {
             panic!("{:?}", e);
