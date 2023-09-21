@@ -250,7 +250,8 @@ fn filter_messages_of_first_polling_iteration<'a>(
     // however, this open message is old as it was sent by the client before the gateway rebooted and this is mistaken with
     // the result of the new open message has not yet been pushed to the message queue of the canister (and thus not polled)
 
-    // TODO: figure out how to remove this assumption
+    // this assumption is valid as the client is identified by its principal and a nonce which is generated for each new IC WS connection by the SDk
+    // therefore, if the same client reconnects, the client key will be different and the scenario mentioned above does not happen
     let len_before_filter = messages.len();
     messages.reverse();
     let mut keep = true;
