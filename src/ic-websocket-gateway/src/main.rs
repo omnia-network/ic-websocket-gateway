@@ -18,13 +18,16 @@ mod client_connection_handler;
 mod events_analyzer;
 mod gateway_server;
 mod messages_demux;
-mod unit_tests;
 mod ws_listener;
 mod metrics {
     pub mod canister_poller_metrics;
     pub mod client_connection_handler_metrics;
     pub mod gateway_server_metrics;
     pub mod ws_listener_metrics;
+}
+mod tests {
+    pub mod canister_poller;
+    pub mod client_connection_handler;
 }
 
 #[derive(Debug, StructOpt)]
