@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 type EventsType = String;
 
@@ -383,6 +383,12 @@ impl EventsAnalyzer {
                     avg_interval,
                     intervals.len()
                 );
+                if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
+                    if avg_interval < Duration::from_millis(1000) {
+                        warn!("Too many incoming connections");
+                        // TODO: let ws_listener know that it should deny some incoming connection requests
+                    }
+                }
 
                 events_data.aggregated_metrics_map = BTreeMap::default();
             }
