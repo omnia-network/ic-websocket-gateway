@@ -79,7 +79,6 @@ actor class TestCanister() {
 
   // method called by the WS Gateway after receiving FirstMessage from the client
   public shared ({ caller }) func ws_open(args : IcWebSocketCdk.CanisterWsOpenArguments) : async IcWebSocketCdk.CanisterWsOpenResult {
-    Debug.print("[ws_open]:" # debug_show (args));
     await ws.ws_open(caller, args);
   };
 
