@@ -44,7 +44,7 @@ pub struct GatewaySession {
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
 // set properties as public only for tests
-#[cfg(test)] // only compile and run the following block when not running tests
+#[cfg(test)] // only compile and run the following block when running tests
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     pub client_id: u64,
@@ -363,7 +363,7 @@ impl GatewayState {
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(canister_id, agent, polling_interval);
+                        let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
                         // the channel used to send updates to the first client is passed as an argument to the poller
                         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
                         poller
