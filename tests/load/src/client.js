@@ -1,31 +1,21 @@
 require('./prepare-environment.js');
 
-const IcWebsocket = require('ic-websocket-js/lib/cjs/index.js').default;
-const { createActor } = require('./helpers.js');
+const { default: IcWebsocket, generateRandomIdentity } = require('ic-websocket-js/lib/cjs/index.js');
 const { deserializeAppMessage, serializeAppMessage } = require('./idl.js');
 
 const {
   WS_GATEWAY_URL,
   IC_URL,
   TEST_CANISTER_ID,
-  FETCH_IC_ROOT_KEY,
 } = process.env;
-
-const test_canister = createActor(TEST_CANISTER_ID, {
-  agentOptions: {
-    host: IC_URL,
-  }
-});
 
 async function connectClient(userContext, events, next) {
   try {
     const startTimestamp = Date.now();
     const customWs = new IcWebsocket(WS_GATEWAY_URL, undefined, {
-      canisterActor: test_canister,
       canisterId: TEST_CANISTER_ID,
       networkUrl: IC_URL,
-      persistKey: false,
-      localTest: FETCH_IC_ROOT_KEY === 'true',
+      identity: generateRandomIdentity(),
     });
 
     await new Promise((resolve, reject) => {
@@ -62,7 +52,7 @@ async function sendMessages(userContext, events, next) {
 
       let messageCounter = 0;
 
-      ws.onmessage = async (event) => {
+      ws.onmessage = (event) => {
         messageCounter++;
         if (messageCounter === 5) {
           // close the test after the last message
@@ -82,7 +72,7 @@ async function sendMessages(userContext, events, next) {
             text: message.text + "-pong",
             timestamp: Date.now(),
           });
-          await ws.send(messageToSend);
+          ws.send(messageToSend);
 
           events.emit('counter', 'send_message_success', 1);
         } catch (err) {
