@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "canisters": {
+    "test_canister_mo": {
+      "type": "motoko",
+      "main": "src/test_canister_mo/main.mo"
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": "npx mops sources",
+      "args": ""
+    }
+  },
+  "output_env_file": ".env"
+}
