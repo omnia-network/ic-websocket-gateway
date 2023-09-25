@@ -99,7 +99,7 @@ Some unit tests are provided in the [unit_tests.rs](./src/ic-websocket-gateway/s
 cargo test -- --test-threads=1
 ```
 
-### Integration tests
+### Integration tests (Rust test canister)
 Integration tests require:
 - [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
 - [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/) 
@@ -122,9 +122,9 @@ After installing Node.js and dfx, you can run the integration tests as follows:
     ```
     ./scripts/install_test_dependencies.sh
     ```
-5. Move to the directory `tests/test_canister` and deploy a test canister using the IC WebSocket CDK:
+5. Move to the directory `tests/test_canister_rs` and deploy a test canister using the IC WebSocket CDK:
     ```
-    dfx deploy test_canister --argument '(opt "<gateway-principal-obtained-in-step-3>")'
+    dfx deploy test_canister_rs --argument '(opt "<gateway-principal-obtained-in-step-3>")'
     ```
 6. Move to the directory `tests/integration` and set the environment variables:
     ```

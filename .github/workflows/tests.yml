@@ -27,7 +27,7 @@ jobs:
           cache-on-failure: "true"
           workspaces: |
             .
-            tests/test_canister
+            tests/test_canister_rs
       - name: Install tests dependencies
         run: ./scripts/install_test_dependencies.sh
       - name: Run unit tests
