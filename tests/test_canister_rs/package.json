@@ -1,5 +1,5 @@
 {
-  "name": "ic_websocket_gateway_test_canister",
+  "name": "ic_websocket_gateway_test_canister_rs",
   "version": "0.1.0",
   "description": "IC WebSocket on the IC (tests)",
   "keywords": [
@@ -9,7 +9,7 @@
     "Canister"
   ],
   "scripts": {
-    "generate": "dfx generate test_canister"
+    "generate": "dfx generate test_canister_rs"
   },
   "devDependencies": {
     "@dfinity/agent": "^0.18.1",

@@ -12,7 +12,7 @@ RUST_LOG=ic_websocket_gateway=debug cargo run > scripts/gateway_test.log &
 pid=$!
 
 echo "Deploying test canister"
-cd tests/test_canister
+cd tests/test_canister_rs
 dfx deploy
 
 cd ../integration

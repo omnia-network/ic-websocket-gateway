@@ -1,7 +1,7 @@
 import IcWebSocket, { generateRandomIdentity } from "ic-websocket-js";
 import environment from "./utils/environment";
 import { deserializeAppMessage, serializeAppMessage } from "./utils/idl";
-import type { _SERVICE } from "../../test_canister/src/declarations/test_canister/test_canister.did";
+import type { _SERVICE } from "../../test_canister_rs/src/declarations/test_canister_rs/test_canister_rs.did";
 
 /// IcWebsocket parameters
 const gatewayAddress = environment.WS_GATEWAY_URL;

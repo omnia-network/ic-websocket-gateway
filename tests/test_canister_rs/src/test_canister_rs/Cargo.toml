@@ -1,5 +1,5 @@
 [package]
-name = "test_canister"
+name = "test_canister_rs"
 version = "0.1.0"
 edition = "2021"
 

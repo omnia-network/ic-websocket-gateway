@@ -9,7 +9,6 @@
     "Canister"
   ],
   "scripts": {
-    "generate": "dfx generate test_canister",
     "test": "LOG_LEVEL=debug jest"
   },
   "devDependencies": {
