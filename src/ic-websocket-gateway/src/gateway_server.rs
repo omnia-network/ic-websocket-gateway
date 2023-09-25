@@ -126,7 +126,11 @@ impl GatewayServer {
         };
     }
 
-    pub fn start_accepting_incoming_connections(&self, tls_config: Option<TlsConfig>) {
+    pub fn start_accepting_incoming_connections(
+        &self,
+        tls_config: Option<TlsConfig>,
+        rate_limiting_channel_rx: Receiver<f64>,
+    ) {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
@@ -139,6 +143,7 @@ impl GatewayServer {
                 agent,
                 client_connection_handler_tx,
                 events_channel_tx,
+                rate_limiting_channel_rx,
                 tls_config,
             )
             .await;

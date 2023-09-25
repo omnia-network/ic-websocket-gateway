@@ -12,10 +12,15 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
-use tokio::{sync::mpsc::Receiver, time::Instant};
-use tracing::{info, trace, warn};
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    time::Instant,
+};
+use tracing::{error, info, trace, warn};
 
 type EventsType = String;
+
+const MIN_INCOMING_INTERVAL: usize = 200;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
@@ -267,15 +272,20 @@ type CollectionData = BTreeMap<EventsReference, EventsLatencies>;
 pub struct EventsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
+    rate_limiting_channel_tx: Sender<f64>,
     map_by_events_type: BTreeMap<EventsType, EventsData>,
     map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
     aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
 }
 
 impl EventsAnalyzer {
-    pub fn new(events_channel_rx: Receiver<Box<dyn Events + Send>>) -> Self {
+    pub fn new(
+        events_channel_rx: Receiver<Box<dyn Events + Send>>,
+        rate_limiting_channel_tx: Sender<f64>,
+    ) -> Self {
         Self {
             events_channel_rx,
+            rate_limiting_channel_tx,
             map_by_events_type: BTreeMap::default(),
             map_by_collection_type: HashMap::default(),
             aggregated_latencies_map: HashMap::default(),
@@ -297,7 +307,7 @@ impl EventsAnalyzer {
                     }
                 },
                 _ = &mut periodic_check_operation => {
-                    self.compute_average_intervals();
+                    self.compute_average_intervals().await;
                     self.compute_collections_latencies();
 
                     periodic_check_operation.set(periodic_check());
@@ -360,8 +370,9 @@ impl EventsAnalyzer {
         }
     }
 
-    fn compute_average_intervals(&mut self) {
+    async fn compute_average_intervals(&mut self) {
         for (events_type, events_data) in self.map_by_events_type.iter_mut() {
+            // TODO: rolling average
             if events_data.aggregated_metrics_map.len() > 10 {
                 let intervals = events_data.aggregated_metrics_map.iter().fold(
                     Vec::new(),
@@ -383,10 +394,18 @@ impl EventsAnalyzer {
                     avg_interval,
                     intervals.len()
                 );
+                let limiting_rate;
                 if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
-                    if avg_interval < Duration::from_millis(1000) {
-                        warn!("Too many incoming connections");
-                        // TODO: let ws_listener know that it should deny some incoming connection requests
+                    if avg_interval < Duration::from_millis(MIN_INCOMING_INTERVAL as u64) {
+                        warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval);
+                        limiting_rate = get_limiting_rate(avg_interval);
+                    } else {
+                        // if the average interval of incoming connections is above the minimum (MIN_INCOMING_INTERVAL)
+                        // the listener should accept all connections (limiting_rate = 0)
+                        limiting_rate = 0.0;
+                    }
+                    if let Err(e) = self.rate_limiting_channel_tx.send(limiting_rate).await {
+                        error!("Rate limiting channel closed on the receiver side: {:?}", e);
                     }
                 }
 
@@ -433,4 +452,9 @@ impl EventsAnalyzer {
 
 async fn periodic_check() {
     tokio::time::sleep(Duration::from_secs(5)).await;
+}
+
+fn get_limiting_rate(avg_interval: Duration) -> f64 {
+    (MIN_INCOMING_INTERVAL as u64 - avg_interval.as_millis() as u64) as f64
+        / MIN_INCOMING_INTERVAL as f64
 }
