@@ -72,8 +72,10 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
 
-    let env_filter_file =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("trace"));
+    let env_filter_file = EnvFilter::builder()
+        .with_env_var("RUST_LOG_FILE")
+        .try_from_env()
+        .unwrap_or_else(|_| EnvFilter::new("trace"));
 
     let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()
@@ -81,8 +83,10 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with_thread_ids(true)
         .with_filter(env_filter_file);
 
-    let env_filter_stdout =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter_stdout = EnvFilter::builder()
+        .with_env_var("RUST_LOG_STDOUT")
+        .try_from_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
     let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
         .pretty()
