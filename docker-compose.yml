@@ -22,7 +22,8 @@ services:
                 "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
             ]
         environment:
-            - RUST_LOG=${RUST_LOG}
+            - RUST_LOG_FILE=${RUST_LOG_FILE}
+            - RUST_LOG_STDOUT=${RUST_LOG_STDOUT}
         volumes:
             - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
         networks:

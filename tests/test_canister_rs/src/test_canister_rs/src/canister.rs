@@ -1,10 +1,9 @@
 use candid::{decode_one, encode_one, CandidType};
 use ic_cdk::{api::time, print};
-use serde::{Deserialize, Serialize};
-
 use ic_websocket_cdk::{
-    ws_send, ClientPublicKey, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
+    ws_send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::CLIENTS_CONNECTED;
 
@@ -29,7 +28,7 @@ pub fn on_open(args: OnOpenCallbackArgs) {
     CLIENTS_CONNECTED.with(|clients_connected| {
         clients_connected
             .borrow_mut()
-            .insert(args.client_key.clone());
+            .insert(args.client_principal.clone());
 
         print(format!(
             "[on_open] # clients connected: {}",
@@ -41,7 +40,7 @@ pub fn on_open(args: OnOpenCallbackArgs) {
         text: String::from("ping"),
         timestamp: time(),
     };
-    send_app_message(args.client_key, msg);
+    send_app_message(args.client_principal, msg);
 }
 
 pub fn on_message(args: OnMessageCallbackArgs) {
@@ -51,20 +50,23 @@ pub fn on_message(args: OnMessageCallbackArgs) {
         timestamp: time(),
     };
     print(format!("[on_message] Received message"));
-    send_app_message(args.client_key, new_msg)
+    send_app_message(args.client_principal, new_msg)
 }
 
-fn send_app_message(client_key: ClientPublicKey, msg: AppMessage) {
+fn send_app_message(client_key: ClientPrincipal, msg: AppMessage) {
     print(format!("Sending message"));
     if let Err(e) = ws_send(client_key, msg.candid_serialize()) {
         print(format!("Could not send message: {}", e));
     }
+    print(format!("Message sent"));
 }
 
 pub fn on_close(args: OnCloseCallbackArgs) {
     // remove client from the list of connected clients
     CLIENTS_CONNECTED.with(|clients_connected| {
-        clients_connected.borrow_mut().remove(&args.client_key);
+        clients_connected
+            .borrow_mut()
+            .remove(&args.client_principal);
 
         print(format!(
             "[on_close] # clients connected: {}",

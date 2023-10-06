@@ -1,24 +1,16 @@
-import IcWebSocket from "ic-websocket-js";
+import IcWebSocket, { generateRandomIdentity } from "ic-websocket-js";
 import environment from "./utils/environment";
-import { createActor } from "./utils/actors";
 import { deserializeAppMessage, serializeAppMessage } from "./utils/idl";
-import type { _SERVICE } from "../../test_canister/src/declarations/test_canister/test_canister.did";
+import type { _SERVICE } from "../../test_canister_rs/src/declarations/test_canister_rs/test_canister_rs.did";
 
 /// IcWebsocket parameters
 const gatewayAddress = environment.WS_GATEWAY_URL;
 const icUrl = environment.IC_URL;
 const canisterId = environment.TEST_CANISTER_ID;
-const canisterActor = createActor(canisterId, {
-  agentOptions: {
-    host: icUrl,
-  },
-});
-const localTest = environment.FETCH_IC_ROOT_KEY;
-const persistKey = false;
 
 /// test constants & variables
 const pingPongCount = 5;
-let ws: IcWebSocket<_SERVICE>;
+let ws: IcWebSocket;
 
 /// jest configuration
 jest.setTimeout(30_000);
@@ -60,11 +52,9 @@ const reconstructWsMessage = (index: number) => {
 describe("WS client", () => {
   it("should open a connection", async () => {
     ws = new IcWebSocket(gatewayAddress, undefined, {
-      canisterActor,
       canisterId,
       networkUrl: icUrl,
-      localTest,
-      persistKey,
+      identity: generateRandomIdentity(),
     });
 
     ws.onopen = () => {
@@ -106,7 +96,7 @@ describe("WS client", () => {
           timestamp: BigInt(Date.now()),
         });
 
-        await ws.send(pongMessage);
+        ws.send(pongMessage);
       };
     });
 

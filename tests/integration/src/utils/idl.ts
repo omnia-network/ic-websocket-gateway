@@ -1,5 +1,5 @@
 import { IDL } from "@dfinity/candid";
-import type { AppMessage } from "../../../test_canister/src/declarations/test_canister/test_canister.did";
+import type { AppMessage } from "../../../test_canister_rs/src/declarations/test_canister_rs/test_canister_rs.did";
 
 export const AppMessageIdl = IDL.Record({
   'text': IDL.Text,

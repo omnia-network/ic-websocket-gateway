@@ -5,14 +5,14 @@ use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
 use ic_websocket_cdk::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
-    CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsRegisterArguments,
-    CanisterWsRegisterResult, CanisterWsSendResult, ClientPublicKey, WsHandlers,
+    CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsSendResult, ClientPrincipal,
+    WsHandlers, WsInitParams,
 };
 
 mod canister;
 
 thread_local! {
-    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPublicKey>> = RefCell::new(HashSet::new());
+    /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPrincipal>> = RefCell::new(HashSet::new());
 }
 
 #[init]
@@ -23,22 +23,18 @@ fn init(gateway_principal: Option<String>) {
         on_close: Some(on_close),
     };
 
+    let params;
     if let Some(gateway_principal) = gateway_principal {
-        ic_websocket_cdk::init(handlers, &gateway_principal)
+        params = WsInitParams::new(handlers, gateway_principal);
     } else {
-        ic_websocket_cdk::init(handlers, GATEWAY_PRINCIPAL)
+        params = WsInitParams::new(handlers, GATEWAY_PRINCIPAL.to_string());
     }
+    ic_websocket_cdk::init(params)
 }
 
 #[post_upgrade]
 fn post_upgrade(gateway_principal: Option<String>) {
     init(gateway_principal);
-}
-
-// method called by the client SDK when instantiating a new IcWebSocket
-#[update]
-fn ws_register(args: CanisterWsRegisterArguments) -> CanisterWsRegisterResult {
-    ic_websocket_cdk::ws_register(args)
 }
 
 // method called by the WS Gateway after receiving open message from the client
@@ -74,6 +70,6 @@ fn ws_wipe() {
 
 // send a message to the client, usually called by the canister itself
 #[update]
-fn ws_send(client_key: ClientPublicKey, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
+fn ws_send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
     ic_websocket_cdk::ws_send(client_key, msg_bytes)
 }

@@ -1,5 +1,5 @@
-use crate::gateway_server::GatewayServer;
 use crate::ws_listener::TlsConfig;
+use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self, File},
@@ -7,16 +7,28 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use structopt::StructOpt;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter, prelude::*, EnvFilter};
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
+mod events_analyzer;
 mod gateway_server;
-mod unit_tests;
+mod messages_demux;
 mod ws_listener;
+mod metrics {
+    pub mod canister_poller_metrics;
+    pub mod client_connection_handler_metrics;
+    pub mod gateway_server_metrics;
+    pub mod ws_listener_metrics;
+}
+mod tests {
+    pub mod canister_poller;
+    pub mod client_connection_handler;
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
@@ -29,9 +41,6 @@ struct DeploymentInfo {
 
     #[structopt(long, default_value = "100")]
     polling_interval: u64,
-
-    #[structopt(long, default_value = "30000")]
-    send_status_interval: u64,
 
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
@@ -63,18 +72,25 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
     let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
 
-    let env_filter_file =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter_file = EnvFilter::builder()
+        .with_env_var("RUST_LOG_FILE")
+        .try_from_env()
+        .unwrap_or_else(|_| EnvFilter::new("trace"));
 
     let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_writer(non_blocking_file)
         .with_thread_ids(true)
         .with_filter(env_filter_file);
+
+    let env_filter_stdout = EnvFilter::builder()
+        .with_env_var("RUST_LOG_STDOUT")
+        .try_from_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
     let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
         .pretty()
-        .with_filter(filter::LevelFilter::INFO);
+        .with_filter(env_filter_stdout);
 
     tracing_subscriber::registry()
         .with(file_tracing_layer)
@@ -95,10 +111,16 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
+
+    let (rate_limiting_channel_tx, rate_limiting_channel_rx): (Sender<f64>, Receiver<f64>) =
+        mpsc::channel(10);
+
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
         deployment_info.subnet_url,
         identity,
+        events_channel_tx,
     )
     .await;
 
@@ -113,15 +135,17 @@ async fn main() -> Result<(), String> {
         None
     };
 
+    tokio::spawn(async move {
+        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);
+        events_analyzer.start_processing().await;
+    });
+
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    gateway_server.start_accepting_incoming_connections(tls_config);
+    gateway_server.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     gateway_server
-        .manage_state(
-            deployment_info.polling_interval,
-            deployment_info.send_status_interval,
-        )
+        .manage_state(deployment_info.polling_interval)
         .await;
     info!("Terminated state manager");
 

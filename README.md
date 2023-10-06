@@ -36,7 +36,6 @@ There are some command line arguments that you can set when running the gateway:
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
 | `--subnet-url` | The URL of the IC subnet to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
-| `--send-status-interval` | The interval (in **milliseconds**) at which the gateway will send a status update to the canisters, to notify that it's still alive. | `30000` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 
@@ -80,13 +79,14 @@ To renew the SSL certificate, you can run the same command as above:
 ## Configure logging
 
 The gateway uses the [tracing](https://docs.rs/tracing) crate for logging. There are two tracing outputs configured:
-- output to **stdout**, which has the `info` level and cannot be changed;
-- output to a **file**, which is saved in the `data/traces/` folder and has the default `info` level. The file name is `gateway_{start-timestamp}.log`.
-    It's possible to configure the file tracing level by setting the `RUST_LOG` environment variable. For example, to set the tracing level to `debug`, you can run:
-    ```
-    RUST_LOG=ic_websocket_gateway=debug cargo run
-    ```
-    The `RUST_LOG` environment variable enables to set different levels for each module. See the [EnvFilter](https://docs.rs/tracing-subscriber/0.3.17/tracing_subscriber/filter/struct.EnvFilter.html) documentation for more details.
+- output to **stdout**, which has the `info` level and can be configured with the `RUST_LOG_STDOUT` env variable, see below;
+- output to a **file**, which is saved in the `data/traces/` folder and has the default `trace` level. The file name is `gateway_{start-timestamp}.log`. It can be configured with the `RUST_LOG_FILE` env variable, see below.
+
+The `RUST_LOG` environment variable enables to set different levels for each module. See the [EnvFilter](https://docs.rs/tracing-subscriber/0.3.17/tracing_subscriber/filter/struct.EnvFilter.html) documentation for more details.
+For example, to set the tracing level to `debug`, you can run:
+```
+RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run
+```
 
 # Development
 
@@ -100,7 +100,7 @@ Some unit tests are provided in the [unit_tests.rs](./src/ic-websocket-gateway/s
 cargo test -- --test-threads=1
 ```
 
-### Integration tests
+### Integration tests (Rust test canister)
 Integration tests require:
 - [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
 - [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/) 
@@ -123,9 +123,9 @@ After installing Node.js and dfx, you can run the integration tests as follows:
     ```
     ./scripts/install_test_dependencies.sh
     ```
-5. Move to the directory `tests/test_canister` and deploy a test canister using the IC WebSocket CDK:
+5. Move to the directory `tests/test_canister_rs` and deploy a test canister using the IC WebSocket CDK:
     ```
-    dfx deploy test_canister --argument '(opt "<gateway-principal-obtained-in-step-3>")'
+    dfx deploy test_canister_rs --argument '(opt "<gateway-principal-obtained-in-step-3>")'
     ```
 6. Move to the directory `tests/integration` and set the environment variables:
     ```

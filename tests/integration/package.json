@@ -9,7 +9,6 @@
     "Canister"
   ],
   "scripts": {
-    "generate": "dfx generate test_canister",
     "test": "LOG_LEVEL=debug jest"
   },
   "devDependencies": {
@@ -44,9 +43,9 @@
     "last 2 edge version"
   ],
   "dependencies": {
-    "@dfinity/agent": "^0.18.1",
-    "@dfinity/candid": "^0.18.1",
-    "@dfinity/principal": "^0.18.1",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#41e37667c36d26a535d4247e37711f4bad2184a8"
+    "@dfinity/agent": "^0.19.2",
+    "@dfinity/candid": "^0.19.2",
+    "@dfinity/principal": "^0.19.2",
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#dbee657817525a88189c293229188a9c9b4d5b52"
   }
 }

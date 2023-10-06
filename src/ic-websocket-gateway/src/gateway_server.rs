@@ -14,15 +14,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{
-        self, CanisterIncomingMessage, CanisterWsCloseArguments, CanisterWsMessageArguments,
-        ClientPublicKey,
-    },
+    canister_methods::{self, CanisterWsCloseArguments, ClientKey},
     canister_poller::{
-        CanisterPoller, CanisterToClientMessage, PollerChannelsPollerEnds,
-        PollerToClientChannelData, TerminationInfo,
+        CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
+        TerminationInfo,
     },
-    client_connection_handler::WsConnectionState,
+    client_connection_handler::IcWsConnectionState,
+    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    metrics::gateway_server_metrics::{
+        ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
+    },
     ws_listener::{TlsConfig, WsListener},
 };
 
@@ -36,60 +37,63 @@ static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     client_id: u64,
-    client_key: ClientPublicKey,
+    client_key: ClientKey,
     canister_id: Principal,
-    message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
-    nonce: u64,
+    message_for_client_tx: Sender<IcWsConnectionUpdate>,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
 // set properties as public only for tests
-#[cfg(test)] // only compile and run the following block when not running tests
+#[cfg(test)] // only compile and run the following block when running tests
 #[derive(Debug, Clone)]
 pub struct GatewaySession {
     pub client_id: u64,
-    pub client_key: ClientPublicKey,
+    pub client_key: ClientKey,
     pub canister_id: Principal,
-    pub message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
-    pub nonce: u64,
+    pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
 }
 
 impl GatewaySession {
     pub fn new(
         client_id: u64,
-        client_key: Vec<u8>,
+        client_key: ClientKey,
         canister_id: Principal,
-        message_for_client_tx: Sender<Result<CanisterToClientMessage, String>>,
-        nonce: u64,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) -> Self {
         Self {
             client_id,
             client_key,
             canister_id,
             message_for_client_tx,
-            nonce,
         }
     }
 }
 
 /// WS Gateway
 pub struct GatewayServer {
-    // agent used to interact with the canisters
+    /// agent used to interact with the canisters
     agent: Arc<Agent>,
-    // gateway address:
+    /// gateway address:
     address: String,
-    // sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
-    client_connection_handler_tx: Sender<WsConnectionState>,
-    // receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
-    client_connection_handler_rx: Receiver<WsConnectionState>,
-    // state of the WS Gateway
+    /// sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
+    client_connection_handler_tx: Sender<IcWsConnectionState>,
+    /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
+    client_connection_handler_rx: Receiver<IcWsConnectionState>,
+    /// sender side of the channel used to send events from different components to the analyzer
+    events_channel_tx: Sender<Box<dyn Events + Send>>,
+    /// state of the WS Gateway
     state: GatewayState,
-    // cancellation token used to signal other tasks when it's time to shut down
+    /// cancellation token used to signal other tasks when it's time to shut down
     token: CancellationToken,
 }
 
 impl GatewayServer {
-    pub async fn new(gateway_address: String, subnet_url: String, identity: BasicIdentity) -> Self {
+    pub async fn new(
+        gateway_address: String,
+        subnet_url: String,
+        identity: BasicIdentity,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
+    ) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
 
         let agent = canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key)
@@ -116,22 +120,30 @@ impl GatewayServer {
             address: gateway_address,
             client_connection_handler_tx,
             client_connection_handler_rx,
+            events_channel_tx,
             state: GatewayState::default(),
             token,
         };
     }
 
-    pub fn start_accepting_incoming_connections(&self, tls_config: Option<TlsConfig>) {
+    pub fn start_accepting_incoming_connections(
+        &self,
+        tls_config: Option<TlsConfig>,
+        rate_limiting_channel_rx: Receiver<f64>,
+    ) {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+        let events_channel_tx = self.events_channel_tx.clone();
         let token = self.token.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 client_connection_handler_tx,
+                events_channel_tx,
+                rate_limiting_channel_rx,
                 tls_config,
             )
             .await;
@@ -142,7 +154,7 @@ impl GatewayServer {
         });
     }
 
-    pub async fn manage_state(&mut self, polling_interval: u64, send_status_interval: u64) {
+    pub async fn manage_state(&mut self, polling_interval: u64) {
         // [main task]                             [poller task]
         // poller_channel_for_completion_rx <----- poller_channel_for_completion_tx
 
@@ -164,8 +176,8 @@ impl GatewayServer {
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
+                        self.events_channel_tx.clone(),
                         polling_interval,
-                        send_status_interval,
                         self.agent.clone()
                     ).await;
 
@@ -221,7 +233,7 @@ impl GatewayServer {
         info!("Starting graceful shutdown");
         self.token.cancel();
         loop {
-            if let Ok(WsConnectionState::Closed(client_id)) =
+            if let Ok(IcWsConnectionState::Closed(client_id)) =
                 self.client_connection_handler_rx.try_recv()
             {
                 // cleanup client's session from WS Gateway state
@@ -253,7 +265,7 @@ impl GatewayServer {
         while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
     }
 
-    pub async fn recv_from_client_connection_handler(&mut self) -> Option<WsConnectionState> {
+    pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsConnectionState> {
         self.client_connection_handler_rx.recv().await
     }
 }
@@ -265,13 +277,13 @@ impl GatewayServer {
 struct GatewayState {
     /// maps the principal of the canister to the sender side of the channel used to communicate with the corresponding poller task
     connected_canisters: HashMap<Principal, Sender<PollerToClientChannelData>>,
-    /// maps the client's public key to the state of the client's session
+    /// maps the client key to the state of the client's session
     /// clients are grouped by the principal of the canister they are connected to
-    client_session_map: HashMap<Principal, HashMap<ClientPublicKey, GatewaySession>>,
-    /// maps the client id to a tuple containing its public key and the principal of the canister it's connected to
+    client_session_map: HashMap<Principal, HashMap<ClientKey, GatewaySession>>,
+    /// maps the client id to a tuple containing its client key and the principal of the canister it's connected to
     // needed because when a client disconnects, we only know its id but in order to clean the state of the client's session
-    // we need to know the public key of the client
-    client_info_map: HashMap<u64, (ClientPublicKey, Principal)>,
+    // we need to know the client key
+    client_info_map: HashMap<u64, (ClientKey, Principal)>,
 }
 
 impl GatewayState {
@@ -285,19 +297,27 @@ impl GatewayState {
 
     async fn manage_clients_connections(
         &mut self,
-        connection_state: WsConnectionState,
+        connection_state: IcWsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval: u64,
-        send_status_interval: u64,
         agent: Arc<Agent>,
     ) {
         match connection_state {
-            WsConnectionState::Established(gateway_session) => {
+            IcWsConnectionState::Setup(gateway_session) => {
+                let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
+                    Some(EventsReference::ClientId(gateway_session.client_id)),
+                    EventsCollectionType::NewClientConnection,
+                    ConnectionEstablishmentEventsMetrics::default(),
+                );
                 let client_key = gateway_session.client_key.clone();
                 let canister_id = gateway_session.canister_id;
 
                 // add client's session state to the WS Gateway state
                 self.add_client(gateway_session.clone());
+                connection_establishment_events
+                    .metrics
+                    .set_added_client_to_state();
 
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
@@ -342,67 +362,43 @@ impl GatewayState {
                     let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
+                        events_channel_tx.clone(),
                     );
                     let agent = Arc::clone(&agent);
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
-                        let poller = CanisterPoller::new(
-                            canister_id,
-                            agent,
-                            polling_interval,
-                            send_status_interval,
-                        );
-                        // if a new poller thread is started due to a client connection, the poller needs to know the nonce of the last polled message
-                        // as an old poller thread (closed due to all clients disconnecting) might have already polled messages from the canister
-                        // the new poller thread should not get those same messages again
+                        let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
+                        // the channel used to send updates to the first client is passed as an argument to the poller
+                        // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
                         poller
-                            .run_polling(poller_channels_poller_ends, gateway_session.nonce)
+                            .run_polling(
+                                poller_channels_poller_ends,
+                                client_key,
+                                gateway_session.message_for_client_tx.clone(),
+                            )
                             .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
                     });
-
-                    // send channel data to poller
-                    if let Err(e) = poller_channel_for_client_channel_sender_tx
-                        .send(poller_to_client_channel_data)
-                        .await
-                    {
-                        error!(
-                            "Receiver has been dropped on the poller task's side. Error: {:?}",
-                            e
-                        )
-                    }
+                    connection_establishment_events
+                        .metrics
+                        .set_started_new_poller();
                 }
+                connection_establishment_events
+                    .metrics
+                    .set_sent_client_channel_to_poller();
 
-                // notify canister that it can now send messages for the client corresponding to client_key
-                let agent = Arc::clone(&agent);
-                tokio::spawn(async move {
-                    let gateway_message =
-                        CanisterIncomingMessage::IcWebSocketEstablished(client_key);
-                    if let Err(e) = canister_methods::ws_message(
-                        &agent,
-                        &canister_id,
-                        CanisterWsMessageArguments {
-                            msg: gateway_message,
-                        },
-                    )
+                events_channel_tx
+                    .send(Box::new(connection_establishment_events))
                     .await
-                    {
-                        error!("Calling ws_message on canister failed: {}", e);
-                        // TODO: try again or report failure to client
-                    }
-                });
+                    .expect("analyzer's side of the channel dropped");
             },
-            WsConnectionState::Closed(client_id) => {
+            IcWsConnectionState::Closed(client_id) => {
                 // cleanup client's session from WS Gateway state
                 self.remove_client(client_id, agent).await;
             },
-            WsConnectionState::Error(e) => {
-                let _entered = span!(Level::INFO, "ws_connection_error").entered();
-                error!("Connection handler terminated with an error: {:?}", e);
-                // TODO: make sure that cleaning up is not needed
-            },
+            _ => error!("should not receive variants other than 'Setup' and 'Closed'"),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();
@@ -523,22 +519,16 @@ impl GatewayState {
     }
 }
 
-fn call_ws_close_in_background(
-    agent_cl: Arc<Agent>,
-    canister_id_cl: Principal,
-    client_key_cl: Vec<u8>,
-) {
+fn call_ws_close_in_background(agent: Arc<Agent>, canister_id: Principal, client_key: ClientKey) {
     // close client connection on canister
     // sending the request to the canister takes a few seconds
     // therefore this is done in a separate task
     // in order to not slow down the main task
     tokio::spawn(async move {
         if let Err(e) = canister_methods::ws_close(
-            &agent_cl,
-            &canister_id_cl,
-            CanisterWsCloseArguments {
-                client_key: client_key_cl,
-            },
+            &agent,
+            &canister_id,
+            CanisterWsCloseArguments { client_key },
         )
         .await
         {
