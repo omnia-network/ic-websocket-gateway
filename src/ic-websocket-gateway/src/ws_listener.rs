@@ -7,11 +7,12 @@ use crate::{
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{Receiver, Sender},
+    time::timeout,
 };
 use tokio_native_tls::{TlsAcceptor, TlsStream};
 use tokio_util::sync::CancellationToken;
@@ -88,6 +89,7 @@ impl WsListener {
         tokio::pin!(wait_for_cancellation);
 
         let mut limiting_rate: f64 = 0.0;
+        let timeout_duration = Duration::from_secs(1);
         loop {
             select! {
                 // bias select! to check token cancellation first
@@ -117,17 +119,20 @@ impl WsListener {
 
                         let stream = match self.tls_acceptor {
                             Some(ref acceptor) => {
-                                let tls_stream = acceptor.accept(stream).await;
-                                match tls_stream {
-                                    Ok(tls_stream) => {
+                                match timeout(timeout_duration, acceptor.accept(stream)).await {
+                                    Ok(Ok(tls_stream)) => {
                                         debug!("TLS handshake successful");
                                         listener_events.metrics.set_accepted_with_tls();
                                         CustomStream::TcpWithTls(tls_stream)
                                     },
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         error!("TLS handshake failed: {:?}", e);
                                         continue;
                                     },
+                                    Err(e) => {
+                                        warn!("Accepting TLS connection timed out: {:?}", e);
+                                        continue;
+                                    }
                                 }
                             },
                             None => {
