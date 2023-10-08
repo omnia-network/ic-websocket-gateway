@@ -1,7 +1,12 @@
 use candid::{decode_one, encode_one, CandidType};
-use ic_cdk::{api::time, print};
+use ic_cdk::{
+    api::{management_canister::http_request::HttpMethod, time},
+    print,
+};
+
 use ic_websocket_cdk::{
-    ws_send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
+    http_fire_and_forget_request, ws_send, CanisterHttpFireAndForgetRequestArgument,
+    ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +46,14 @@ pub fn on_open(args: OnOpenCallbackArgs) {
         timestamp: time(),
     };
     send_app_message(args.client_principal, msg);
+
+    let canister_http_request = CanisterHttpFireAndForgetRequestArgument::new(
+        String::from("http:://example.com"),
+        HttpMethod::GET,
+        Vec::new(),
+        None,
+    );
+    http_fire_and_forget_request(canister_http_request);
 }
 
 pub fn on_message(args: OnMessageCallbackArgs) {
