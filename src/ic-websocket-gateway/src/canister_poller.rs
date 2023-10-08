@@ -1,6 +1,6 @@
 use crate::{
     canister_methods::{
-        self, CanisterOpenMessageContent, CanisterOutputCertifiedMessages, CanisterOutputMessage,
+        self, CanisterOpenMessageContent, CanisterOutput, CanisterOutputCertifiedMessages,
         CanisterServiceMessage, CanisterToClientMessage, CanisterWsGetMessagesArguments, ClientKey,
         WebsocketMessage,
     },
@@ -223,7 +223,7 @@ impl CanisterPoller {
 }
 
 pub fn filter_canister_messages<'a>(
-    messages: &'a mut Vec<CanisterOutputMessage>,
+    messages: &'a mut Vec<CanisterOutput>,
     message_nonce: u64,
     first_client_key: ClientKey,
 ) {
@@ -240,7 +240,7 @@ pub fn filter_canister_messages<'a>(
 /// Finds the response to the open message of the client that started the poller.
 /// Returns all the messages following this message (inclusive).
 pub fn filter_messages_of_first_polling_iteration<'a>(
-    messages: &'a mut Vec<CanisterOutputMessage>,
+    messages: &'a mut Vec<CanisterOutput>,
     first_client_key: ClientKey,
 ) {
     // the filter assumes that, if the response to the open message of the first client that connects after the gateway reboots is not (yet) present,
@@ -250,28 +250,40 @@ pub fn filter_messages_of_first_polling_iteration<'a>(
     // however, this open message is old as it was sent by the client before the gateway rebooted and this is mistaken with
     // the result of the new open message has not yet been pushed to the message queue of the canister (and thus not polled)
 
-    // this assumption is valid as the client is identified by its principal and a nonce which is generated for each new IC WS connection by the SDk
+    // this assumption is valid as the client is identified by its principal and a nonce which is generated for each new IC WS connection by the SDK
     // therefore, if the same client reconnects, the client key will be different and the scenario mentioned above does not happen
     let len_before_filter = messages.len();
     messages.reverse();
     let mut keep = true;
-    messages.retain(|canister_output_message| {
+    messages.retain(|canister_output| {
         if keep {
-            let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
-                .expect("content of canister_output_message is not of type WebsocketMessage");
-            if websocket_message.is_service_message {
-                let canister_service_message = decode_one(&websocket_message.content)
-                    .expect("content of websocket_message is not of type CanisterServiceMessage");
-                if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent {
-                    client_key,
-                }) = canister_service_message
-                {
-                    if client_key == first_client_key {
-                        keep = false;
+            match canister_output {
+                CanisterOutput::HttpRequest(_) => {
+                    // all the http requests "after" (according to the original order) the first open message have to be retained
+                    return true;
+                },
+                CanisterOutput::WebSocketMessage(canister_output_message) => {
+                    let websocket_message: WebsocketMessage = from_slice(
+                        &canister_output_message.content,
+                    )
+                    .expect("content of canister_output_message is not of type WebsocketMessage");
+                    if websocket_message.is_service_message {
+                        let canister_service_message = decode_one(&websocket_message.content)
+                            .expect(
+                            "content of websocket_message is not of type CanisterServiceMessage",
+                        );
+                        if let CanisterServiceMessage::OpenMessage(CanisterOpenMessageContent {
+                            client_key,
+                        }) = canister_service_message
+                        {
+                            if client_key == first_client_key {
+                                keep = false;
+                            }
+                        }
                     }
-                }
+                    return true;
+                },
             }
-            return true;
         }
         false
     });

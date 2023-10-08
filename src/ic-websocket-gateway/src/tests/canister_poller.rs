@@ -3,9 +3,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::canister_methods::{
-        CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutputCertifiedMessages,
-        CanisterOutputMessage, CanisterServiceMessage, CanisterToClientMessage, ClientKey,
-        WebsocketMessage,
+        CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutput,
+        CanisterOutputCertifiedMessages, CanisterOutputMessage, CanisterServiceMessage,
+        CanisterToClientMessage, ClientKey, WebsocketMessage,
     };
     use crate::canister_poller::{
         filter_canister_messages, filter_messages_of_first_polling_iteration, IcWsConnectionUpdate,
@@ -120,7 +120,7 @@ mod tests {
         mock_canister_output_message(websocket_message, client_key)
     }
 
-    fn mock_messages_to_be_filtered() -> Vec<CanisterOutputMessage> {
+    fn mock_messages_to_be_filtered() -> Vec<CanisterOutput> {
         let old_client_key = ClientKey::new(Principal::from_text("aaaaa-aa").unwrap(), 0);
         let reconnecting_client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -136,35 +136,35 @@ mod tests {
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&old_client_key, 10);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_open_message(&reconnecting_client_key, 0);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_ack_message(&old_client_key, 11);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 1);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 2);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 3);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_ack_message(&reconnecting_client_key, 4);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&old_client_key, 12);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // the gateway reboots and therefore all the previous connections are closed
         // client 2chl6-4hpzw-vqaaa-aaaaa-c reconnects
@@ -172,28 +172,28 @@ mod tests {
 
         // this message should not be filtered out as it is the open message sent by the first client that (re)connects after the gateway reboots
         let canister_message = canister_open_message(&reconnecting_client_key, 0);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should not be filtered out as it was sent after the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 1);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should not be filtered out as it was sent after the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 2);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should not be filtered out as it was sent after the gateway rebooted
         let canister_message = canister_open_message(&new_client_key, 0);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should not be filtered out as it was sent after the gateway rebooted
         let canister_message = canister_output_message(&new_client_key, 1);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         messages
     }
 
-    fn mock_all_old_messages_to_be_filtered() -> Vec<CanisterOutputMessage> {
+    fn mock_all_old_messages_to_be_filtered() -> Vec<CanisterOutput> {
         let old_client_key = ClientKey::new(Principal::from_text("aaaaa-aa").unwrap(), 0);
         let reconnecting_client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -204,31 +204,31 @@ mod tests {
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&old_client_key, 10);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_ack_message(&old_client_key, 11);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 1);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 2);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&reconnecting_client_key, 3);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_ack_message(&reconnecting_client_key, 4);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // this message should be filtered out as it was sent before the gateway rebooted
         let canister_message = canister_output_message(&old_client_key, 12);
-        messages.push(canister_message);
+        messages.push(CanisterOutput::WebSocketMessage(canister_message));
 
         // the gateway reboots and therefore all the previous connections are closed
         // client 2chl6-4hpzw-vqaaa-aaaaa-c will reconnect but its open message is not ready for this polling iteration
@@ -240,13 +240,13 @@ mod tests {
     fn mock_ordered_messages(
         client_key: &ClientKey,
         start_sequence_number: u64,
-    ) -> Vec<CanisterOutputMessage> {
+    ) -> Vec<CanisterOutput> {
         let mut sequence_number = start_sequence_number;
 
         let mut messages = Vec::new();
         while sequence_number < 10 {
             let canister_message = canister_output_message(&client_key, sequence_number);
-            messages.push(canister_message);
+            messages.push(CanisterOutput::WebSocketMessage(canister_message));
             sequence_number += 1;
         }
         messages
@@ -274,12 +274,16 @@ mod tests {
         assert_eq!(messages.len(), 5);
 
         let mut expected_sequence_number = 0;
-        for canister_output_message in messages {
-            let websocket_message: WebsocketMessage = from_slice(&canister_output_message.content)
+        for canister_output in messages {
+            if let CanisterOutput::WebSocketMessage(canister_output_message) = canister_output {
+                let websocket_message: WebsocketMessage = from_slice(
+                    &canister_output_message.content,
+                )
                 .expect("content of canister_output_message is not of type WebsocketMessage");
-            if websocket_message.client_key == client_key {
-                assert_eq!(websocket_message.sequence_num, expected_sequence_number);
-                expected_sequence_number += 1;
+                if websocket_message.client_key == client_key {
+                    assert_eq!(websocket_message.sequence_num, expected_sequence_number);
+                    expected_sequence_number += 1;
+                }
             }
         }
         assert_eq!(expected_sequence_number, 3);
@@ -401,7 +405,7 @@ mod tests {
         let message_nonce = Arc::new(RwLock::new(0));
 
         let msgs = CanisterOutputCertifiedMessages {
-            messages: vec![canister_output_message],
+            messages: vec![CanisterOutput::WebSocketMessage(canister_output_message)],
             cert: Vec::new(),
             tree: Vec::new(),
         };
@@ -510,15 +514,17 @@ mod tests {
             0,
         );
         let start_sequence_number = 0;
-        for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
-            let m = CanisterToClientMessage {
-                key: canister_output_message.key.clone(),
-                content: canister_output_message.content,
-                cert: Vec::new(),
-                tree: Vec::new(),
-            };
-            let incoming_canister_message_events = mock_incoming_canister_message_events();
-            messages.push((m, incoming_canister_message_events));
+        for canister_output in mock_ordered_messages(&client_key, start_sequence_number) {
+            if let CanisterOutput::WebSocketMessage(canister_output_message) = canister_output {
+                let m = CanisterToClientMessage {
+                    key: canister_output_message.key.clone(),
+                    content: canister_output_message.content,
+                    cert: Vec::new(),
+                    tree: Vec::new(),
+                };
+                let incoming_canister_message_events = mock_incoming_canister_message_events();
+                messages.push((m, incoming_canister_message_events));
+            }
         }
 
         let count_messages = messages.len() as u64;
@@ -622,15 +628,17 @@ mod tests {
             0,
         );
         let start_sequence_number = 0;
-        for canister_output_message in mock_ordered_messages(&client_key, start_sequence_number) {
-            let m = CanisterToClientMessage {
-                key: canister_output_message.key.clone(),
-                content: canister_output_message.content,
-                cert: Vec::new(),
-                tree: Vec::new(),
-            };
-            let incoming_canister_message_events = mock_incoming_canister_message_events();
-            messages_in_queue.push((m, incoming_canister_message_events));
+        for canister_output in mock_ordered_messages(&client_key, start_sequence_number) {
+            if let CanisterOutput::WebSocketMessage(canister_output_message) = canister_output {
+                let m = CanisterToClientMessage {
+                    key: canister_output_message.key.clone(),
+                    content: canister_output_message.content,
+                    cert: Vec::new(),
+                    tree: Vec::new(),
+                };
+                let incoming_canister_message_events = mock_incoming_canister_message_events();
+                messages_in_queue.push((m, incoming_canister_message_events));
+            }
         }
 
         let count_messages_in_queue = messages_in_queue.len() as u64;

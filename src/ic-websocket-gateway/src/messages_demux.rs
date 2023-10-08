@@ -1,10 +1,12 @@
+use ic_cdk::api::management_canister::http_request::HttpMethod;
 use std::{collections::HashMap, sync::Arc};
-
 use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
-    canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
+    canister_methods::{
+        CanisterOutput, CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey,
+    },
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsImpl, EventsReference},
     metrics::canister_poller_metrics::{
@@ -144,58 +146,94 @@ impl MessagesDemux {
     pub async fn relay_messages(
         &mut self,
         msgs: CanisterOutputCertifiedMessages,
-        message_nonce: Arc<RwLock<u64>>,
+        canister_nonce: Arc<RwLock<u64>>,
     ) -> Result<(), String> {
-        for canister_output_message in msgs.messages {
-            let canister_to_client_message = CanisterToClientMessage {
-                key: canister_output_message.key,
-                content: canister_output_message.content,
-                cert: msgs.cert.clone(),
-                tree: msgs.tree.clone(),
-            };
-            let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
-                None,
-                EventsCollectionType::CanisterMessage,
-                IncomingCanisterMessageEventsMetrics::default(),
-            );
-            incoming_canister_message_events
-                .metrics
-                .set_start_relaying_message();
-
-            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
-            incoming_canister_message_events.reference =
-                Some(EventsReference::MessageNonce(last_message_nonce));
-            match self
-                .client_channels
-                .get(&canister_output_message.client_key)
-            {
-                Some(client_channel_tx) => {
-                    trace!(
-                        "Received message with key: {:?} from canister",
-                        canister_to_client_message.key
+        for canister_output in msgs.messages {
+            let last_canister_nonce = match canister_output {
+                CanisterOutput::WebSocketMessage(canister_output_message) => {
+                    let canister_to_client_message = CanisterToClientMessage {
+                        key: canister_output_message.key,
+                        content: canister_output_message.content,
+                        cert: msgs.cert.clone(),
+                        tree: msgs.tree.clone(),
+                    };
+                    let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
+                        None,
+                        EventsCollectionType::CanisterMessage,
+                        IncomingCanisterMessageEventsMetrics::default(),
                     );
-                    self.relay_message(
-                        canister_to_client_message,
-                        client_channel_tx,
-                        incoming_canister_message_events,
-                    )
-                    .await;
+                    incoming_canister_message_events
+                        .metrics
+                        .set_start_relaying_message();
 
-                    // TODO: check without panicking
-                    // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
+                    let canister_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+                    incoming_canister_message_events.reference =
+                        Some(EventsReference::MessageNonce(canister_nonce));
+                    match self
+                        .client_channels
+                        .get(&canister_output_message.client_key)
+                    {
+                        Some(client_channel_tx) => {
+                            trace!(
+                                "Received message with key: {:?} from canister",
+                                canister_to_client_message.key
+                            );
+                            self.relay_message(
+                                canister_to_client_message,
+                                client_channel_tx,
+                                incoming_canister_message_events,
+                            )
+                            .await;
+                        },
+                        None => {
+                            // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
+                            //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+                            warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, canister_output_message.client_key);
+                            self.add_message_to_client_queue(
+                                &canister_output_message.client_key,
+                                (canister_to_client_message, incoming_canister_message_events),
+                            )
+                        },
+                    }
+                    canister_nonce
+                },
+                CanisterOutput::HttpRequest(canister_output_request) => {
+                    warn!("{:?}", canister_output_request);
+                    let canister_nonce = get_nonce_from_message(canister_output_request.key())?;
+                    tokio::spawn(async move {
+                        // TODO: move this to a separate component which receives requests from all canisters and forwards them to the specified address
+                        match canister_output_request.method() {
+                            &HttpMethod::GET => {
+                                let res = reqwest::Client::new()
+                                    .get(canister_output_request.url())
+                                    .send()
+                                    .await
+                                    .unwrap();
+                                warn!("{:?}", res.status());
+                            },
+                            &HttpMethod::POST => {
+                                reqwest::Client::new()
+                                    .post(canister_output_request.url())
+                                    .send()
+                                    .await
+                                    .unwrap();
+                            },
+                            &HttpMethod::HEAD => {
+                                reqwest::Client::new()
+                                    .head(canister_output_request.url())
+                                    .send()
+                                    .await
+                                    .unwrap();
+                            },
+                        }
+                    });
+                    canister_nonce
+                },
+            };
+            // TODO: check without panicking
+            // assert_eq!(*canister_nonce, last_canister_nonce); // check that messages are relayed in increasing order
 
-                    *message_nonce.write().await = last_message_nonce + 1;
-                },
-                None => {
-                    // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-                    //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                    warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, canister_output_message.client_key);
-                    self.add_message_to_client_queue(
-                        &canister_output_message.client_key,
-                        (canister_to_client_message, incoming_canister_message_events),
-                    )
-                },
-            }
+            *canister_nonce.write().await = last_canister_nonce + 1;
         }
         Ok(())
     }
@@ -227,11 +265,11 @@ impl MessagesDemux {
 }
 
 pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
-    if let Some(message_nonce_str) = key.split('_').last() {
-        let message_nonce = message_nonce_str
+    if let Some(canister_nonce_str) = key.split('_').last() {
+        let canister_nonce = canister_nonce_str
             .parse()
             .map_err(|e| format!("Could not parse nonce. Error: {:?}", e))?;
-        return Ok(message_nonce);
+        return Ok(canister_nonce);
     }
     Err(String::from(
         "Key in canister message is not formatted correctly",

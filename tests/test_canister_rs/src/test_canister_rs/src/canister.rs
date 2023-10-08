@@ -48,7 +48,7 @@ pub fn on_open(args: OnOpenCallbackArgs) {
     send_app_message(args.client_principal, msg);
 
     let canister_http_request = CanisterHttpFireAndForgetRequestArgument::new(
-        String::from("http:://example.com"),
+        String::from("https://omnia-iot.com"),
         HttpMethod::GET,
         Vec::new(),
         None,

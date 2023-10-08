@@ -3,6 +3,7 @@ use ic_agent::AgentError;
 use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
 };
+use ic_cdk::api::management_canister::http_request::{HttpHeader, HttpMethod};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -81,6 +82,20 @@ pub struct WebsocketMessage {
     pub content: Vec<u8>,
 }
 
+#[derive(CandidType, Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CanisterHttpFireAndForgetRequestArgument {
+    url: String,
+    method: HttpMethod,
+    headers: Vec<HttpHeader>,
+    body: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub enum CanisterOutput {
+    WebSocketMessage(CanisterOutputMessage),
+    HttpRequest(CanisterOutputRequest),
+}
+
 /// Element of the list of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputMessage {
@@ -91,6 +106,26 @@ pub struct CanisterOutputMessage {
     /// The message to be relayed, that contains the application message of type WesocketMessage.
     #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
+}
+
+#[derive(CandidType, Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CanisterOutputRequest {
+    key: String,
+    canister_http_request: CanisterHttpFireAndForgetRequestArgument,
+}
+
+impl CanisterOutputRequest {
+    pub fn key(&self) -> &String {
+        &self.key
+    }
+
+    pub fn url(&self) -> &String {
+        &self.canister_http_request.url
+    }
+
+    pub fn method(&self) -> &HttpMethod {
+        &self.canister_http_request.method
+    }
 }
 
 #[derive(CandidType, Deserialize, Serialize)]
@@ -113,7 +148,7 @@ pub enum CanisterServiceMessage {
 /// List of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputCertifiedMessages {
-    pub messages: Vec<CanisterOutputMessage>, // List of messages.
+    pub messages: Vec<CanisterOutput>, // List of messages.
     #[serde(with = "serde_bytes")]
     pub cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
     #[serde(with = "serde_bytes")]
