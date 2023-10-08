@@ -44,7 +44,10 @@ impl EventsMetrics for PollerEventsMetrics {
         &self.received_messages
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let time_to_receive = self.received_messages.duration_since(&self.start_polling)?;
             let time_to_start_relaying = self
@@ -56,7 +59,7 @@ impl EventsMetrics for PollerEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(PollerDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_receive,
                 time_to_start_relaying,
                 time_to_relay,
@@ -154,7 +157,10 @@ impl EventsMetrics for IncomingCanisterMessageEventsMetrics {
         &self.message_relayed
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let time_to_relay = self
                 .message_relayed
@@ -162,7 +168,7 @@ impl EventsMetrics for IncomingCanisterMessageEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(IncomingCanisterMessageDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_relay,
                 latency,
             )));

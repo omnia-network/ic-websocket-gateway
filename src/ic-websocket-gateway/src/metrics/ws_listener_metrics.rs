@@ -44,7 +44,10 @@ impl EventsMetrics for ListenerEventsMetrics {
         &self.received_request
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let accepted = {
                 if self.accepted_with_tls.is_set() {
@@ -58,7 +61,7 @@ impl EventsMetrics for ListenerEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(ListenerDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_accept,
                 time_to_start_handling,
                 latency,
