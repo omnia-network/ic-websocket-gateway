@@ -4,8 +4,8 @@ mod tests {
 
     use crate::canister_methods::{
         CanisterAckMessageContent, CanisterOpenMessageContent, CanisterOutput,
-        CanisterOutputCertifiedMessages, CanisterOutputMessage, CanisterServiceMessage,
-        CanisterToClientMessage, ClientKey, WebsocketMessage,
+        CanisterOutputCertifiedMessages, CanisterOutputMessage, CanisterOutputRequest,
+        CanisterServiceMessage, CanisterToClientMessage, ClientKey, WebsocketMessage,
     };
     use crate::canister_poller::{
         filter_canister_messages, filter_messages_of_first_polling_iteration, IcWsConnectionUpdate,
@@ -24,6 +24,8 @@ mod tests {
     fn init_poller() -> (
         Sender<IcWsConnectionUpdate>,
         Receiver<IcWsConnectionUpdate>,
+        Sender<CanisterOutputRequest>,
+        Receiver<CanisterOutputRequest>,
         Sender<Box<dyn Events + Send>>,
         Receiver<Box<dyn Events + Send>>,
     ) {
@@ -32,18 +34,25 @@ mod tests {
             Receiver<IcWsConnectionUpdate>,
         ) = mpsc::channel(100);
 
+        let (canister_http_request_tx, canister_http_request_rx) = mpsc::channel(100);
+
         let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
         (
             message_for_client_tx,
             message_for_client_rx,
+            canister_http_request_tx,
+            canister_http_request_rx,
             events_channel_tx,
             events_channel_rx,
         )
     }
 
-    fn init_messages_demux(analyzer_channel_tx: Sender<Box<dyn Events + Send>>) -> MessagesDemux {
-        MessagesDemux::new(analyzer_channel_tx)
+    fn init_messages_demux(
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
+    ) -> MessagesDemux {
+        MessagesDemux::new(analyzer_channel_tx, canister_http_request_tx)
     }
 
     fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {
@@ -310,12 +319,14 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
             events_channel_tx,
             // the following have to be returned in order not to drop them
             _events_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let reconnecting_client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -391,10 +402,16 @@ mod tests {
     /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
     /// Stores the message in the queue so that it can be processed later.
     async fn should_push_message_to_queue() {
-        let (_message_for_client_tx, _message_for_client_rx, events_channel_tx, _events_channel_rx) =
-            init_poller();
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
+            events_channel_tx,
+            _events_channel_rx,
+        ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -427,12 +444,14 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
             events_channel_tx,
             // the following have to be returned in order not to drop them
             _events_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -467,10 +486,16 @@ mod tests {
     /// Simulates the case in which there is a message in the queue for a client that is not yet connected.
     /// Keeps the message in the queue.
     async fn should_keep_message_in_queue() {
-        let (_message_for_client_tx, _message_for_client_rx, events_channel_tx, _events_channel_rx) =
-            init_poller();
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
+            events_channel_tx,
+            _events_channel_rx,
+        ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -501,12 +526,14 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
             events_channel_tx,
             // the following have to be returned in order not to drop them
             _events_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let mut messages = Vec::new();
         let client_key = ClientKey::new(
@@ -558,12 +585,14 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
             events_channel_tx,
             // the following have to be returned in order not to drop them
             _events_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -609,12 +638,14 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
+            canister_http_request_tx,
+            _canister_http_request_rx,
             events_channel_tx,
             // the following have to be returned in order not to drop them
             _events_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(events_channel_tx, canister_http_request_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),

@@ -1,11 +1,11 @@
-use ic_cdk::api::management_canister::http_request::HttpMethod;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
     canister_methods::{
-        CanisterOutput, CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey,
+        CanisterOutput, CanisterOutputCertifiedMessages, CanisterOutputRequest,
+        CanisterToClientMessage, ClientKey,
     },
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsImpl, EventsReference},
@@ -25,10 +25,14 @@ pub struct MessagesDemux {
         )>,
     >,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+    canister_http_request_tx: Sender<CanisterOutputRequest>,
 }
 
 impl MessagesDemux {
-    pub fn new(analyzer_channel_tx: Sender<Box<dyn Events + Send>>) -> Self {
+    pub fn new(
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
+    ) -> Self {
         // queues where the poller temporarily stores messages received from the canister before a client is registered
         // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
         let clients_message_queues: HashMap<
@@ -43,6 +47,7 @@ impl MessagesDemux {
             client_channels: HashMap::new(),
             clients_message_queues,
             analyzer_channel_tx,
+            canister_http_request_tx,
         }
     }
 
@@ -198,35 +203,11 @@ impl MessagesDemux {
                     canister_nonce
                 },
                 CanisterOutput::HttpRequest(canister_output_request) => {
-                    warn!("{:?}", canister_output_request);
                     let canister_nonce = get_nonce_from_message(canister_output_request.key())?;
-                    tokio::spawn(async move {
-                        // TODO: move this to a separate component which receives requests from all canisters and forwards them to the specified address
-                        match canister_output_request.method() {
-                            &HttpMethod::GET => {
-                                let res = reqwest::Client::new()
-                                    .get(canister_output_request.url())
-                                    .send()
-                                    .await
-                                    .unwrap();
-                                warn!("{:?}", res.status());
-                            },
-                            &HttpMethod::POST => {
-                                reqwest::Client::new()
-                                    .post(canister_output_request.url())
-                                    .send()
-                                    .await
-                                    .unwrap();
-                            },
-                            &HttpMethod::HEAD => {
-                                reqwest::Client::new()
-                                    .head(canister_output_request.url())
-                                    .send()
-                                    .await
-                                    .unwrap();
-                            },
-                        }
-                    });
+                    self.canister_http_request_tx
+                        .send(canister_output_request)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     canister_nonce
                 },
             };

@@ -1,8 +1,8 @@
 use crate::{
     canister_methods::{
         self, CanisterOpenMessageContent, CanisterOutput, CanisterOutputCertifiedMessages,
-        CanisterServiceMessage, CanisterToClientMessage, CanisterWsGetMessagesArguments, ClientKey,
-        WebsocketMessage,
+        CanisterOutputRequest, CanisterServiceMessage, CanisterToClientMessage,
+        CanisterWsGetMessagesArguments, ClientKey, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     messages_demux::MessagesDemux,
@@ -108,10 +108,14 @@ impl CanisterPoller {
     pub async fn run_polling(
         &mut self,
         mut poller_channels: PollerChannelsPollerEnds,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
         first_client_key: ClientKey,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) {
-        let mut messages_demux = MessagesDemux::new(poller_channels.poller_to_analyzer.clone());
+        let mut messages_demux = MessagesDemux::new(
+            poller_channels.poller_to_analyzer.clone(),
+            canister_http_request_tx,
+        );
         // the channel used to send updates to the first client is passed as an argument to the poller
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
         // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not

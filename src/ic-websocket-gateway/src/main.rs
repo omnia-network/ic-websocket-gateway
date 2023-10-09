@@ -17,6 +17,7 @@ mod canister_poller;
 mod client_connection_handler;
 mod events_analyzer;
 mod gateway_server;
+mod http_fire_and_forget_client;
 mod messages_demux;
 mod ws_listener;
 mod metrics {
@@ -112,6 +113,9 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    // channel used to send messages to the http fire and forget client
+    let (canister_http_request_tx, canister_http_request_rx) = mpsc::channel(100);
+
     let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
     let (rate_limiting_channel_tx, rate_limiting_channel_rx): (Sender<f64>, Receiver<f64>) =
@@ -121,6 +125,7 @@ async fn main() -> Result<(), String> {
         deployment_info.gateway_address,
         deployment_info.subnet_url,
         identity,
+        canister_http_request_tx,
         events_channel_tx,
     )
     .await;
@@ -135,6 +140,12 @@ async fn main() -> Result<(), String> {
     } else {
         None
     };
+
+    tokio::spawn(async move {
+        let mut http_fire_and_forget_client =
+            http_fire_and_forget_client::HttpClient::new(canister_http_request_rx);
+        http_fire_and_forget_client.start_relaying_requests().await;
+    });
 
     tokio::spawn(async move {
         let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);

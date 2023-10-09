@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, CanisterWsCloseArguments, ClientKey},
+    canister_methods::{self, CanisterOutputRequest, CanisterWsCloseArguments, ClientKey},
     canister_poller::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
@@ -79,6 +79,8 @@ pub struct GatewayServer {
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
     client_connection_handler_rx: Receiver<IcWsConnectionState>,
+    /// sender side of the channel used to send messages to the http fire and forget client
+    canister_http_request_tx: Sender<CanisterOutputRequest>,
     /// sender side of the channel used to send events from different components to the analyzer
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     /// state of the WS Gateway
@@ -92,6 +94,7 @@ impl GatewayServer {
         gateway_address: String,
         subnet_url: String,
         identity: BasicIdentity,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         let fetch_ic_root_key = subnet_url != "https://icp0.io";
@@ -120,6 +123,7 @@ impl GatewayServer {
             address: gateway_address,
             client_connection_handler_tx,
             client_connection_handler_rx,
+            canister_http_request_tx,
             events_channel_tx,
             state: GatewayState::default(),
             token,
@@ -176,6 +180,7 @@ impl GatewayServer {
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
+                        self.canister_http_request_tx.clone(),
                         self.events_channel_tx.clone(),
                         polling_interval,
                         self.agent.clone()
@@ -299,6 +304,7 @@ impl GatewayState {
         &mut self,
         connection_state: IcWsConnectionState,
         poller_channel_for_completion_tx: Sender<TerminationInfo>,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval: u64,
         agent: Arc<Agent>,
@@ -374,6 +380,7 @@ impl GatewayState {
                         poller
                             .run_polling(
                                 poller_channels_poller_ends,
+                                canister_http_request_tx,
                                 client_key,
                                 gateway_session.message_for_client_tx.clone(),
                             )
