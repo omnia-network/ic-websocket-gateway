@@ -1,6 +1,9 @@
 use candid::{decode_one, encode_one, CandidType};
 use ic_cdk::{
-    api::{management_canister::http_request::HttpMethod, time},
+    api::{
+        management_canister::http_request::{HttpHeader, HttpMethod},
+        time,
+    },
     print,
 };
 
@@ -50,7 +53,10 @@ pub fn on_open(args: OnOpenCallbackArgs) {
     let canister_http_request = CanisterHttpFireAndForgetRequestArgument::new(
         String::from("https://omnia-iot.com"),
         HttpMethod::GET,
-        Vec::new(),
+        vec![HttpHeader {
+            name: String::from("Accept"),
+            value: String::from("application/json"),
+        }],
         None,
     );
     http_fire_and_forget_request(canister_http_request);

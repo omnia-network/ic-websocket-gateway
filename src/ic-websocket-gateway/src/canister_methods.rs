@@ -126,6 +126,14 @@ impl CanisterOutputRequest {
     pub fn method(&self) -> &HttpMethod {
         &self.canister_http_request.method
     }
+
+    pub fn headers(&self) -> &Vec<HttpHeader> {
+        &self.canister_http_request.headers
+    }
+
+    pub fn body(&self) -> &Option<Vec<u8>> {
+        &self.canister_http_request.body
+    }
 }
 
 #[derive(CandidType, Deserialize, Serialize)]
