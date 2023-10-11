@@ -1,1 +1,62 @@
-service : {};
+type ClientPrincipal = principal;
+type ClientKey = record {
+    client_principal : ClientPrincipal;
+    client_nonce : nat64;
+};
+
+type WebsocketMessage = record {
+    client_key : ClientKey;
+    sequence_num : nat64;
+    timestamp : nat64;
+    is_service_message : bool;
+    content : blob;
+};
+
+type CanisterOutputMessage = record {
+    client_key : ClientKey;
+    key : text;
+    content : blob;
+};
+
+type CanisterWsOpenArguments = record {
+    client_nonce : nat64;
+};
+
+type CanisterWsOpenResult = variant {
+    Ok : null;
+    Err : text;
+};
+
+type CanisterWsCloseArguments = record {
+    client_key : ClientKey;
+};
+
+type CanisterWsCloseResult = variant {
+    Ok : null;
+    Err : text;
+};
+
+type CanisterWsMessageArguments = record {
+    msg : WebsocketMessage;
+};
+
+type CanisterWsMessageResult = variant {
+    Ok : null;
+    Err : text;
+};
+
+type CanisterWsGetMessagesArguments = record {
+    nonce : nat64;
+};
+
+type CanisterWsGetMessagesResult = variant {
+    Ok : vec CanisterOutputMessage;
+    Err : text;
+};
+
+service : {
+    "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
+    "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
+    "ws_message" : (CanisterWsMessageArguments) -> (CanisterWsMessageResult);
+    "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
+};
