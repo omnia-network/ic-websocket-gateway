@@ -1,0 +1,17 @@
+{
+  "canisters": {
+    "management_canister": {
+      "candid": "management_canister.did",
+      "package": "management_canister",
+      "type": "rust"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
