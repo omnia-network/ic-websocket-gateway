@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tracing::warn;
 
-use crate::canister_methods::{self, GetNewRegisteredCanistersArgs};
+use crate::canister_methods::{self, CanisterStatus, GetCanisterUpdatesArgs};
 
 pub struct ManagementCanisterPoller {
     canister_id: Principal,
@@ -28,27 +28,37 @@ impl ManagementCanisterPoller {
     }
 
     pub async fn start_polling(&self) {
-        canister_methods::register_gateway(&self.agent, &self.canister_id)
-            .await
-            .expect("error after calling ws_open");
+        let registered_canisters =
+            canister_methods::register_gateway(&self.agent, &self.canister_id)
+                .await
+                .expect("error after calling ws_open");
+        warn!("Registered canisters: {:?}", registered_canisters);
+        // TODO: start poller for each registered principal
         loop {
             sleep(self.polling_interval_ms).await;
             // get messages to be relayed to clients from canister (starting from 'message_nonce')
-            let canister_result = canister_methods::get_new_registered_canisters(
+            let canister_updates = canister_methods::get_canister_updates(
                 &self.agent,
                 &self.canister_id,
-                GetNewRegisteredCanistersArgs {
+                GetCanisterUpdatesArgs {
                     nonce: *self.message_nonce.read().await,
                 },
             )
             .await
-            .expect("error after calling ws_get_messages");
+            .expect("error after calling get_canister_updates");
 
-            let messages_count = canister_result.len();
-            warn!("Received {:?} messages", messages_count);
-            for canister_registration in canister_result {
-                // TODO: start a poller for each canister principal received
-                warn!("Received: {:?}", canister_registration.content);
+            let messages_count = canister_updates.len();
+            for canister_update in canister_updates {
+                match canister_update.status {
+                    CanisterStatus::Registered(principal) => {
+                        warn!("Registered new canister: {:?}", principal);
+                        // TODO: start poller
+                    },
+                    CanisterStatus::Deregistered(principal) => {
+                        warn!("Deregistered canister: {:?}", principal);
+                        // TODO: stop poller
+                    },
+                }
             }
             let last_iteration_nonce = *self.message_nonce.read().await;
             *self.message_nonce.write().await = last_iteration_nonce + messages_count as u64;

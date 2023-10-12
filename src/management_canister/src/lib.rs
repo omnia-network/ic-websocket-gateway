@@ -3,9 +3,9 @@ use ic_cdk::api::caller;
 use ic_cdk_macros::{init, post_upgrade, query, update};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::{cell::RefCell, collections::VecDeque, convert::AsRef};
+use std::{cell::RefCell, collections::VecDeque};
 
-/// The maximum number of messages returned by [get_new_registered_canisters] at each poll.
+/// The maximum number of messages returned by [get_canister_updates] at each poll.
 const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 10;
 
 const GATEWAY_PRINCIPAL: &str = "be6t5-k6m66-cifvj-yibal-eornr-h7wh4-jtj2p-yhvgs-p7str-dn7sq-xae";
@@ -13,23 +13,26 @@ const GATEWAY_PRINCIPAL: &str = "be6t5-k6m66-cifvj-yibal-eornr-h7wh4-jtj2p-yhvgs
 type RegisterGatewayResult = Result<Vec<Principal>, String>;
 type CanisterRegistrationResult = Result<(), String>;
 type CanisterDeregistrationResult = Result<(), String>;
-/// The result of [get_new_registered_canisters].
-type GetNewRegisteredCanistersResult = Result<Vec<CanisterRegistration>, String>;
-/// The result of [ws_send].
-type SendNewRegisteredCanisterResult = Result<(), String>;
+/// The result of [get_canister_updates].
+type GetCanisterUpdatesResult = Result<Vec<CanisterUpdate>, String>;
 
-/// The arguments for [get_new_registered_canisters].
+/// The arguments for [get_canister_updates].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-struct GetNewRegisteredCanistersArgs {
+struct GetCanisterUpdatesArgs {
     nonce: u64,
 }
 
 /// Element of the list of messages returned to the WS Gateway after polling.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-struct CanisterRegistration {
+struct CanisterUpdate {
     key: String, // Key for certificate verification.
-    #[serde(with = "serde_bytes")]
-    content: Vec<u8>, // The message to be relayed, that contains the application message.
+    status: CanisterStatus,
+}
+
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+enum CanisterStatus {
+    Registered(Principal),
+    Deregistered(Principal),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -52,11 +55,15 @@ thread_local! {
     /// Keeps track of the principal of the WS Gateway which polls the canister
     /* flexible */ static REGISTERED_GATEWAY: RefCell<Option<RegisteredGateway>> = RefCell::new(None);
     /// Keeps track of the messages that have to be sent to the WS Gateway
-    /* flexible */ static MESSAGES_FOR_GATEWAY: RefCell<VecDeque<CanisterRegistration>> = RefCell::new(VecDeque::new());
+    /* flexible */ static MESSAGES_FOR_GATEWAY: RefCell<VecDeque<CanisterUpdate>> = RefCell::new(VecDeque::new());
     /// Keeps track of the nonce which:
     /// - the WS Gateway uses to specify the first index of the certified messages to be returned when polling
     /// - the client uses as part of the path in the Merkle tree in order to verify the certificate of the messages relayed by the WS Gateway
     /* flexible */ static OUTGOING_MESSAGE_NONCE: RefCell<u64> = RefCell::new(0u64);
+}
+
+fn cleanup_outgoing_message_nonce() {
+    OUTGOING_MESSAGE_NONCE.with(|n| n.replace(0));
 }
 
 fn get_outgoing_message_nonce() -> u64 {
@@ -108,6 +115,19 @@ fn remove_canister(principal: &Principal) {
     })
 }
 
+fn push_message_for_gateway(update: CanisterUpdate) {
+    MESSAGES_FOR_GATEWAY.with(|m| {
+        // messages in the queue are inserted with contiguous and increasing nonces
+        // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
+        // is incremented by one in each call, and the message is pushed at the end of the queue
+        m.borrow_mut().push_back(update);
+    });
+}
+
+fn cleanup_messages_for_gateway() {
+    MESSAGES_FOR_GATEWAY.with(|m| m.borrow_mut().clear());
+}
+
 fn get_message_for_gateway_key(gateway_principal: Principal, nonce: u64) -> String {
     gateway_principal.to_string() + "_" + &format!("{:0>20}", nonce.to_string())
 }
@@ -141,9 +161,9 @@ fn get_messages_for_gateway_range(gateway_principal: Principal, nonce: u64) -> (
     })
 }
 
-fn get_messages_for_gateway(start_index: usize, end_index: usize) -> Vec<CanisterRegistration> {
+fn get_messages_for_gateway(start_index: usize, end_index: usize) -> Vec<CanisterUpdate> {
     MESSAGES_FOR_GATEWAY.with(|m| {
-        let mut messages: Vec<CanisterRegistration> = Vec::with_capacity(end_index - start_index);
+        let mut messages: Vec<CanisterUpdate> = Vec::with_capacity(end_index - start_index);
         for index in start_index..end_index {
             messages.push(m.borrow().get(index).unwrap().clone());
         }
@@ -152,7 +172,7 @@ fn get_messages_for_gateway(start_index: usize, end_index: usize) -> Vec<Caniste
 }
 
 /// Gets the messages in MESSAGES_FOR_GATEWAY starting from the one with the specified nonce
-fn get_messages(gateway_principal: Principal, nonce: u64) -> GetNewRegisteredCanistersResult {
+fn get_messages(gateway_principal: Principal, nonce: u64) -> GetCanisterUpdatesResult {
     let (start_index, end_index) = get_messages_for_gateway_range(gateway_principal, nonce);
     Ok(get_messages_for_gateway(start_index, end_index))
 }
@@ -193,6 +213,10 @@ fn register_gateway() -> RegisterGatewayResult {
     if !is_registered_gateway(client_principal) {
         return Err(String::from("caller is not the registered gateway"));
     } else {
+        // remove previously stored messages for gateway
+        cleanup_messages_for_gateway();
+        // reset outgoing message nonce
+        cleanup_outgoing_message_nonce();
         // gateway restarted, respond with all registered canisters
         Ok(get_registered_canisters())
     }
@@ -203,7 +227,7 @@ fn register_canister() -> CanisterRegistrationResult {
     let principal = caller();
     if !is_canister_registered(&principal) {
         insert_canister_principal(&principal);
-        // TODO: send update to gateway
+        send_canister_update(CanisterStatus::Registered(principal));
         Ok(())
     } else {
         Err(format!(
@@ -218,7 +242,7 @@ fn deregister_canister() -> CanisterDeregistrationResult {
     let principal = caller();
     if is_canister_registered(&principal) {
         remove_canister(&principal);
-        // TODO: send update to gateway
+        send_canister_update(CanisterStatus::Deregistered(principal));
         Ok(())
     } else {
         Err(format!(
@@ -230,9 +254,7 @@ fn deregister_canister() -> CanisterDeregistrationResult {
 
 /// Returns messages to the WS Gateway in response of a polling iteration.
 #[query]
-fn get_new_registered_canisters(
-    args: GetNewRegisteredCanistersArgs,
-) -> GetNewRegisteredCanistersResult {
+fn get_canister_updates(args: GetCanisterUpdatesArgs) -> GetCanisterUpdatesResult {
     // check if the caller of this method is the WS Gateway that has been set during the initialization of the SDK
     let gateway_principal = caller();
     check_is_registered_gateway(gateway_principal)?;
@@ -240,7 +262,7 @@ fn get_new_registered_canisters(
     get_messages(gateway_principal, args.nonce)
 }
 
-pub fn send_new_registered_canister(msg_bytes: Vec<u8>) -> SendNewRegisteredCanisterResult {
+fn send_canister_update(status: CanisterStatus) {
     // get the principal of the gateway that is polling the canister
     let gateway_principal = get_registered_gateway_principal();
 
@@ -252,14 +274,5 @@ pub fn send_new_registered_canister(msg_bytes: Vec<u8>) -> SendNewRegisteredCani
     // increment the nonce for the next message
     increment_outgoing_message_nonce();
 
-    MESSAGES_FOR_GATEWAY.with(|m| {
-        // messages in the queue are inserted with contiguous and increasing nonces
-        // (from beginning to end of the queue) as ws_send is called sequentially, the nonce
-        // is incremented by one in each call, and the message is pushed at the end of the queue
-        m.borrow_mut().push_back(CanisterRegistration {
-            content: msg_bytes,
-            key,
-        });
-    });
-    Ok(())
+    push_message_for_gateway(CanisterUpdate { status, key });
 }

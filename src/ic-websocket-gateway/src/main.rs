@@ -34,7 +34,7 @@ mod tests {
     pub mod client_connection_handler;
 }
 
-const MANAGEMENT_CANISTER_PRINCIPAL: &str = "bd3sg-teaaa-aaaaa-qaaba-cai";
+const MANAGEMENT_CANISTER_PRINCIPAL: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]

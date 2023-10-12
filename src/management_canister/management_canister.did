@@ -1,6 +1,11 @@
-type CanisterRegistration = record {
+type CanisterUpdate = record {
     key : text;
-    content : blob;
+    status : CanisterStatus;
+};
+
+type CanisterStatus = variant {
+    Registered : principal;
+    Deregistered : principal;
 };
 
 type RegisterGatewayResult = variant {
@@ -18,12 +23,12 @@ type CanisterDeregistrationResult = variant {
     Err : text;
 };
 
-type GetNewRegisteredCanistersArgs = record {
+type GetCanisterUpdatesArgs = record {
     nonce : nat64;
 };
 
-type GetNewRegisteredCanistersResult = variant {
-    Ok : vec CanisterRegistration;
+type GetCanisterUpdatesResult = variant {
+    Ok : vec CanisterUpdate;
     Err : text;
 };
 
@@ -31,5 +36,5 @@ service : {
     "register_gateway" : () -> (RegisterGatewayResult);
     "register_canister" : () -> (CanisterRegistrationResult);
     "deregister_canister" : () -> (CanisterDeregistrationResult);
-    "get_new_registered_canisters" : (GetNewRegisteredCanistersArgs) -> (GetNewRegisteredCanistersResult) query;
+    "get_canister_updates" : (GetCanisterUpdatesArgs) -> (GetCanisterUpdatesResult) query;
 };

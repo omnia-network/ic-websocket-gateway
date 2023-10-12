@@ -58,19 +58,24 @@ pub struct CanisterWsGetMessagesArguments {
 }
 
 /// Element of the list of messages returned to the WS Gateway after polling.
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CanisterRegistration {
+#[derive(CandidType, Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CanisterUpdate {
     key: String, // Key for certificate verification.
-    #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>, // The message to be relayed, that contains the application message.
+    pub status: CanisterStatus,
 }
 
-/// The result of [get_new_registered_canisters].
-pub type GetNewRegisteredCanistersResult = Result<Vec<CanisterRegistration>, String>;
+#[derive(CandidType, Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub enum CanisterStatus {
+    Registered(Principal),
+    Deregistered(Principal),
+}
 
-/// The arguments for [get_new_registered_canisters].
+/// The result of [get_canister_updates].
+pub type GetCanisterUpdatesResult = Result<Vec<CanisterUpdate>, String>;
+
+/// The arguments for [get_canister_updates].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
-pub struct GetNewRegisteredCanistersArgs {
+pub struct GetCanisterUpdatesArgs {
     pub nonce: u64,
 }
 
@@ -244,19 +249,19 @@ pub async fn ws_get_messages(
     Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| e.to_string())?
 }
 
-pub async fn get_new_registered_canisters(
+pub async fn get_canister_updates(
     agent: &Agent,
     canister_id: &Principal,
-    args: GetNewRegisteredCanistersArgs,
-) -> GetNewRegisteredCanistersResult {
+    args: GetCanisterUpdatesArgs,
+) -> GetCanisterUpdatesResult {
     let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
-        .query(canister_id, "get_new_registered_canisters")
+        .query(canister_id, "get_canister_updates")
         .with_arg(args)
         .call()
         .await
         .map_err(|e| e.to_string())?;
 
-    Decode!(&res, GetNewRegisteredCanistersResult).map_err(|e| e.to_string())?
+    Decode!(&res, GetCanisterUpdatesResult).map_err(|e| e.to_string())?
 }
