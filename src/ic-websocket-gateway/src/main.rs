@@ -159,7 +159,7 @@ async fn main() -> Result<(), String> {
     });
 
     tokio::spawn(async move {
-        let management_canister_poller = management_poller::ManagementCanisterPoller::new(
+        let mut management_canister_poller = management_poller::ManagementCanisterPoller::new(
             Principal::from_text(MANAGEMENT_CANISTER_PRINCIPAL).unwrap(),
             Arc::clone(&agent),
             1000,

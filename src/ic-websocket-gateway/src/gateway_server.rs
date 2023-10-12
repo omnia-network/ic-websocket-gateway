@@ -353,11 +353,6 @@ impl GatewayState {
                         poller_channel_for_client_channel_sender_rx,
                     ) = mpsc::channel(100);
 
-                    self.add_poller_data(
-                        canister_id,
-                        poller_channel_for_client_channel_sender_tx.clone(),
-                    );
-
                     let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
                         poller_channel_for_client_channel_sender_rx,
                         poller_channel_for_completion_tx,
@@ -381,6 +376,12 @@ impl GatewayState {
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
                         canister_id
                     });
+
+                    self.add_poller_data(
+                        canister_id,
+                        poller_channel_for_client_channel_sender_tx.clone(),
+                    );
+
                     connection_establishment_events
                         .metrics
                         .set_started_new_poller();

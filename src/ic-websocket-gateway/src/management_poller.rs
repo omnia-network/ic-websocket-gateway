@@ -1,6 +1,6 @@
 use candid::Principal;
 use ic_agent::Agent;
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tracing::warn;
 
@@ -10,6 +10,7 @@ pub struct ManagementCanisterPoller {
     canister_id: Principal,
     /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
     message_nonce: Arc<RwLock<u64>>,
+    registered_canisters: BTreeSet<Principal>,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
 }
@@ -22,17 +23,24 @@ impl ManagementCanisterPoller {
             // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
             message_nonce: Arc::new(RwLock::new(0)),
+            registered_canisters: BTreeSet::new(),
             agent,
             polling_interval_ms,
         }
     }
 
-    pub async fn start_polling(&self) {
-        let registered_canisters =
+    pub async fn start_polling(&mut self) {
+        self.registered_canisters = {
             canister_methods::register_gateway(&self.agent, &self.canister_id)
                 .await
-                .expect("error after calling ws_open");
-        warn!("Registered canisters: {:?}", registered_canisters);
+                .expect("error after calling ws_open")
+                .iter()
+                .fold(BTreeSet::new(), |mut s, principal| {
+                    s.insert(principal.to_owned());
+                    s
+                })
+        };
+        warn!("Registered canisters: {:?}", self.registered_canisters);
         // TODO: start poller for each registered principal
         loop {
             sleep(self.polling_interval_ms).await;
@@ -52,10 +60,12 @@ impl ManagementCanisterPoller {
                 match canister_update.status {
                     CanisterStatus::Registered(principal) => {
                         warn!("Registered new canister: {:?}", principal);
+                        self.registered_canisters.insert(principal);
                         // TODO: start poller
                     },
                     CanisterStatus::Deregistered(principal) => {
                         warn!("Deregistered canister: {:?}", principal);
+                        self.registered_canisters.remove(&principal);
                         // TODO: stop poller
                     },
                 }
