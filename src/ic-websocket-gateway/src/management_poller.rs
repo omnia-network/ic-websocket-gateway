@@ -1,7 +1,7 @@
 use candid::Principal;
 use ic_agent::Agent;
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::warn;
 
 use crate::canister_methods::{self, CanisterStatus, GetCanisterUpdatesArgs};
@@ -11,12 +11,18 @@ pub struct ManagementCanisterPoller {
     /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
     message_nonce: Arc<RwLock<u64>>,
     registered_canisters: BTreeSet<Principal>,
+    canister_updates_tx: Sender<CanisterStatus>,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
 }
 
 impl ManagementCanisterPoller {
-    pub fn new(canister_id: Principal, agent: Arc<Agent>, polling_interval_ms: u64) -> Self {
+    pub fn new(
+        canister_id: Principal,
+        canister_updates_tx: Sender<CanisterStatus>,
+        agent: Arc<Agent>,
+        polling_interval_ms: u64,
+    ) -> Self {
         Self {
             canister_id,
             // once the poller starts running, it requests messages from nonce 0.
@@ -24,6 +30,7 @@ impl ManagementCanisterPoller {
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
             message_nonce: Arc::new(RwLock::new(0)),
             registered_canisters: BTreeSet::new(),
+            canister_updates_tx,
             agent,
             polling_interval_ms,
         }
@@ -59,16 +66,16 @@ impl ManagementCanisterPoller {
             for canister_update in canister_updates {
                 match canister_update.status {
                     CanisterStatus::Registered(principal) => {
-                        warn!("Registered new canister: {:?}", principal);
                         self.registered_canisters.insert(principal);
-                        // TODO: start poller
                     },
                     CanisterStatus::Deregistered(principal) => {
-                        warn!("Deregistered canister: {:?}", principal);
                         self.registered_canisters.remove(&principal);
-                        // TODO: stop poller
                     },
-                }
+                };
+                self.canister_updates_tx
+                    .send(canister_update.status)
+                    .await
+                    .expect("receiver side of the channel dropped");
             }
             let last_iteration_nonce = *self.message_nonce.read().await;
             *self.message_nonce.write().await = last_iteration_nonce + messages_count as u64;

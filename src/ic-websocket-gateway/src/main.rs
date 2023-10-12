@@ -1,3 +1,4 @@
+use crate::canister_methods::CanisterStatus;
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use candid::Principal;
@@ -118,6 +119,15 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    // [main task]                [management canister poller task]
+    // canister_updates_rx <----- canister_updates_tx
+
+    // channel used by the management canister poller to notify the gateway server of a canister (de)registration update
+    let (canister_updates_tx, canister_updates_rx): (
+        Sender<CanisterStatus>,
+        Receiver<CanisterStatus>,
+    ) = mpsc::channel(100);
+
     // channel used to send messages to the http fire and forget client
     let (canister_http_request_tx, canister_http_request_rx) = mpsc::channel(100);
 
@@ -137,6 +147,7 @@ async fn main() -> Result<(), String> {
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
         Arc::clone(&agent),
+        canister_updates_rx,
         canister_http_request_tx,
         events_channel_tx,
     )
@@ -161,6 +172,7 @@ async fn main() -> Result<(), String> {
     tokio::spawn(async move {
         let mut management_canister_poller = management_poller::ManagementCanisterPoller::new(
             Principal::from_text(MANAGEMENT_CANISTER_PRINCIPAL).unwrap(),
+            canister_updates_tx,
             Arc::clone(&agent),
             1000,
         );

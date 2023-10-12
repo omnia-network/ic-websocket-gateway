@@ -14,7 +14,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level};
 
 use crate::{
-    canister_methods::{self, CanisterOutputRequest, CanisterWsCloseArguments, ClientKey},
+    canister_methods::{
+        self, CanisterOutputRequest, CanisterStatus, CanisterWsCloseArguments, ClientKey,
+    },
     canister_poller::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
@@ -79,6 +81,8 @@ pub struct GatewayServer {
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     /// receiver side of the channel used by the main task to get the state of the client connection from the connection handler task
     client_connection_handler_rx: Receiver<IcWsConnectionState>,
+    // receiver side of the channel used by the management canister poller to notify the gateway server of a canister (de)registration update
+    canister_updates_rx: Receiver<CanisterStatus>,
     /// sender side of the channel used to send messages to the http fire and forget client
     canister_http_request_tx: Sender<CanisterOutputRequest>,
     /// sender side of the channel used to send events from different components to the analyzer
@@ -93,6 +97,7 @@ impl GatewayServer {
     pub async fn new(
         gateway_address: String,
         agent: Arc<Agent>,
+        canister_updates_rx: Receiver<CanisterStatus>,
         canister_http_request_tx: Sender<CanisterOutputRequest>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
@@ -116,6 +121,7 @@ impl GatewayServer {
             address: gateway_address,
             client_connection_handler_tx,
             client_connection_handler_rx,
+            canister_updates_rx,
             canister_http_request_tx,
             events_channel_tx,
             state: GatewayState::default(),
@@ -165,7 +171,7 @@ impl GatewayServer {
         loop {
             select! {
                 // check if a client's connection state changed
-                Some(connection_state) = self.recv_from_client_connection_handler() => {
+                Some(connection_state) = self.client_connection_handler_rx.recv() => {
                     // connection state can contain either:
                     // - the GatewaySession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
@@ -179,6 +185,11 @@ impl GatewayServer {
                         self.agent.clone()
                     ).await;
 
+                }
+                // check if the management canister received an update from another canister
+                Some(update) = self.canister_updates_rx.recv() => {
+                    // start/stop poller
+                    warn!("Received: {:?}", update);
                 }
                 // check if a poller task has terminated
                 Some(termination_info) = poller_channel_for_completion_rx.recv() => {
@@ -261,10 +272,6 @@ impl GatewayServer {
         // wait to make sure that all ws_close are executed before shutting down
         // each time a ws_close returns the counter is decremented by 1
         while CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst) > 0 {}
-    }
-
-    pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsConnectionState> {
-        self.client_connection_handler_rx.recv().await
     }
 }
 
