@@ -1,62 +1,35 @@
-type ClientPrincipal = principal;
-type ClientKey = record {
-    client_principal : ClientPrincipal;
-    client_nonce : nat64;
-};
-
-type WebsocketMessage = record {
-    client_key : ClientKey;
-    sequence_num : nat64;
-    timestamp : nat64;
-    is_service_message : bool;
-    content : blob;
-};
-
-type CanisterOutputMessage = record {
-    client_key : ClientKey;
+type CanisterRegistration = record {
     key : text;
     content : blob;
 };
 
-type CanisterWsOpenArguments = record {
-    client_nonce : nat64;
+type RegisterGatewayResult = variant {
+    Ok : vec principal;
+    Err : text;
 };
 
-type CanisterWsOpenResult = variant {
+type CanisterRegistrationResult = variant {
     Ok : null;
     Err : text;
 };
 
-type CanisterWsCloseArguments = record {
-    client_key : ClientKey;
-};
-
-type CanisterWsCloseResult = variant {
+type CanisterDeregistrationResult = variant {
     Ok : null;
     Err : text;
 };
 
-type CanisterWsMessageArguments = record {
-    msg : WebsocketMessage;
-};
-
-type CanisterWsMessageResult = variant {
-    Ok : null;
-    Err : text;
-};
-
-type CanisterWsGetMessagesArguments = record {
+type GetNewRegisteredCanistersArgs = record {
     nonce : nat64;
 };
 
-type CanisterWsGetMessagesResult = variant {
-    Ok : vec CanisterOutputMessage;
+type GetNewRegisteredCanistersResult = variant {
+    Ok : vec CanisterRegistration;
     Err : text;
 };
 
 service : {
-    "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
-    "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
-    "ws_message" : (CanisterWsMessageArguments) -> (CanisterWsMessageResult);
-    "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
+    "register_gateway" : () -> (RegisterGatewayResult);
+    "register_canister" : () -> (CanisterRegistrationResult);
+    "deregister_canister" : () -> (CanisterDeregistrationResult);
+    "get_new_registered_canisters" : (GetNewRegisteredCanistersArgs) -> (GetNewRegisteredCanistersResult) query;
 };

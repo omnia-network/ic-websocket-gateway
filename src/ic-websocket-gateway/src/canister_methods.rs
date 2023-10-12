@@ -31,8 +31,11 @@ impl fmt::Display for ClientKey {
     }
 }
 
+pub type RegisterGatewayResult = Result<Vec<Principal>, String>;
+
 /// The result of [ws_close].
 pub type CanisterWsCloseResult = Result<(), String>;
+
 /// The result of [ws_get_messages].
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
@@ -51,6 +54,23 @@ pub struct CanisterWsCloseArguments {
 /// The arguments for [ws_get_messages].
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsGetMessagesArguments {
+    pub nonce: u64,
+}
+
+/// Element of the list of messages returned to the WS Gateway after polling.
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CanisterRegistration {
+    key: String, // Key for certificate verification.
+    #[serde(with = "serde_bytes")]
+    pub content: Vec<u8>, // The message to be relayed, that contains the application message.
+}
+
+/// The result of [get_new_registered_canisters].
+pub type GetNewRegisteredCanistersResult = Result<Vec<CanisterRegistration>, String>;
+
+/// The arguments for [get_new_registered_canisters].
+#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
+pub struct GetNewRegisteredCanistersArgs {
     pub nonce: u64,
 }
 
@@ -178,6 +198,17 @@ pub async fn get_new_agent(
     }
     Ok(agent)
 }
+pub async fn register_gateway(agent: &Agent, canister_id: &Principal) -> RegisterGatewayResult {
+    let args = candid::encode_args(()).map_err(|e| e.to_string())?;
+    let res = agent
+        .update(canister_id, "register_gateway")
+        .with_arg(args)
+        .call_and_wait()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Decode!(&res, RegisterGatewayResult).map_err(|e| e.to_string())?
+}
 
 pub async fn ws_close(
     agent: &Agent,
@@ -211,4 +242,21 @@ pub async fn ws_get_messages(
         .map_err(|e| e.to_string())?;
 
     Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| e.to_string())?
+}
+
+pub async fn get_new_registered_canisters(
+    agent: &Agent,
+    canister_id: &Principal,
+    args: GetNewRegisteredCanistersArgs,
+) -> GetNewRegisteredCanistersResult {
+    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
+
+    let res = agent
+        .query(canister_id, "get_new_registered_canisters")
+        .with_arg(args)
+        .call()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Decode!(&res, GetNewRegisteredCanistersResult).map_err(|e| e.to_string())?
 }

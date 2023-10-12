@@ -1,4 +1,4 @@
-use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
+use ic_agent::{export::Principal, Agent};
 use std::{
     collections::HashMap,
     sync::{
@@ -92,17 +92,10 @@ pub struct GatewayServer {
 impl GatewayServer {
     pub async fn new(
         gateway_address: String,
-        subnet_url: String,
-        identity: BasicIdentity,
+        agent: Arc<Agent>,
         canister_http_request_tx: Sender<CanisterOutputRequest>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
-        let fetch_ic_root_key = subnet_url != "https://icp0.io";
-
-        let agent = canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key)
-            .await
-            .expect("could not get new agent");
-        let agent = Arc::new(agent);
         info!(
             "Gateway Agent principal: {}",
             agent.get_principal().expect("Principal should be set")

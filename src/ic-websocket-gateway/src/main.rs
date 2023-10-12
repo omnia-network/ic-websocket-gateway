@@ -1,6 +1,8 @@
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
+use candid::Principal;
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
+use std::sync::Arc;
 use std::{
     fs::{self, File},
     path::Path,
@@ -18,6 +20,7 @@ mod client_connection_handler;
 mod events_analyzer;
 mod gateway_server;
 mod http_fire_and_forget_client;
+mod management_poller;
 mod messages_demux;
 mod ws_listener;
 mod metrics {
@@ -30,6 +33,8 @@ mod tests {
     pub mod canister_poller;
     pub mod client_connection_handler;
 }
+
+const MANAGEMENT_CANISTER_PRINCIPAL: &str = "bd3sg-teaaa-aaaaa-qaaba-cai";
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
@@ -121,10 +126,17 @@ async fn main() -> Result<(), String> {
     let (rate_limiting_channel_tx, rate_limiting_channel_rx): (Sender<f64>, Receiver<f64>) =
         mpsc::channel(10);
 
+    let fetch_ic_root_key = deployment_info.subnet_url != "https://icp0.io";
+
+    let agent =
+        canister_methods::get_new_agent(&deployment_info.subnet_url, identity, fetch_ic_root_key)
+            .await
+            .expect("could not get new agent");
+    let agent = Arc::new(agent);
+
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
-        deployment_info.subnet_url,
-        identity,
+        Arc::clone(&agent),
         canister_http_request_tx,
         events_channel_tx,
     )
@@ -142,14 +154,23 @@ async fn main() -> Result<(), String> {
     };
 
     tokio::spawn(async move {
-        let mut http_fire_and_forget_client =
-            http_fire_and_forget_client::HttpClient::new(canister_http_request_rx);
-        http_fire_and_forget_client.start_relaying_requests().await;
+        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);
+        events_analyzer.start_processing().await;
     });
 
     tokio::spawn(async move {
-        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);
-        events_analyzer.start_processing().await;
+        let management_canister_poller = management_poller::ManagementCanisterPoller::new(
+            Principal::from_text(MANAGEMENT_CANISTER_PRINCIPAL).unwrap(),
+            Arc::clone(&agent),
+            1000,
+        );
+        management_canister_poller.start_polling().await;
+    });
+
+    tokio::spawn(async move {
+        let mut http_fire_and_forget_client =
+            http_fire_and_forget_client::HttpClient::new(canister_http_request_rx);
+        http_fire_and_forget_client.start_relaying_requests().await;
     });
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
