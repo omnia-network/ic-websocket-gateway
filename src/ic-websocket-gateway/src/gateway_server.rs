@@ -342,44 +342,15 @@ impl GatewayState {
                 };
 
                 if needs_new_poller {
-                    // [main task]                                        [poller task]
-                    // poller_channel_for_client_channel_sender_tx -----> poller_channel_for_client_channel_sender_rx
-
-                    // channel used to communicate with the poller task
-                    // the channel is used to send to the poller the sender side of a new client's channel
-                    // so that the poller can send canister messages directly to the client's task
-                    let (
-                        poller_channel_for_client_channel_sender_tx,
-                        poller_channel_for_client_channel_sender_rx,
-                    ) = mpsc::channel(100);
-
-                    let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
-                        poller_channel_for_client_channel_sender_rx,
-                        poller_channel_for_completion_tx,
-                        events_channel_tx.clone(),
-                    );
-                    let agent = Arc::clone(&agent);
-
-                    // spawn new canister poller task
-                    tokio::spawn(async move {
-                        let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
-                        // the channel used to send updates to the first client is passed as an argument to the poller
-                        // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
-                        poller
-                            .run_polling(
-                                poller_channels_poller_ends,
-                                canister_http_request_tx,
-                                client_key,
-                                gateway_session.message_for_client_tx.clone(),
-                            )
-                            .await;
-                        // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
-                        canister_id
-                    });
-
-                    self.add_poller_data(
+                    self.start_poller(
                         canister_id,
-                        poller_channel_for_client_channel_sender_tx.clone(),
+                        client_key,
+                        gateway_session.message_for_client_tx.clone(),
+                        canister_http_request_tx,
+                        events_channel_tx.clone(),
+                        poller_channel_for_completion_tx,
+                        Arc::clone(&agent),
+                        polling_interval,
                     );
 
                     connection_establishment_events
@@ -517,6 +488,59 @@ impl GatewayState {
 
     fn count_connected_pollers(&self) -> usize {
         self.connected_canisters.len()
+    }
+
+    fn start_poller(
+        &mut self,
+        canister_id: Principal,
+        first_client_key: ClientKey,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
+        canister_http_request_tx: Sender<CanisterOutputRequest>,
+        events_channel_tx: Sender<Box<dyn Events + Send>>,
+        poller_channel_for_completion_tx: Sender<TerminationInfo>,
+        agent: Arc<Agent>,
+        polling_interval: u64,
+    ) -> Sender<PollerToClientChannelData> {
+        // [main task]                                        [poller task]
+        // poller_channel_for_client_channel_sender_tx -----> poller_channel_for_client_channel_sender_rx
+
+        // channel used to communicate with the poller task
+        // the channel is used to send to the poller the sender side of a new client's channel
+        // so that the poller can send canister messages directly to the client's task
+        let (
+            poller_channel_for_client_channel_sender_tx,
+            poller_channel_for_client_channel_sender_rx,
+        ) = mpsc::channel(100);
+
+        self.add_poller_data(
+            canister_id,
+            poller_channel_for_client_channel_sender_tx.clone(),
+        );
+
+        let poller_channels_poller_ends = PollerChannelsPollerEnds::new(
+            poller_channel_for_client_channel_sender_rx,
+            poller_channel_for_completion_tx,
+            events_channel_tx,
+        );
+
+        // spawn new canister poller task
+        tokio::spawn(async move {
+            let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
+            // the channel used to send updates to the first client is passed as an argument to the poller
+            // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
+            poller
+                .run_polling(
+                    poller_channels_poller_ends,
+                    canister_http_request_tx,
+                    first_client_key,
+                    message_for_client_tx,
+                )
+                .await;
+            // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
+            canister_id
+        });
+
+        poller_channel_for_client_channel_sender_tx
     }
 }
 
