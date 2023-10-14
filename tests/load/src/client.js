@@ -16,6 +16,7 @@ async function connectClient(userContext, events, next) {
       canisterId: TEST_CANISTER_ID,
       networkUrl: IC_URL,
       identity: generateRandomIdentity(),
+      ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
     });
 
     await new Promise((resolve, reject) => {

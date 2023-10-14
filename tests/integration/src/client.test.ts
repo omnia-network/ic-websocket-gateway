@@ -9,7 +9,7 @@ const icUrl = environment.IC_URL;
 const canisterId = environment.TEST_CANISTER_ID;
 
 /// test constants & variables
-const pingPongCount = 5;
+const pingPongCount = 20;
 let ws: IcWebSocket;
 
 /// jest configuration
@@ -46,8 +46,6 @@ const reconstructWsMessage = (index: number) => {
   return message;
 }
 
-// TODO: make ws gateway and local replica start automatically before running tests
-
 /// tests
 describe("WS client", () => {
   it("should open a connection", async () => {
@@ -55,6 +53,7 @@ describe("WS client", () => {
       canisterId,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
+      ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
     });
 
     ws.onopen = () => {

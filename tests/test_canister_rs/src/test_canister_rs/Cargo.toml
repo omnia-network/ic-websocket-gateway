@@ -11,4 +11,4 @@ candid = { workspace = true }
 ic-cdk = { workspace = true }
 ic-cdk-macros = { workspace = true }
 serde = { workspace = true }
-ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "86b05d6959c80e8ede2e39a3a8e71c85306c36a1" }
+ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "b776b8a777a9ff3d3d8c65c2a6dc0ebc0fd1e236" }
