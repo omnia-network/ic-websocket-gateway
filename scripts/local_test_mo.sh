@@ -14,7 +14,7 @@ dfx deploy
 
 cd ../integration
 echo "Running integration test"
-npm run test
+npm test
 
 # kill gateway process
 kill $pid
