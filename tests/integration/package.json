@@ -46,6 +46,6 @@
     "@dfinity/agent": "^0.19.2",
     "@dfinity/candid": "^0.19.2",
     "@dfinity/principal": "^0.19.2",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#a0993cd2867acdd84f4fd2229cb0a1be441a4ac0"
+    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#c73179ad22df800a9d3e29034385f88e15540f76"
   }
 }
