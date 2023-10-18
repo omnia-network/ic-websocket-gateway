@@ -6,6 +6,7 @@ docs/
 scripts/
 target/
 tests/
+!tests/test_canister_rs/src/test_canister_rs
 volumes/
 .editorconfig
 .env.example
