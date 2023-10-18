@@ -73,8 +73,8 @@ actor class TestCanister() {
   let params = IcWebSocketCdk.WsInitParams(
     handlers,
     null,
-    ?Nat64.fromNat(2_000),
-    ?Nat64.fromNat(1_000),
+    null, // ?Nat64.fromNat(2_000),
+    null, // ?Nat64.fromNat(1_000),
   );
 
   let ws = IcWebSocketCdk.IcWebSocket(ws_state, params);
