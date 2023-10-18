@@ -34,6 +34,7 @@ mod tests {
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
     #[structopt(long, default_value = "http://127.0.0.1:4943")]
+    /// can be set by running: 'cargo run -- --subnet-url=http://localhost:4943'
     subnet_url: String,
 
     #[structopt(long, default_value = "0.0.0.0:8080")]

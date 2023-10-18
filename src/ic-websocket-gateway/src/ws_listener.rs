@@ -53,23 +53,26 @@ impl WsListener {
         let listener = TcpListener::bind(&gateway_address)
             .await
             .expect("Can't listen");
-        let mut tls_acceptor = None;
-        if let Some(tls_config) = tls_config {
-            let chain = fs::read(tls_config.certificate_pem_path).expect("Can't read certificate");
-            let privkey =
-                fs::read(tls_config.certificate_key_pem_path).expect("Can't read private key");
-            let tls_identity =
-                Identity::from_pkcs8(&chain, &privkey).expect("Can't create a TLS identity");
-            let acceptor = TlsAcceptor::from(
-                native_tls::TlsAcceptor::builder(tls_identity)
-                    .build()
-                    .expect("Can't create a TLS acceptor from the TLS identity"),
-            );
-            tls_acceptor = Some(acceptor);
-            info!("TLS enabled");
-        } else {
-            info!("TLS disabled");
-        }
+        let tls_acceptor = {
+            if let Some(tls_config) = tls_config {
+                let chain =
+                    fs::read(tls_config.certificate_pem_path).expect("Can't read certificate");
+                let privkey =
+                    fs::read(tls_config.certificate_key_pem_path).expect("Can't read private key");
+                let tls_identity =
+                    Identity::from_pkcs8(&chain, &privkey).expect("Can't create a TLS identity");
+                let acceptor = TlsAcceptor::from(
+                    native_tls::TlsAcceptor::builder(tls_identity)
+                        .build()
+                        .expect("Can't create a TLS acceptor from the TLS identity"),
+                );
+                info!("TLS enabled");
+                Some(acceptor)
+            } else {
+                info!("TLS disabled");
+                None
+            }
+        };
         Self {
             listener,
             tls_acceptor,

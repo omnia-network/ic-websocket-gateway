@@ -32,7 +32,10 @@ impl EventsMetrics for RequestConnectionSetupEventsMetrics {
         &self.ws_connection_setup
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let time_to_setup = self
                 .ws_connection_setup
@@ -40,7 +43,7 @@ impl EventsMetrics for RequestConnectionSetupEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(RequestConnectionSetupDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_setup,
                 latency,
             )));
@@ -124,7 +127,10 @@ impl EventsMetrics for OutgoingCanisterMessageEventsMetrics {
         &self.received_canister_message
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let time_to_send = self
                 .message_sent_to_client
@@ -132,7 +138,7 @@ impl EventsMetrics for OutgoingCanisterMessageEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(OutgoingCanisterMessageDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_send,
                 latency,
             )));

@@ -38,7 +38,10 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
         &self.sent_client_channel_to_poller
     }
 
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>> {
+    fn compute_deltas(
+        &self,
+        reference: Option<&EventsReference>,
+    ) -> Option<Box<dyn Deltas + Send>> {
         if let Some(reference) = reference {
             let time_to_start_poller = self
                 .started_new_poller
@@ -57,7 +60,7 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
             let latency = self.compute_latency()?;
 
             return Some(Box::new(ConnectionEstablishmentDeltas::new(
-                reference,
+                reference.to_owned(),
                 time_to_start_poller,
                 time_to_send_client_channel,
                 latency,

@@ -20,26 +20,36 @@ use tracing::{error, info, trace, warn};
 
 type EventsType = String;
 
+/// minimum interval between incoming messages
+/// if below this threshold, the gateway starts rate liimiting
 const MIN_INCOMING_INTERVAL: usize = 200;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
+    /// returns the name of the struct implementing EventsMetrics
     fn get_metrics_type(&self) -> EventsType {
         self.get_metrics().get_struct_name()
     }
 
-    fn get_reference(&self) -> Option<EventsReference>;
+    /// returns the reference used to collect events from different components
+    fn get_reference(&self) -> Option<&EventsReference>;
 
     /// returns the name of the collection which the events in the struct belong to
-    fn get_collection_type(&self) -> EventsCollectionType;
+    fn get_collection_type(&self) -> &EventsCollectionType;
 
-    fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static>;
+    /// returns the metrics computed from events
+    fn get_metrics(&self) -> &dyn EventsMetrics;
 }
 
 #[derive(Debug, Clone)]
+/// struct used to enforce the following fields on all type aliases implementing Events
 pub struct EventsImpl<T: EventsMetrics + Send> {
+    /// reference given to events of a component
+    /// used to collect it with events of other components
     pub reference: Option<EventsReference>,
+    /// name of a collection of events from multiple components
     collection_type: EventsCollectionType,
+    /// metrics computed from events of a component
     pub metrics: T,
 }
 
@@ -57,24 +67,25 @@ impl<T: EventsMetrics + Send> EventsImpl<T> {
     }
 }
 
-impl<T: EventsMetrics + Send + Clone + 'static> Events for EventsImpl<T> {
-    fn get_collection_type(&self) -> EventsCollectionType {
-        self.collection_type.clone()
+impl<T: EventsMetrics + Send + 'static> Events for EventsImpl<T> {
+    fn get_collection_type(&self) -> &EventsCollectionType {
+        &self.collection_type
     }
 
-    fn get_reference(&self) -> Option<EventsReference> {
+    fn get_reference(&self) -> Option<&EventsReference> {
         if let Some(reference) = &self.reference {
-            return Some(reference.clone());
+            return Some(reference);
         }
         None
     }
 
-    fn get_metrics(&self) -> Box<dyn EventsMetrics + Send + 'static> {
-        Box::new(self.metrics.clone())
+    fn get_metrics(&self) -> &dyn EventsMetrics {
+        &self.metrics
     }
 }
 
 pub trait EventsMetrics: Debug {
+    /// returns the name of the struct
     fn get_struct_name(&self) -> EventsType {
         let path: Vec<String> = type_name::<Self>()
             .split("::")
@@ -87,10 +98,11 @@ pub trait EventsMetrics: Debug {
     fn get_value_for_interval(&self) -> &TimeableEvent;
 
     /// returns the time deltas between the events in the struct implementing Events
-    fn compute_deltas(&self, reference: Option<EventsReference>) -> Option<Box<dyn Deltas + Send>>;
+    fn compute_deltas(&self, reference: Option<&EventsReference>)
+        -> Option<Box<dyn Deltas + Send>>;
 
     /// computes the interval between two structs implementing Events
-    fn compute_interval(&self, previous: &Box<dyn EventsMetrics + Send>) -> Duration {
+    fn compute_interval(&self, previous: &dyn EventsMetrics) -> Duration {
         self.get_value_for_interval()
             .duration_since(previous.get_value_for_interval())
             .expect("previous event must exist")
@@ -324,24 +336,24 @@ impl EventsAnalyzer {
         let events_type = events.get_metrics_type();
         let collection_type = events.get_collection_type();
         let latency = deltas.get_latency();
-        let reference = deltas.get_reference().clone();
+        let reference = deltas.get_reference();
 
-        if let Some(collection_data) = self.map_by_collection_type.get_mut(&collection_type) {
-            if let Some(latencies) = collection_data.get_mut(&reference) {
+        if let Some(collection_data) = self.map_by_collection_type.get_mut(collection_type) {
+            if let Some(latencies) = collection_data.get_mut(reference) {
                 latencies.insert(events_type, latency);
             } else {
                 let mut latencies = EventsLatencies::default();
                 latencies.insert(events_type, latency);
-                collection_data.insert(reference, latencies);
+                collection_data.insert(reference.to_owned(), latencies);
             }
         } else {
             let mut latencies = EventsLatencies::default();
             latencies.insert(events_type, latency);
             let mut latencies_map = CollectionData::default();
-            latencies_map.insert(reference, latencies);
+            latencies_map.insert(reference.to_owned(), latencies);
             let collection_data = latencies_map;
             self.map_by_collection_type
-                .insert(collection_type, collection_data);
+                .insert(collection_type.to_owned(), collection_data);
         }
     }
 
@@ -351,7 +363,7 @@ impl EventsAnalyzer {
         deltas: Box<dyn Deltas + Send>,
     ) {
         let events_type = events.get_metrics_type();
-        let reference = deltas.get_reference().clone();
+        let reference = deltas.get_reference().to_owned();
 
         // first events received for each type is not processed further as there is no previous event for computing interval
         if let Some(data) = self.map_by_events_type.get_mut(&events_type) {
@@ -359,7 +371,7 @@ impl EventsAnalyzer {
                 deltas,
                 events
                     .get_metrics()
-                    .compute_interval(&data.previous.get_metrics()),
+                    .compute_interval(data.previous.get_metrics()),
             );
             data.aggregated_metrics_map
                 .insert(reference, aggregated_metrics);
@@ -441,7 +453,7 @@ impl EventsAnalyzer {
                             let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
                             aggregated_latencies.insert(total_latency);
                             self.aggregated_latencies_map
-                                .insert(collection_type.clone(), aggregated_latencies);
+                                .insert(collection_type.to_owned(), aggregated_latencies);
                         }
                     }
                 }

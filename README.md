@@ -2,7 +2,7 @@
 
 WebSockets enable web applications to maintain a full-duplex connection between the backend and the frontend. This allows for many different use-cases, such as notifications, dynamic content updates (e.g., showing new comments/likes on a post), collaborative editing, etc.
 
-At the moment, WebSockets are not supported for dapps on the Internet Computer and developers need to resort to work-arounds in the frontend to enable a similar functionality. This results in a poor developer experience and an overload of the backend canister.
+At the moment, the Internet Computer does not natively support WebSocket connections and developers need to resort to work-arounds in the frontend to enable a similar functionality. This results in a poor developer experience and an overload of the backend canister.
 
 This repository contains the implementation of a WebSocket Gateway enabling clients to establish a full-duplex connection to their backend canister on the Internet Computer via the WebSocket API.
 
@@ -48,6 +48,7 @@ A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](.
     ```
     cp .env.example .env
     ```
+
 2. The docker-compose.yml file is configured to make the gateway run with TLS enabled. For this, you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
 3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
 4. Run the gateway:
@@ -72,6 +73,7 @@ A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](.
     > Make sure you have port `80` open on your server and reachable from the Internet, otherwise certbot will not be able to verify your domain. Port `80` is used only for the certificate generation and can be closed afterwards.
 
 To renew the SSL certificate, you can run the same command as above:
+
 ```
 ./scripts/certbot_certonly.sh
 ```
@@ -79,11 +81,13 @@ To renew the SSL certificate, you can run the same command as above:
 ## Configure logging
 
 The gateway uses the [tracing](https://docs.rs/tracing) crate for logging. There are two tracing outputs configured:
-- output to **stdout**, which has the `info` level and can be configured with the `RUST_LOG_STDOUT` env variable, see below;
-- output to a **file**, which is saved in the `data/traces/` folder and has the default `trace` level. The file name is `gateway_{start-timestamp}.log`. It can be configured with the `RUST_LOG_FILE` env variable, see below.
+
+-   output to **stdout**, which has the `info` level and can be configured with the `RUST_LOG_STDOUT` env variable, see below;
+-   output to a **file**, which is saved in the `data/traces/` folder and has the default `trace` level. The file name is `gateway_{start-timestamp}.log`. It can be configured with the `RUST_LOG_FILE` env variable, see below.
 
 The `RUST_LOG` environment variable enables to set different levels for each module. See the [EnvFilter](https://docs.rs/tracing-subscriber/0.3.17/tracing_subscriber/filter/struct.EnvFilter.html) documentation for more details.
 For example, to set the tracing level to `debug`, you can run:
+
 ```
 RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run
 ```
@@ -94,17 +98,19 @@ RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=de
 
 ### Unit tests
 
-Some unit tests are provided in the [unit_tests.rs](./src/ic-websocket-gateway/src/unit_tests.rs) file. You can run them with:
+Some unit tests are provided in the [tests](./src/ic-websocket-gateway/src/tests) folder. You can run them with:
 
 ```
-cargo test -- --test-threads=1
+cargo test
 ```
 
 ### Integration tests (Rust test canister)
+
 Integration tests require:
-- [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
-- [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/) 
-- a test canister deployed on the local replica
+
+-   [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
+-   [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/)
+-   a test canister deployed on the local replica
 
 After installing Node.js and dfx, you can run the integration tests as follows:
 
@@ -146,78 +152,57 @@ To make it easier to run both the unit and integration tests, a script is provid
 
 # How it works
 
-TODO: update this section
-
 ## Overview
 
 ![](./docs/images/image2.png)
 
-In order to enable WebSockets for a dapp running on the IC, we use an intermediary, called WS Gateway, that provides a WebSocket endpoint for the frontend of the dapp, running in the user’s browser and interfaces with the canister backend.
+In order to enable WebSockets for a dapp running on the IC, we use a trustless intermediary, called WS Gateway, that provides a WebSocket endpoint for the frontend of the dapp, running in the user’s browser and interacts with the canister backend.
 
-The gateway is needed as a WebSocket is a one-to-one connection between client and server, but the Internet Computer does not support that due to its replicated nature. The gateway translates all messages coming in on the WebSocket from the client to API canister calls for the backend and sends all messages coming from the backend on the Internet Computer out on the WebSocket with the corresponding client.
+The gateway is needed as a WebSocket is a one-to-one connection between client and server, but the Internet Computer does not support that due to its replicated nature. The gateway relays all messages coming in via the WebSocket from the client as API canister calls for the backend and sends each message polled from the backend via the WebSocket with the corresponding client.
 
 ## Features
 
--   General: The WS Gateway can provide WebSockets for many different dapps at the same time. A frontend can connect through any gateway to the backend (e.g., through the geographically closest one to reduce latency).
--   Trustless: In order to make it impossible for the gateway to tamper with messages:
+-   General: The WS Gateway can provide a WebSocket interface for many different dapps at the same time.
+-   Trustless:
 
-    -   all messages are signed: messages sent by the canister are [certified](https://internetcomputer.org/how-it-works/response-certification/); messages sent by the client signed by it;
+    -   all messages are signed: messages sent by the canister are [certified](https://internetcomputer.org/how-it-works/response-certification/); messages sent by the client signed using an identity either provided by the user or generated by the [IC WebSocket Frontend SDK](https://github.com/omnia-network/ic-websocket-sdk-js). This way, the gateway cannot tamper the content of the messages;
     -   all messages have a sequence number to guarantee all messages are received in the correct order;
-    -   all messages are accompanied by a timestamp.
+    -   all messages are accompanied by a timestamp to prevent the gateway from delaying them;
+    -   all messages are acknowledged by the [IC WebSocket Backend CDK](https://github.com/omnia-network/ic-websocket-cdk-rs) so that the gateway cannot block them;
+    -   the [IC WebSocket Backend CDK](https://github.com/omnia-network/ic-websocket-cdk-rs) expects keep alive messages from each connected client so that it can detect if a client is not connected anymore;
 
 -   IMPORTANT CAVEAT: NO ENCRYPTION!
     No single replica can be assumed to be trusted, so the canister state cannot be assumed to be kept secret. This means that when exchanging messages with the canister, we have to keep in mind that in principle the messages could be seen by others on the canister side.
     We could encrypt the messages between the client and the canister (so that they’re hidden from the gateway and any other party that cannot see the canister state), but we chose not to do so to make it clear that **in principle the messages could be seen by others on the canister side**.
+    This will be solved in the next version of IC WebSocket using VetKeys.
 
 ## Components
 
 1. Client:
 
-    Client uses the [IC WebSocket SDK](https://github.com/omnia-network/ic-websocket-sdk-js) to establish the IC WebSocket connection and communicate with its backend canister via the WebSocket API. Client will sign its messages.
+    Client uses the [IC WebSocket Frontend SDK](https://github.com/omnia-network/ic-websocket-sdk-js) to establish the IC WebSocket connection mediated by the WS Gateway in order to communicate with the backend canister using the WebSocket API. When instantiating a new IC WebSocket connection, the client can pass an identity to the SDK in order to authenticate its messages to the canister.
 
-    - Generates a public/private ed25519 key pair.
-    - Makes an update call to the canister to register the public key. Canister remembers the caller associated with this key. The call returns client_id.
-    - Opens a WebSocket to the given gateway address.
-    - Sends the first message with its client_id and the canister it wants to connect to. The message is signed with the private key.
-    - Receives certified canister messages from the WebSocket.
-    - Sends messages to the canister via the WebSocket Gateway. Messages are signed with the private key.
+    The client can instantiate a new IC WebSocket connection by calling the `IcWebSocket` constructor.
+
+    When the client calls the `send` method of the SDK, the SDK creates a signed envelope with the content specified by the client and signed with its identity. The signed envelope is sent to the WS Gateway via WebSocket and specifies the `ws_open` method of the canister.
+
+    Once receiving a message from the WS Gateway via WebSocket, the SDK validates the messages by verifying the certificate provided using the public key of the Internet Computer.
 
 2. WS Gateway:
 
-    WS Gateway accepts WebSocket connections to enable clients to communicate with canisters with WebSockets. Gateway can only pass on messages between clients and canisters and cannot forge messages.
+    WS Gateway accepts WebSocket connections with multiple clients in order to relay their messages to and from the canister.
 
-    - Accepts WebSocket connections.
-    - Expects the first message from the WebSocket to contain canister_id and client_id, signed.
-    - Makes an update call ws_open to the canister with the given id passing on the message. The method returns true if the canister correctly verifies the signature with the previously registered client_id. If the method returns false, the WebSocket is dropped.
-    - If ws_open returns true, the gateway spawns a polling task that makes query calls to ws_get_messages.
-    - ws_get_messages returns certified messages from the canister to the clients that opened the WebSocket with this gateway. The gateway sends respective messages to the clients over the WebSockets.
-    - After receiving messages, the polling task increases the message nonce to receive later messages.
-    - Forwards signed client messages received over the WebSocket to the canister with ws_message.
-    - The gateway calls ws_close when the WebSocket with the client closes for any reason.
+    Upon receiving a signed envelope from a client, the WS Gateway relays the message to the `/<canister_id>/call` endpoint of the Internet Computer. This way, the WS Gateway is transparent to the canister, which receives the request as if sent directly by the client which signed it.
+
+    In order to get updates from the canister, the WS Gateway polls the caniser by sending periodic queries to the `ws_get_messages` method. Upon receiving a response to a query, the WS Gateway relays the contained message and certificate to the corresponding client using the WebSocket.
 
 3. Backend canister:
 
-    The backend canister uses the [IC WebSocket CDK](https://github.com/omnia-network/ic-websocket-cdk-rs) which makes it possible for the WS Gateway to facilitate WebSocket connections with clients.
+    The backend canister uses the [IC WebSocket Backend CDK](https://github.com/omnia-network/ic-websocket-cdk-rs) which exposes the methods of a typical WebSocket server (`ws_open`, `ws_message`, `ws_error`, `ws_close`) plus the `ws_get_messages` method polled by the WS Gateway. The backend canister must specify the callback functions which should be executed on different WebSocket events (`open`, `message`, `error`, `close`). The CDK triggers the corresponding callback upon receiving a request on one of the WebSocket methods.
 
-    - Receives client public keys. Records the caller associated with the given public key.
-    - Receives calls to ws_open. Verifies that the provided signature corresponds to the given client_id. Records the caller as the gateway that will poll for messages.
-    - Receives client messages to ws_message. Verifies that the provided signature corresponds to the recorded client_id.
-    - Queues outgoing messages in queues corresponding to the recorded gateways. Puts the associated hashes in ic_certified_map to produce certificates.
-    - When ws_close is called by the gateway corresponding to the provided client_id, the client info is deleted.
+    The CDK also implements the logic necessary to detect a possible WS Gateway misbehaviour.
 
-## Message flow
-
-![](./docs/images/image1.png)
-
-1. Client generates an ed25519 key pair and makes an update call to the canister to register the public key. Canister remembers the caller associated with this key. The call returns client_id.
-2. Client opens a WebSocket with the gateway.
-3. Client sends the first message with its client_id and the canister_id it wants to connect to. The message is signed with the private key.
-4. The gateway makes an update call ws_open to the canister with the given id passing on the message. The method returns true if the canister correctly verifies the signature with the previously registered client_id.
-5. Client composes a message and signs it. Client sends the message to the gateway over the WebSocket. The gateway makes an update call to forward the message to the canister.
-
-    In the other direction, the canister composes a message and places its hash in the certified data structure. The gateway polls for messages and retrieves the message together with the certificate. The gateway passes on the message and the certificate to the client over the WebSocket.
-
-6. Whenever the WebSocket with the client is closed, the gateway calls ws_close. Afterwards no more messages can be sent from the canister to the client.
+    In order to send an update to one of its clients, the canister calls the `ws_send` method of the CDK specifying the message that it wants to be delivered to the client. The CDK pushes this message in a FIFO queue together with all the other clients' messages. Upon receiving a query call to the `ws_get_messages` method, the CDK returns the messages in this queue (up to a certain limit), together with a certificate which proves to the clients that the messages are actually the ones sent from the canister even if relayed by the WS Gateway.
 
 # License
 
@@ -225,4 +210,18 @@ TODO: add a license
 
 # Contributing
 
-Feel free to open issues and pull requests.
+Feel free to open issues, pull requests and reach out to us!
+
+## Massimo Albarello
+
+-   [Linkedin](https://linkedin.com/in/massimoalbarello)
+-   [Twitter](https://twitter.com/MaxAlbarello)
+-   [Calendly](https://cal.com/massimoalbarello/meeting)
+-   [Email](mez@omnia-network.com)
+
+## Luca Bertelli
+
+-   [Linkedin](https://www.linkedin.com/in/luca-bertelli-407041128/)
+-   [Twitter](https://twitter.com/ilbert_luca)
+-   [Calendly](https://cal.com/lucabertelli/)
+-   [Email](liuc@omnia-network.com)
