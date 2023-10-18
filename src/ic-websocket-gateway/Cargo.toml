@@ -1,7 +1,10 @@
 [package]
 name = "ic_websocket_gateway"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 async-trait = "0.1.72"
