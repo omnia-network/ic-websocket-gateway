@@ -9,7 +9,7 @@
     "@dfinity/candid": "^0.19.2",
     "bufferutil": "^4.0.7",
     "dotenv": "^16.3.1",
-    "ic-websocket-js": "github:omnia-network/ic-websocket-sdk-js#080acdb812fd5ab14bdfd314327b34d62a843137",
+    "ic-websocket-js": "^0.1.1",
     "isomorphic-webcrypto": "^2.3.8",
     "tweetnacl": "^1.0.3",
     "utf-8-validate": "^5.0.10",

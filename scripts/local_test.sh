@@ -17,7 +17,7 @@ dfx deploy
 
 cd ../integration
 echo "Running integration test"
-python3 run_n_clients.py
+npm test
 
 # kill gateway process
 kill $pid

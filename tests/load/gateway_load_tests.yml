@@ -4,6 +4,10 @@ config:
   phases:
     - duration: 5
       arrivalRate: 1
+    - duration: 30
+      arrivalRate: 5
+    - duration: 5
+      arrivalRate: 1
 
 scenarios:
   - name: "Client connects, sends messages and disconnects"
