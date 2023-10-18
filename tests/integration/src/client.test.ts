@@ -53,7 +53,7 @@ describe("WS client", () => {
       canisterId,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
-      ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
+      // ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
     });
 
     ws.onopen = () => {
