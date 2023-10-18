@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1.72"
-candid = "0.9.0"
+candid = { workspace = true }
 ic-agent = { workspace = true }
-ic-cdk = "0.10.0"
-ic-cdk-macros = "0.7.1"
-serde = "1.0.176"
+ic-cdk = { workspace = true }
+ic-cdk-macros = { workspace = true }
+serde = { workspace = true }
 serde_cbor = "0.11.2"
 tokio = { version = "1.29.1", features = ["full"] }
 tokio-native-tls = "0.3.1"

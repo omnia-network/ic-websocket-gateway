@@ -71,11 +71,13 @@ actor class TestCanister() {
   );
 
   let params = IcWebSocketCdk.WsInitParams(
-    ws_state,
     handlers,
+    null,
+    ?Nat64.fromNat(2_000),
+    ?Nat64.fromNat(1_000),
   );
 
-  let ws = IcWebSocketCdk.IcWebSocket(params);
+  let ws = IcWebSocketCdk.IcWebSocket(ws_state, params);
 
   // method called by the WS Gateway after receiving FirstMessage from the client
   public shared ({ caller }) func ws_open(args : IcWebSocketCdk.CanisterWsOpenArguments) : async IcWebSocketCdk.CanisterWsOpenResult {

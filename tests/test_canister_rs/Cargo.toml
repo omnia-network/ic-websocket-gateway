@@ -1,4 +1,0 @@
-[workspace]
-members = [
-    "src/test_canister_rs",
-]

@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-candid = "0.9.3"
-ic-cdk = "0.10.0"
-ic-cdk-macros = "0.7.1"
-serde = "1.0.176"
-ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "18a892055d866d602038db3ba6e1f1a1102eeac7" }
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-cdk-macros = { workspace = true }
+serde = { workspace = true }
+ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", rev = "06fa3934743e9505f765660e62aba1bc47706d5a" }
