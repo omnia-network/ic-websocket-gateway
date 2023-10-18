@@ -1,0 +1,1277 @@
+{
+  "aggregate": {
+    "counters": {
+      "vusers.created_by_name.Client connects, sends messages and disconnects": 505,
+      "vusers.created": 505,
+      "connect_client_success": 336,
+      "send_message_success": 1344,
+      "connect_client_error": 169,
+      "errors.": 169,
+      "vusers.failed": 169,
+      "disconnect_client": 336,
+      "vusers.completed": 336
+    },
+    "rates": {},
+    "firstCounterAt": 1696877712719,
+    "firstHistogramAt": 1696877717230,
+    "lastCounterAt": 1696877837250,
+    "lastHistogramAt": 1696877837250,
+    "firstMetricAt": 1696877712719,
+    "lastMetricAt": 1696877837250,
+    "period": 1696877830000,
+    "summaries": {
+      "open_connection_latency_s": {
+        "min": 2.5,
+        "max": 7.7,
+        "count": 336,
+        "p50": 4.2,
+        "median": 4.2,
+        "p75": 4.6,
+        "p90": 5.2,
+        "p95": 5.4,
+        "p99": 5.9,
+        "p999": 7.3
+      },
+      "receive_message_latency_ms": {
+        "min": 2112,
+        "max": 5155,
+        "count": 1344,
+        "p50": 3262.4,
+        "median": 3262.4,
+        "p75": 3678.4,
+        "p90": 3984.7,
+        "p95": 4316.6,
+        "p99": 4770.6,
+        "p999": 4965.3
+      },
+      "vusers.session_length": {
+        "min": 17828.1,
+        "max": 29433.9,
+        "count": 336,
+        "p50": 20543.1,
+        "median": 20543.1,
+        "p75": 21813.5,
+        "p90": 22703.7,
+        "p95": 23162.4,
+        "p99": 26643.2,
+        "p999": 29445.4
+      }
+    },
+    "histograms": {
+      "open_connection_latency_s": {
+        "min": 2.5,
+        "max": 7.7,
+        "count": 336,
+        "p50": 4.2,
+        "median": 4.2,
+        "p75": 4.6,
+        "p90": 5.2,
+        "p95": 5.4,
+        "p99": 5.9,
+        "p999": 7.3
+      },
+      "receive_message_latency_ms": {
+        "min": 2112,
+        "max": 5155,
+        "count": 1344,
+        "p50": 3262.4,
+        "median": 3262.4,
+        "p75": 3678.4,
+        "p90": 3984.7,
+        "p95": 4316.6,
+        "p99": 4770.6,
+        "p999": 4965.3
+      },
+      "vusers.session_length": {
+        "min": 17828.1,
+        "max": 29433.9,
+        "count": 336,
+        "p50": 20543.1,
+        "median": 20543.1,
+        "p75": 21813.5,
+        "p90": 22703.7,
+        "p95": 23162.4,
+        "p99": 26643.2,
+        "p999": 29445.4
+      }
+    }
+  },
+  "intermediate": [
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 20,
+        "vusers.created": 20,
+        "connect_client_success": 1,
+        "send_message_success": 1,
+        "connect_client_error": 2,
+        "errors.": 2,
+        "vusers.failed": 2
+      },
+      "rates": {},
+      "firstCounterAt": 1696877712719,
+      "firstHistogramAt": 1696877717230,
+      "lastCounterAt": 1696877719999,
+      "lastHistogramAt": 1696877717275,
+      "firstMetricAt": 1696877712719,
+      "lastMetricAt": 1696877719999,
+      "period": "1696877710000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 4.5,
+          "max": 4.5,
+          "count": 1,
+          "p50": 4.5,
+          "median": 4.5,
+          "p75": 4.5,
+          "p90": 4.5,
+          "p95": 4.5,
+          "p99": 4.5,
+          "p999": 4.5
+        },
+        "receive_message_latency_ms": {
+          "min": 3910,
+          "max": 3910,
+          "count": 1,
+          "p50": 3905.8,
+          "median": 3905.8,
+          "p75": 3905.8,
+          "p90": 3905.8,
+          "p95": 3905.8,
+          "p99": 3905.8,
+          "p999": 3905.8
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 4.5,
+          "max": 4.5,
+          "count": 1,
+          "p50": 4.5,
+          "median": 4.5,
+          "p75": 4.5,
+          "p90": 4.5,
+          "p95": 4.5,
+          "p99": 4.5,
+          "p999": 4.5
+        },
+        "receive_message_latency_ms": {
+          "min": 3910,
+          "max": 3910,
+          "count": 1,
+          "p50": 3905.8,
+          "median": 3905.8,
+          "p75": 3905.8,
+          "p90": 3905.8,
+          "p95": 3905.8,
+          "p99": 3905.8,
+          "p999": 3905.8
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 50,
+        "vusers.created": 50,
+        "connect_client_success": 31,
+        "send_message_success": 68,
+        "connect_client_error": 14,
+        "errors.": 14,
+        "vusers.failed": 14
+      },
+      "rates": {},
+      "firstCounterAt": 1696877720722,
+      "firstHistogramAt": 1696877720949,
+      "lastCounterAt": 1696877729924,
+      "lastHistogramAt": 1696877728557,
+      "firstMetricAt": 1696877720722,
+      "lastMetricAt": 1696877729924,
+      "period": "1696877720000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 7.3,
+          "count": 31,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 5.3,
+          "p90": 5.5,
+          "p95": 5.6,
+          "p99": 6.2,
+          "p999": 6.2
+        },
+        "receive_message_latency_ms": {
+          "min": 2112,
+          "max": 5155,
+          "count": 68,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3197.8,
+          "p90": 3605.5,
+          "p95": 4231.1,
+          "p99": 4965.3,
+          "p999": 4965.3
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 7.3,
+          "count": 31,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 5.3,
+          "p90": 5.5,
+          "p95": 5.6,
+          "p99": 6.2,
+          "p999": 6.2
+        },
+        "receive_message_latency_ms": {
+          "min": 2112,
+          "max": 5155,
+          "count": 68,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3197.8,
+          "p90": 3605.5,
+          "p95": 4231.1,
+          "p99": 4965.3,
+          "p999": 4965.3
+        }
+      }
+    },
+    {
+      "counters": {
+        "connect_client_success": 39,
+        "send_message_success": 132,
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 45,
+        "vusers.created": 45,
+        "disconnect_client": 9,
+        "vusers.failed": 13,
+        "vusers.completed": 9,
+        "connect_client_error": 13,
+        "errors.": 13
+      },
+      "rates": {},
+      "firstCounterAt": 1696877730160,
+      "firstHistogramAt": 1696877730160,
+      "lastCounterAt": 1696877739707,
+      "lastHistogramAt": 1696877739707,
+      "firstMetricAt": 1696877730160,
+      "lastMetricAt": 1696877739707,
+      "period": "1696877730000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 3,
+          "max": 5.9,
+          "count": 39,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 4.9,
+          "p90": 5.3,
+          "p95": 5.3,
+          "p99": 5.9,
+          "p999": 5.9
+        },
+        "receive_message_latency_ms": {
+          "min": 2201,
+          "max": 4661,
+          "count": 132,
+          "p50": 3678.4,
+          "median": 3678.4,
+          "p75": 4065.2,
+          "p90": 4403.8,
+          "p95": 4492.8,
+          "p99": 4583.6,
+          "p999": 4676.2
+        },
+        "vusers.session_length": {
+          "min": 20000.3,
+          "max": 24350.2,
+          "count": 9,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 22254.1,
+          "p90": 23630.3,
+          "p95": 23630.3,
+          "p99": 23630.3,
+          "p999": 23630.3
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 3,
+          "max": 5.9,
+          "count": 39,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 4.9,
+          "p90": 5.3,
+          "p95": 5.3,
+          "p99": 5.9,
+          "p999": 5.9
+        },
+        "receive_message_latency_ms": {
+          "min": 2201,
+          "max": 4661,
+          "count": 132,
+          "p50": 3678.4,
+          "median": 3678.4,
+          "p75": 4065.2,
+          "p90": 4403.8,
+          "p95": 4492.8,
+          "p99": 4583.6,
+          "p999": 4676.2
+        },
+        "vusers.session_length": {
+          "min": 20000.3,
+          "max": 24350.2,
+          "count": 9,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 22254.1,
+          "p90": 23630.3,
+          "p95": 23630.3,
+          "p99": 23630.3,
+          "p999": 23630.3
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 51,
+        "vusers.created": 51,
+        "connect_client_success": 32,
+        "send_message_success": 127,
+        "disconnect_client": 30,
+        "vusers.failed": 18,
+        "vusers.completed": 30,
+        "connect_client_error": 18,
+        "errors.": 18
+      },
+      "rates": {},
+      "firstCounterAt": 1696877740098,
+      "firstHistogramAt": 1696877741391,
+      "lastCounterAt": 1696877749965,
+      "lastHistogramAt": 1696877748298,
+      "firstMetricAt": 1696877740098,
+      "lastMetricAt": 1696877749965,
+      "period": "1696877740000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 3.1,
+          "max": 7,
+          "count": 32,
+          "p50": 4.1,
+          "median": 4.1,
+          "p75": 4.4,
+          "p90": 5,
+          "p95": 5.1,
+          "p99": 5.6,
+          "p999": 5.6
+        },
+        "receive_message_latency_ms": {
+          "min": 2486,
+          "max": 3841,
+          "count": 127,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3534.1,
+          "p90": 3752.7,
+          "p95": 3752.7,
+          "p99": 3828.5,
+          "p999": 3828.5
+        },
+        "vusers.session_length": {
+          "min": 19249.1,
+          "max": 27313,
+          "count": 30,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 22254.1,
+          "p90": 23162.4,
+          "p95": 23630.3,
+          "p99": 24107.7,
+          "p999": 24107.7
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 3.1,
+          "max": 7,
+          "count": 32,
+          "p50": 4.1,
+          "median": 4.1,
+          "p75": 4.4,
+          "p90": 5,
+          "p95": 5.1,
+          "p99": 5.6,
+          "p999": 5.6
+        },
+        "receive_message_latency_ms": {
+          "min": 2486,
+          "max": 3841,
+          "count": 127,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3534.1,
+          "p90": 3752.7,
+          "p95": 3752.7,
+          "p99": 3828.5,
+          "p999": 3828.5
+        },
+        "vusers.session_length": {
+          "min": 19249.1,
+          "max": 27313,
+          "count": 30,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 22254.1,
+          "p90": 23162.4,
+          "p95": 23630.3,
+          "p99": 24107.7,
+          "p999": 24107.7
+        }
+      }
+    },
+    {
+      "counters": {
+        "connect_client_success": 31,
+        "send_message_success": 138,
+        "disconnect_client": 44,
+        "vusers.failed": 19,
+        "vusers.completed": 44,
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 51,
+        "vusers.created": 51,
+        "connect_client_error": 19,
+        "errors.": 19
+      },
+      "rates": {},
+      "firstCounterAt": 1696877750336,
+      "firstHistogramAt": 1696877750378,
+      "lastCounterAt": 1696877759876,
+      "lastHistogramAt": 1696877758541,
+      "firstMetricAt": 1696877750336,
+      "lastMetricAt": 1696877759876,
+      "period": "1696877750000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 5.6,
+          "count": 31,
+          "p50": 4,
+          "median": 4,
+          "p75": 4.4,
+          "p90": 4.8,
+          "p95": 4.9,
+          "p99": 5.1,
+          "p999": 5.1
+        },
+        "receive_message_latency_ms": {
+          "min": 2381,
+          "max": 4525,
+          "count": 138,
+          "p50": 3197.8,
+          "median": 3197.8,
+          "p75": 3328.3,
+          "p90": 3534.1,
+          "p95": 3752.7,
+          "p99": 4231.1,
+          "p999": 4231.1
+        },
+        "vusers.session_length": {
+          "min": 18079.4,
+          "max": 29433.9,
+          "count": 44,
+          "p50": 20543.1,
+          "median": 20543.1,
+          "p75": 22254.1,
+          "p90": 22703.7,
+          "p95": 22703.7,
+          "p99": 27730.6,
+          "p999": 27730.6
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 5.6,
+          "count": 31,
+          "p50": 4,
+          "median": 4,
+          "p75": 4.4,
+          "p90": 4.8,
+          "p95": 4.9,
+          "p99": 5.1,
+          "p999": 5.1
+        },
+        "receive_message_latency_ms": {
+          "min": 2381,
+          "max": 4525,
+          "count": 138,
+          "p50": 3197.8,
+          "median": 3197.8,
+          "p75": 3328.3,
+          "p90": 3534.1,
+          "p95": 3752.7,
+          "p99": 4231.1,
+          "p999": 4231.1
+        },
+        "vusers.session_length": {
+          "min": 18079.4,
+          "max": 29433.9,
+          "count": 44,
+          "p50": 20543.1,
+          "median": 20543.1,
+          "p75": 22254.1,
+          "p90": 22703.7,
+          "p95": 22703.7,
+          "p99": 27730.6,
+          "p999": 27730.6
+        }
+      }
+    },
+    {
+      "counters": {
+        "connect_client_success": 36,
+        "send_message_success": 128,
+        "disconnect_client": 35,
+        "vusers.failed": 18,
+        "vusers.completed": 35,
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 50,
+        "vusers.created": 50,
+        "connect_client_error": 18,
+        "errors.": 18
+      },
+      "rates": {},
+      "firstCounterAt": 1696877760347,
+      "firstHistogramAt": 1696877760347,
+      "lastCounterAt": 1696877769876,
+      "lastHistogramAt": 1696877769128,
+      "firstMetricAt": 1696877760347,
+      "lastMetricAt": 1696877769876,
+      "period": "1696877760000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 2.5,
+          "max": 5.8,
+          "count": 36,
+          "p50": 4.4,
+          "median": 4.4,
+          "p75": 5.2,
+          "p90": 5.5,
+          "p95": 5.8,
+          "p99": 5.8,
+          "p999": 5.8
+        },
+        "receive_message_latency_ms": {
+          "min": 2235,
+          "max": 4755,
+          "count": 128,
+          "p50": 3395.5,
+          "median": 3395.5,
+          "p75": 3984.7,
+          "p90": 4403.8,
+          "p95": 4676.2,
+          "p99": 4770.6,
+          "p999": 4770.6
+        },
+        "vusers.session_length": {
+          "min": 19298.4,
+          "max": 26458.8,
+          "count": 35,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21381.5,
+          "p90": 21813.5,
+          "p95": 24107.7,
+          "p99": 24594.7,
+          "p999": 24594.7
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 2.5,
+          "max": 5.8,
+          "count": 36,
+          "p50": 4.4,
+          "median": 4.4,
+          "p75": 5.2,
+          "p90": 5.5,
+          "p95": 5.8,
+          "p99": 5.8,
+          "p999": 5.8
+        },
+        "receive_message_latency_ms": {
+          "min": 2235,
+          "max": 4755,
+          "count": 128,
+          "p50": 3395.5,
+          "median": 3395.5,
+          "p75": 3984.7,
+          "p90": 4403.8,
+          "p95": 4676.2,
+          "p99": 4770.6,
+          "p999": 4770.6
+        },
+        "vusers.session_length": {
+          "min": 19298.4,
+          "max": 26458.8,
+          "count": 35,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21381.5,
+          "p90": 21813.5,
+          "p95": 24107.7,
+          "p99": 24594.7,
+          "p999": 24594.7
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 50,
+        "vusers.created": 50,
+        "send_message_success": 134,
+        "disconnect_client": 33,
+        "vusers.failed": 21,
+        "vusers.completed": 33,
+        "connect_client_success": 26,
+        "connect_client_error": 21,
+        "errors.": 21
+      },
+      "rates": {},
+      "firstCounterAt": 1696877770354,
+      "firstHistogramAt": 1696877771115,
+      "lastCounterAt": 1696877779876,
+      "lastHistogramAt": 1696877779676,
+      "firstMetricAt": 1696877770354,
+      "lastMetricAt": 1696877779876,
+      "period": "1696877770000",
+      "summaries": {
+        "receive_message_latency_ms": {
+          "min": 2354,
+          "max": 4037,
+          "count": 134,
+          "p50": 3262.4,
+          "median": 3262.4,
+          "p75": 3678.4,
+          "p90": 3752.7,
+          "p95": 3828.5,
+          "p99": 3984.7,
+          "p999": 3984.7
+        },
+        "vusers.session_length": {
+          "min": 19602.5,
+          "max": 22895.1,
+          "count": 33,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21813.5,
+          "p90": 22254.1,
+          "p95": 22703.7,
+          "p99": 22703.7,
+          "p999": 22703.7
+        },
+        "open_connection_latency_s": {
+          "min": 3,
+          "max": 4.9,
+          "count": 26,
+          "p50": 3.9,
+          "median": 3.9,
+          "p75": 4.3,
+          "p90": 4.7,
+          "p95": 4.9,
+          "p99": 4.9,
+          "p999": 4.9
+        }
+      },
+      "histograms": {
+        "receive_message_latency_ms": {
+          "min": 2354,
+          "max": 4037,
+          "count": 134,
+          "p50": 3262.4,
+          "median": 3262.4,
+          "p75": 3678.4,
+          "p90": 3752.7,
+          "p95": 3828.5,
+          "p99": 3984.7,
+          "p999": 3984.7
+        },
+        "vusers.session_length": {
+          "min": 19602.5,
+          "max": 22895.1,
+          "count": 33,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21813.5,
+          "p90": 22254.1,
+          "p95": 22703.7,
+          "p99": 22703.7,
+          "p999": 22703.7
+        },
+        "open_connection_latency_s": {
+          "min": 3,
+          "max": 4.9,
+          "count": 26,
+          "p50": 3.9,
+          "median": 3.9,
+          "p75": 4.3,
+          "p90": 4.7,
+          "p95": 4.9,
+          "p99": 4.9,
+          "p999": 4.9
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 50,
+        "vusers.created": 50,
+        "connect_client_success": 32,
+        "send_message_success": 104,
+        "disconnect_client": 30,
+        "vusers.failed": 15,
+        "vusers.completed": 30,
+        "connect_client_error": 15,
+        "errors.": 15
+      },
+      "rates": {},
+      "firstCounterAt": 1696877780578,
+      "firstHistogramAt": 1696877780945,
+      "lastCounterAt": 1696877789876,
+      "lastHistogramAt": 1696877788270,
+      "firstMetricAt": 1696877780578,
+      "lastMetricAt": 1696877789876,
+      "period": "1696877780000",
+      "summaries": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 4.7,
+          "count": 32,
+          "p50": 3.8,
+          "median": 3.8,
+          "p75": 4.3,
+          "p90": 4.4,
+          "p95": 4.4,
+          "p99": 4.6,
+          "p999": 4.6
+        },
+        "receive_message_latency_ms": {
+          "min": 2313,
+          "max": 4012,
+          "count": 104,
+          "p50": 3134.5,
+          "median": 3134.5,
+          "p75": 3464.1,
+          "p90": 3828.5,
+          "p95": 3828.5,
+          "p99": 3905.8,
+          "p999": 3905.8
+        },
+        "vusers.session_length": {
+          "min": 18203.3,
+          "max": 21780.5,
+          "count": 30,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 20958.1,
+          "p95": 21381.5,
+          "p99": 21813.5,
+          "p999": 21813.5
+        }
+      },
+      "histograms": {
+        "open_connection_latency_s": {
+          "min": 2.7,
+          "max": 4.7,
+          "count": 32,
+          "p50": 3.8,
+          "median": 3.8,
+          "p75": 4.3,
+          "p90": 4.4,
+          "p95": 4.4,
+          "p99": 4.6,
+          "p999": 4.6
+        },
+        "receive_message_latency_ms": {
+          "min": 2313,
+          "max": 4012,
+          "count": 104,
+          "p50": 3134.5,
+          "median": 3134.5,
+          "p75": 3464.1,
+          "p90": 3828.5,
+          "p95": 3828.5,
+          "p99": 3905.8,
+          "p999": 3905.8
+        },
+        "vusers.session_length": {
+          "min": 18203.3,
+          "max": 21780.5,
+          "count": 30,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 20958.1,
+          "p95": 21381.5,
+          "p99": 21813.5,
+          "p999": 21813.5
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 49,
+        "vusers.created": 49,
+        "send_message_success": 135,
+        "connect_client_success": 31,
+        "disconnect_client": 26,
+        "vusers.failed": 20,
+        "vusers.completed": 26,
+        "connect_client_error": 20,
+        "errors.": 20
+      },
+      "rates": {},
+      "firstCounterAt": 1696877790476,
+      "firstHistogramAt": 1696877791161,
+      "lastCounterAt": 1696877799998,
+      "lastHistogramAt": 1696877799998,
+      "firstMetricAt": 1696877790476,
+      "lastMetricAt": 1696877799998,
+      "period": "1696877790000",
+      "summaries": {
+        "receive_message_latency_ms": {
+          "min": 2403,
+          "max": 4966,
+          "count": 135,
+          "p50": 3605.5,
+          "median": 3605.5,
+          "p75": 3828.5,
+          "p90": 4403.8,
+          "p95": 4867,
+          "p99": 4867,
+          "p999": 4867
+        },
+        "open_connection_latency_s": {
+          "min": 2.9,
+          "max": 7.7,
+          "count": 31,
+          "p50": 4.1,
+          "median": 4.1,
+          "p75": 4.6,
+          "p90": 5.3,
+          "p95": 5.4,
+          "p99": 5.8,
+          "p999": 5.8
+        },
+        "vusers.session_length": {
+          "min": 17828.1,
+          "max": 23373.3,
+          "count": 26,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 22254.1,
+          "p90": 22703.7,
+          "p95": 23162.4,
+          "p99": 23162.4,
+          "p999": 23162.4
+        }
+      },
+      "histograms": {
+        "receive_message_latency_ms": {
+          "min": 2403,
+          "max": 4966,
+          "count": 135,
+          "p50": 3605.5,
+          "median": 3605.5,
+          "p75": 3828.5,
+          "p90": 4403.8,
+          "p95": 4867,
+          "p99": 4867,
+          "p999": 4867
+        },
+        "open_connection_latency_s": {
+          "min": 2.9,
+          "max": 7.7,
+          "count": 31,
+          "p50": 4.1,
+          "median": 4.1,
+          "p75": 4.6,
+          "p90": 5.3,
+          "p95": 5.4,
+          "p99": 5.8,
+          "p999": 5.8
+        },
+        "vusers.session_length": {
+          "min": 17828.1,
+          "max": 23373.3,
+          "count": 26,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 22254.1,
+          "p90": 22703.7,
+          "p95": 23162.4,
+          "p99": 23162.4,
+          "p999": 23162.4
+        }
+      }
+    },
+    {
+      "counters": {
+        "disconnect_client": 39,
+        "vusers.failed": 12,
+        "vusers.completed": 39,
+        "connect_client_success": 42,
+        "send_message_success": 137,
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 53,
+        "vusers.created": 53,
+        "connect_client_error": 12,
+        "errors.": 12
+      },
+      "rates": {},
+      "firstCounterAt": 1696877800010,
+      "firstHistogramAt": 1696877800010,
+      "lastCounterAt": 1696877809987,
+      "lastHistogramAt": 1696877809613,
+      "firstMetricAt": 1696877800010,
+      "lastMetricAt": 1696877809987,
+      "period": "1696877800000",
+      "summaries": {
+        "vusers.session_length": {
+          "min": 17836.8,
+          "max": 25835.1,
+          "count": 39,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21813.5,
+          "p90": 23162.4,
+          "p95": 23162.4,
+          "p99": 24107.7,
+          "p999": 24107.7
+        },
+        "open_connection_latency_s": {
+          "min": 3.1,
+          "max": 5.5,
+          "count": 42,
+          "p50": 4.2,
+          "median": 4.2,
+          "p75": 4.6,
+          "p90": 4.7,
+          "p95": 5,
+          "p99": 5.2,
+          "p999": 5.2
+        },
+        "receive_message_latency_ms": {
+          "min": 2352,
+          "max": 4319,
+          "count": 137,
+          "p50": 3395.5,
+          "median": 3395.5,
+          "p75": 3905.8,
+          "p90": 3984.7,
+          "p95": 4147.4,
+          "p99": 4231.1,
+          "p999": 4231.1
+        }
+      },
+      "histograms": {
+        "vusers.session_length": {
+          "min": 17836.8,
+          "max": 25835.1,
+          "count": 39,
+          "p50": 20958.1,
+          "median": 20958.1,
+          "p75": 21813.5,
+          "p90": 23162.4,
+          "p95": 23162.4,
+          "p99": 24107.7,
+          "p999": 24107.7
+        },
+        "open_connection_latency_s": {
+          "min": 3.1,
+          "max": 5.5,
+          "count": 42,
+          "p50": 4.2,
+          "median": 4.2,
+          "p75": 4.6,
+          "p90": 4.7,
+          "p95": 5,
+          "p99": 5.2,
+          "p999": 5.2
+        },
+        "receive_message_latency_ms": {
+          "min": 2352,
+          "max": 4319,
+          "count": 137,
+          "p50": 3395.5,
+          "median": 3395.5,
+          "p75": 3905.8,
+          "p90": 3984.7,
+          "p95": 4147.4,
+          "p99": 4231.1,
+          "p999": 4231.1
+        }
+      }
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Client connects, sends messages and disconnects": 36,
+        "vusers.created": 36,
+        "send_message_success": 149,
+        "connect_client_success": 32,
+        "connect_client_error": 17,
+        "errors.": 17,
+        "vusers.failed": 17,
+        "disconnect_client": 26,
+        "vusers.completed": 26
+      },
+      "rates": {},
+      "firstCounterAt": 1696877810591,
+      "firstHistogramAt": 1696877811102,
+      "lastCounterAt": 1696877819499,
+      "lastHistogramAt": 1696877819499,
+      "firstMetricAt": 1696877810591,
+      "lastMetricAt": 1696877819499,
+      "period": "1696877810000",
+      "summaries": {
+        "receive_message_latency_ms": {
+          "min": 2369,
+          "max": 3968,
+          "count": 149,
+          "p50": 3262.4,
+          "median": 3262.4,
+          "p75": 3534.1,
+          "p90": 3605.5,
+          "p95": 3678.4,
+          "p99": 3905.8,
+          "p999": 3905.8
+        },
+        "open_connection_latency_s": {
+          "min": 2.8,
+          "max": 5.3,
+          "count": 32,
+          "p50": 4.2,
+          "median": 4.2,
+          "p75": 4.4,
+          "p90": 4.7,
+          "p95": 5.2,
+          "p99": 5.2,
+          "p999": 5.2
+        },
+        "vusers.session_length": {
+          "min": 18622.4,
+          "max": 29398.9,
+          "count": 26,
+          "p50": 20543.1,
+          "median": 20543.1,
+          "p75": 21381.5,
+          "p90": 21813.5,
+          "p95": 22254.1,
+          "p99": 22703.7,
+          "p999": 22703.7
+        }
+      },
+      "histograms": {
+        "receive_message_latency_ms": {
+          "min": 2369,
+          "max": 3968,
+          "count": 149,
+          "p50": 3262.4,
+          "median": 3262.4,
+          "p75": 3534.1,
+          "p90": 3605.5,
+          "p95": 3678.4,
+          "p99": 3905.8,
+          "p999": 3905.8
+        },
+        "open_connection_latency_s": {
+          "min": 2.8,
+          "max": 5.3,
+          "count": 32,
+          "p50": 4.2,
+          "median": 4.2,
+          "p75": 4.4,
+          "p90": 4.7,
+          "p95": 5.2,
+          "p99": 5.2,
+          "p999": 5.2
+        },
+        "vusers.session_length": {
+          "min": 18622.4,
+          "max": 29398.9,
+          "count": 26,
+          "p50": 20543.1,
+          "median": 20543.1,
+          "p75": 21381.5,
+          "p90": 21813.5,
+          "p95": 22254.1,
+          "p99": 22703.7,
+          "p999": 22703.7
+        }
+      }
+    },
+    {
+      "counters": {
+        "send_message_success": 82,
+        "disconnect_client": 47,
+        "vusers.failed": 0,
+        "vusers.completed": 47,
+        "connect_client_success": 3
+      },
+      "rates": {},
+      "firstCounterAt": 1696877821211,
+      "firstHistogramAt": 1696877821211,
+      "lastCounterAt": 1696877829340,
+      "lastHistogramAt": 1696877829340,
+      "firstMetricAt": 1696877821211,
+      "lastMetricAt": 1696877829340,
+      "period": "1696877820000",
+      "summaries": {
+        "receive_message_latency_ms": {
+          "min": 2331,
+          "max": 3777,
+          "count": 82,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3197.8,
+          "p90": 3534.1,
+          "p95": 3678.4,
+          "p99": 3752.7,
+          "p999": 3752.7
+        },
+        "vusers.session_length": {
+          "min": 18538.4,
+          "max": 24514.6,
+          "count": 47,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 21813.5,
+          "p95": 22254.1,
+          "p99": 23630.3,
+          "p999": 23630.3
+        },
+        "open_connection_latency_s": {
+          "min": 3.8,
+          "max": 4.4,
+          "count": 3,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 4.3,
+          "p90": 4.3,
+          "p95": 4.3,
+          "p99": 4.3,
+          "p999": 4.3
+        }
+      },
+      "histograms": {
+        "receive_message_latency_ms": {
+          "min": 2331,
+          "max": 3777,
+          "count": 82,
+          "p50": 3072.4,
+          "median": 3072.4,
+          "p75": 3197.8,
+          "p90": 3534.1,
+          "p95": 3678.4,
+          "p99": 3752.7,
+          "p999": 3752.7
+        },
+        "vusers.session_length": {
+          "min": 18538.4,
+          "max": 24514.6,
+          "count": 47,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 21813.5,
+          "p95": 22254.1,
+          "p99": 23630.3,
+          "p999": 23630.3
+        },
+        "open_connection_latency_s": {
+          "min": 3.8,
+          "max": 4.4,
+          "count": 3,
+          "p50": 4.3,
+          "median": 4.3,
+          "p75": 4.3,
+          "p90": 4.3,
+          "p95": 4.3,
+          "p99": 4.3,
+          "p999": 4.3
+        }
+      }
+    },
+    {
+      "counters": {
+        "send_message_success": 9,
+        "disconnect_client": 17,
+        "vusers.failed": 0,
+        "vusers.completed": 17
+      },
+      "rates": {},
+      "firstCounterAt": 1696877831311,
+      "firstHistogramAt": 1696877831311,
+      "lastCounterAt": 1696877837250,
+      "lastHistogramAt": 1696877837250,
+      "firstMetricAt": 1696877831311,
+      "lastMetricAt": 1696877837250,
+      "period": "1696877830000",
+      "summaries": {
+        "receive_message_latency_ms": {
+          "min": 3113,
+          "max": 3186,
+          "count": 9,
+          "p50": 3134.5,
+          "median": 3134.5,
+          "p75": 3134.5,
+          "p90": 3134.5,
+          "p95": 3134.5,
+          "p99": 3134.5,
+          "p999": 3134.5
+        },
+        "vusers.session_length": {
+          "min": 19252.4,
+          "max": 20656.1,
+          "count": 17,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 20543.1,
+          "p95": 20543.1,
+          "p99": 20543.1,
+          "p999": 20543.1
+        }
+      },
+      "histograms": {
+        "receive_message_latency_ms": {
+          "min": 3113,
+          "max": 3186,
+          "count": 9,
+          "p50": 3134.5,
+          "median": 3134.5,
+          "p75": 3134.5,
+          "p90": 3134.5,
+          "p95": 3134.5,
+          "p99": 3134.5,
+          "p999": 3134.5
+        },
+        "vusers.session_length": {
+          "min": 19252.4,
+          "max": 20656.1,
+          "count": 17,
+          "p50": 20136.3,
+          "median": 20136.3,
+          "p75": 20543.1,
+          "p90": 20543.1,
+          "p95": 20543.1,
+          "p99": 20543.1,
+          "p999": 20543.1
+        }
+      }
+    }
+  ]
+}
