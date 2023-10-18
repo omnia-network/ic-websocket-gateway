@@ -9,6 +9,13 @@ default-members = [
     "src/ic-websocket-gateway",
 ]
 
+[workspace.package]
+edition = "2021"
+rust-version = "1.70.0"
+repository = "https://github.com/omnia-network/ic-websocket-gateway"
+description = "IC Websocket Gateway workspace"
+license = "MIT"
+
 [workspace.dependencies]
 candid = "0.9.3"
 ic-agent = { git = "https://github.com/omnia-network/agent-rs", rev = "7bbf9b65bf7700b030e8f83447f397321fb02dcd" }
