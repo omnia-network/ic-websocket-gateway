@@ -210,7 +210,7 @@ For more information on the IC WebSocket protocol and the messages exchanged bet
 
 # License
 
-TODO: add a license
+MIT License. See [LICENSE](./LICENSE).
 
 # Contributing
 
