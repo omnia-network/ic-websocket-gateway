@@ -110,3 +110,9 @@ Types:
     -   key constructed by appending the next outgoing message nonce to the gateway principal (same as in `CanisterOutputMessage`).
     -   certificate of all the messages
     -   certified state tree, containing that message
+
+## Acknowledgements
+
+![](./images/acknowledgement.png)
+
+TODO: explenation
