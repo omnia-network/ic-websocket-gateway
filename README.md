@@ -183,7 +183,7 @@ The WS Gateway is needed as a WebSocket is a one-to-one connection between clien
 
     The client can instantiate a new IC WebSocket connection by calling the `IcWebSocket` constructor.
 
-    When the client calls the `send` method of the SDK, the SDK creates a signed envelope with the content specified by the client and signed with its identity. The signed envelope is sent to the WS Gateway via WebSocket and specifies the `ws_open` method of the canister.
+    When the client calls the `send` method of the SDK, the SDK creates a [signed envelope](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-call) with the content specified by the client and signed with its identity. The envelope is sent to the WS Gateway via WebSocket and specifies the `ws_open` method of the canister.
 
     Once receiving a message from the WS Gateway via WebSocket, the SDK validates the messages by verifying the certificate provided using the public key of the Internet Computer.
 
@@ -191,7 +191,7 @@ The WS Gateway is needed as a WebSocket is a one-to-one connection between clien
 
     WS Gateway accepts WebSocket connections with multiple clients in order to relay their messages to and from the canister.
 
-    Upon receiving a signed envelope from a client, the WS Gateway relays the message to the `/canister/<canister_id>/call` endpoint of the Internet Computer. This way, the WS Gateway is transparent to the canister, which receives the request as if sent directly by the client which signed it.
+    Upon receiving a [signed envelope](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-call) from a client, the WS Gateway relays the message to the `/canister/<canister_id>/call` endpoint of the Internet Computer. This way, the WS Gateway is transparent to the canister, which receives the request as if sent directly by the client which signed it.
 
     In order to get updates from the canister, the WS Gateway polls the caniser by sending periodic queries to the `ws_get_messages` method. Upon receiving a response to a query, the WS Gateway relays the contained message and certificate to the corresponding client using the WebSocket.
 
