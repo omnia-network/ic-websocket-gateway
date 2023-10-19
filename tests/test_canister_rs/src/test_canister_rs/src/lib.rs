@@ -30,8 +30,8 @@ fn init(gateway_principal: Option<String>) {
         } else {
             GATEWAY_PRINCIPAL.to_string()
         },
-        // send_ack_interval_ms: 2_000,
-        // keep_alive_timeout_ms: 1_000,
+        send_ack_interval_ms: 10_000,
+        keep_alive_timeout_ms: 9_000,
         ..Default::default()
     };
 

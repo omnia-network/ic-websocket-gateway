@@ -153,7 +153,7 @@ impl ClientConnectionHandler {
                             if let Err(e) = ws_write.close().await {
                                 error!("Error closing the WS connection: {:?}", e);
                             }
-                            debug!("Terminating client connection handler task");
+                            debug!("Terminating client connection handler task due to graceful shutdown");
                             break 'handler_loop;
                         },
                         // wait for canister message to send to client
@@ -199,6 +199,7 @@ impl ClientConnectionHandler {
                                             self.id,
                                         ))
                                         .await;
+                                        debug!("Terminating client connection handler task due to client disconnection");
                                         break 'handler_loop;
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
