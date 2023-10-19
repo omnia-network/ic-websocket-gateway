@@ -76,7 +76,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let env_filter_file = EnvFilter::builder()
         .with_env_var("RUST_LOG_FILE")
         .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("trace"));
+        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
 
     let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()
@@ -87,7 +87,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let env_filter_stdout = EnvFilter::builder()
         .with_env_var("RUST_LOG_STDOUT")
         .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=info"));
     let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
         .pretty()
