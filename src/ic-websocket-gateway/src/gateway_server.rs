@@ -406,7 +406,8 @@ impl GatewayState {
 
     #[tracing::instrument(name = "manage_clients_state", skip_all,
         fields(
-            client_id = gateway_session.client_id
+            client_id = gateway_session.client_id,
+            client_key = %gateway_session.client_key
         )
     )]
     fn add_client(&mut self, gateway_session: GatewaySession) {
