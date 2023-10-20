@@ -20,10 +20,6 @@ use tracing::{error, info, trace, warn};
 
 type EventsType = String;
 
-/// minimum interval between incoming messages
-/// if below this threshold, the gateway starts rate liimiting
-const MIN_INCOMING_INTERVAL: usize = 200;
-
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
     /// returns the name of the struct implementing EventsMetrics
@@ -285,6 +281,7 @@ pub struct EventsAnalyzer {
     /// receiver of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
     rate_limiting_channel_tx: Sender<f64>,
+    min_incoming_interval: u64,
     map_by_events_type: BTreeMap<EventsType, EventsData>,
     map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
     aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
@@ -294,10 +291,12 @@ impl EventsAnalyzer {
     pub fn new(
         events_channel_rx: Receiver<Box<dyn Events + Send>>,
         rate_limiting_channel_tx: Sender<f64>,
+        min_incoming_interval: u64,
     ) -> Self {
         Self {
             events_channel_rx,
             rate_limiting_channel_tx,
+            min_incoming_interval,
             map_by_events_type: BTreeMap::default(),
             map_by_collection_type: HashMap::default(),
             aggregated_latencies_map: HashMap::default(),
@@ -383,6 +382,7 @@ impl EventsAnalyzer {
     }
 
     async fn compute_average_intervals(&mut self) {
+        let min_incoming_interval = self.min_incoming_interval;
         for (events_type, events_data) in self.map_by_events_type.iter_mut() {
             // TODO: rolling average
             if events_data.aggregated_metrics_map.len() > 10 {
@@ -408,9 +408,9 @@ impl EventsAnalyzer {
                 );
                 let limiting_rate;
                 if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
-                    if avg_interval < Duration::from_millis(MIN_INCOMING_INTERVAL as u64) {
+                    if avg_interval < Duration::from_millis(min_incoming_interval) {
                         warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval);
-                        limiting_rate = get_limiting_rate(avg_interval);
+                        limiting_rate = get_limiting_rate(min_incoming_interval, avg_interval);
                     } else {
                         // if the average interval of incoming connections is above the minimum (MIN_INCOMING_INTERVAL)
                         // the listener should accept all connections (limiting_rate = 0)
@@ -437,13 +437,13 @@ impl EventsAnalyzer {
                         if let Some(aggregated_latencies) =
                             self.aggregated_latencies_map.get_mut(collection_type)
                         {
-                            if aggregated_latencies.len() == 10 {
+                            if aggregated_latencies.len() > 10 {
                                 let sum_latencies: Duration = aggregated_latencies.iter().sum();
                                 let avg_latencies =
                                     sum_latencies.div_f64(aggregated_latencies.len() as f64);
                                 info!(
-                                    "Average total latency of events in collection: {:?}: {:?}",
-                                    collection_type, avg_latencies
+                                    "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
+                                    collection_type, avg_latencies, aggregated_latencies.len()
                                 );
                                 aggregated_latencies.clear();
                             } else {
@@ -466,7 +466,7 @@ async fn periodic_check() {
     tokio::time::sleep(Duration::from_secs(5)).await;
 }
 
-fn get_limiting_rate(avg_interval: Duration) -> f64 {
-    (MIN_INCOMING_INTERVAL as u64 - avg_interval.as_millis() as u64) as f64
-        / MIN_INCOMING_INTERVAL as f64
+fn get_limiting_rate(min_incoming_interval: u64, avg_interval: Duration) -> f64 {
+    (min_incoming_interval as u64 - avg_interval.as_millis() as u64) as f64
+        / min_incoming_interval as f64
 }

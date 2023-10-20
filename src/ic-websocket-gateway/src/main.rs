@@ -43,6 +43,11 @@ struct DeploymentInfo {
     #[structopt(long, default_value = "100")]
     polling_interval: u64,
 
+    #[structopt(long, default_value = "100")]
+    /// minimum interval between incoming messages
+    /// if below this threshold, the gateway starts rate liimiting
+    min_incoming_interval: u64,
+
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
 
@@ -137,7 +142,11 @@ async fn main() -> Result<(), String> {
     };
 
     tokio::spawn(async move {
-        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);
+        let mut events_analyzer = EventsAnalyzer::new(
+            events_channel_rx,
+            rate_limiting_channel_tx,
+            deployment_info.min_incoming_interval,
+        );
         events_analyzer.start_processing().await;
     });
 
