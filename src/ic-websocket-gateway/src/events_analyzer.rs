@@ -309,14 +309,15 @@ impl EventsAnalyzer {
         tokio::pin!(periodic_check_operation);
         loop {
             select! {
+                // collect each event received on the channel for periodic processing
                 Some(events) = self.events_channel_rx.recv() => {
                     let reference = events.get_reference();
                     if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
-                        deltas.display();
                         self.add_latency_to_collection(&events, &deltas);
                         self.add_interval_to_events(events, deltas);
                     }
                 },
+                // periodically process latest events
                 _ = &mut periodic_check_operation => {
                     self.compute_average_intervals().await;
                     self.compute_collections_latencies();

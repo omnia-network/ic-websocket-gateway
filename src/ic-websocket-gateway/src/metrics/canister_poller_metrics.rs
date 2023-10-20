@@ -105,7 +105,11 @@ impl PollerDeltas {
 impl Deltas for PollerDeltas {
     fn display(&self) {
         trace!(
-            "\nreference: {:?}\ntime_to_receive: {:?}\ntime_to_start_relaying: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
+            "reference: {:?}
+            time_to_receive: {:?}
+            time_to_start_relaying: {:?}
+            time_to_relay: {:?}
+            latency: {:?}",
             self.reference,
             self.time_to_receive,
             self.time_to_start_relaying,
@@ -202,7 +206,9 @@ impl IncomingCanisterMessageDeltas {
 impl Deltas for IncomingCanisterMessageDeltas {
     fn display(&self) {
         trace!(
-            "\nreference: {:?}\ntime_to_relay: {:?}\nlatency: {:?}",
+            "reference: {:?}
+            time_to_relay: {:?}
+            latency: {:?}",
             self.reference,
             self.time_to_relay,
             self.latency
