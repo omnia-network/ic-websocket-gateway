@@ -19,7 +19,11 @@ use tokio::{
         RwLock,
     },
 };
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
+
+// TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
+//       maybe get it once starting to poll the canister (?)
+const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 500;
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
@@ -214,8 +218,11 @@ impl CanisterPoller {
             *self.message_nonce.read().await,
             first_client_key,
         );
-
-        if canister_result.messages.len() > 0 {
+        let number_of_returned_messages = canister_result.messages.len();
+        if number_of_returned_messages > 0 {
+            if number_of_returned_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
+                warn!("Polled the maximum number of messages. Consider increasing the polling frequency or the maximum number of returned messages by the CDK");
+            }
             return Some((canister_result, poller_events));
         }
         None

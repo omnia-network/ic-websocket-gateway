@@ -32,6 +32,7 @@ fn init(gateway_principal: Option<String>) {
         },
         send_ack_interval_ms: 10_000,
         keep_alive_timeout_ms: 9_000,
+        max_number_of_returned_messages: 500,
         ..Default::default()
     };
 
