@@ -1,4 +1,4 @@
-# Message Flow
+# IC WebSocket Protocol
 
 ## Establishment
 
@@ -111,8 +111,31 @@ Types:
     -   certificate of all the messages
     -   certified state tree, containing that message
 
-## Acknowledgements
+## Message Acknowledgement
 
 ![](./images/acknowledgement.png)
 
-TODO: explenation
+All messages are relayed by the Gateway which acts as a man-in-the-middle and could therefore tamper, reorder, or block messages. Tampering and reordering can be detected thanks to signed messages and sequence numbers, respectively. However, client and canister have to be able to detect whether the Gateway is blocking the messages within reasonable time. To achieve this, the canister (via the [IC WebSocket Backend CDK](https://github.com/omnia-network/ic-websocket-cdk-rs)):
+
+-   periodically (with configurable period `T`) creates a service message of type `WebsocketServiceMessageContent::AckMessage` containing an acknowledgement message of type `CanisterAckMessageContent` and pushes it in the message queue for each client connected to it.
+-   once it receives a service message of type `WebsocketServiceMessageContent::KeepAliveMessage` containing a keep alive message of type `ClientKeepAliveMessageContent` for a certain client, it records the time current time.
+-   `1/2 T` after the acknowledgement for a client has been sent (i.e. pushed to the message queue), it checks whether the time of the last keep alive message received for that client is less than `3/2 T`. If that’s not the case, the gateway blocked the messages.
+
+The gateway:
+
+-   fetches the acknowledgement message for a client from the respective queue of the canister in the next polling iteration, as if it were a normal canister message.
+-   checks the `client_id` corresponding to the client key of the client which the message has to be delivered to.
+-   relays the message to the client via the WebSocket connection identified by the `client_id`.
+-   keeps relaying the [signed envelopes](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-call) received from the client to the canister as these include, among others, the keep alive message sent by the client in response to the acknowledgement message from the canister.
+
+The client (via the [IC WebSocket Frontend SDK](https://github.com/omnia-network/ic-websocket-sdk-js)):
+
+-   upon sending a message via the WebSocket, it records the current time.
+-   upon receiving a service message of type `WebSocketMessage` from the Gateway with content of type `WebsocketServiceMessageContent::AckMessage(CanisterAckMessageContent)`, first performs the same steps as when receiving a relayed canister message (as explained in a previous section). Then, considers all the messages with sequence number lower or equal to the one contained in the service message as acknowledged. For all the others, it checks whether more than `3/2 T` has passed, if so the gateway blocked some messages. Otherwise, it still does not considers these messages as acknowledged (and therefore an other acknowledgement for these will be expected) but it sends a service `WebSocketMessagee` with content of type `WebsocketServiceMessageContent::AckMessage(ClientKeepAliveMessageContent)`.
+
+Types:
+
+-   `CanisterAckMessageContent`
+    -   sequence number of the last message received by the canister from the respective client. This acknowledgement is serialized and used as content of a `WebsocketMessage` message where `is_service_message` is set to `true` and `sequence_num` is the next sequence number of the messages sent from the canister to the respective client.
+-   `ClientKeepAliveMessageContent`
+    -   sequence number of the last message that the client sending the keep alive message received from the canister.

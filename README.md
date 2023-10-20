@@ -205,7 +205,7 @@ The WS Gateway is needed as a WebSocket is a one-to-one connection between clien
 
 ## Message Flow
 
-For more information on the IC WebSocket protocol and the messages exchanged between client, WS Gateway and canister, checkout the [message flow](./docs/message-flow.md) doc.
+For more information on the messages exchanged between client, WS Gateway and canister, checkout the [IC WebSocket Protocol](./docs/ic-ws-protocol.md).
 
 # License
 
