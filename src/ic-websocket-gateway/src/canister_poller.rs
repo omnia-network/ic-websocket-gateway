@@ -23,7 +23,9 @@ use tracing::{error, info, trace, warn};
 
 // TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
 //       maybe get it once starting to poll the canister (?)
-const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 500;
+//       30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
+//       as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
+const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 30;
 
 type CanisterGetMessagesWithEvents = (CanisterOutputCertifiedMessages, PollerEvents);
 
@@ -176,10 +178,12 @@ impl CanisterPoller {
                             .send(Box::new(poller_events))
                             .await
                             .expect("analyzer's side of the channel dropped");
-                        // counting only iterations which return at least one canister message
-                        *self.polling_iteration.write().await += 1;
                     }
 
+                    // counting all polling iterations (instead of only the ones that return at least one canister message)
+                    // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
+                    // this can help us in the future understanding whether the poller is polling too frequently or not
+                    *self.polling_iteration.write().await += 1;
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
                     get_messages_operation.set(self.get_canister_updates(first_client_key.clone()));
