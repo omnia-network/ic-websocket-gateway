@@ -49,11 +49,11 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
                 // if the poller has already been started, we consider this latency as zero
                 .unwrap_or(Duration::from_millis(0));
             let time_to_send_client_channel = self
-                .started_new_poller
+                .sent_client_channel_to_poller
                 .duration_since(&self.started_new_poller)
                 // if the poller has already been started, we consider the latency since the client was added to the gateway state
                 .unwrap_or(
-                    self.started_new_poller
+                    self.sent_client_channel_to_poller
                         .duration_since(&self.added_client_to_state)?,
                 );
             let latency = self.compute_latency()?;
