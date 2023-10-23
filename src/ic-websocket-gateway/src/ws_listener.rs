@@ -36,7 +36,7 @@ pub struct WsListener {
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
-    rate_limiting_channel_rx: Receiver<f64>,
+    rate_limiting_channel_rx: Receiver<Option<f64>>,
     // needed to know which gateway_session to delete in case of error or WS closed
     next_client_id: u64,
 }
@@ -47,7 +47,7 @@ impl WsListener {
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<IcWsConnectionState>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
-        rate_limiting_channel_rx: Receiver<f64>,
+        rate_limiting_channel_rx: Receiver<Option<f64>>,
         tls_config: Option<TlsConfig>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
@@ -104,8 +104,16 @@ impl WsListener {
                     break;
                 },
                 Some(rate) = self.rate_limiting_channel_rx.recv() => {
-                    warn!("Rate limiting {}% of incoming connections", rate*100.0);
-                    limiting_rate = rate;
+                    match rate {
+                        Some(rate) => {
+                            warn!("Rate limiting {}% of incoming connections", rate*100.0);
+                            limiting_rate = rate;
+                        },
+                        None => {
+                            warn!("No rate limiting applied");
+                            limiting_rate = 0.0;
+                        }
+                    }
                 }
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     if !is_in_rate_limit(limiting_rate) {

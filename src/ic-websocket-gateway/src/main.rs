@@ -119,8 +119,10 @@ async fn main() -> Result<(), String> {
 
     let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
-    let (rate_limiting_channel_tx, rate_limiting_channel_rx): (Sender<f64>, Receiver<f64>) =
-        mpsc::channel(10);
+    let (rate_limiting_channel_tx, rate_limiting_channel_rx): (
+        Sender<Option<f64>>,
+        Receiver<Option<f64>>,
+    ) = mpsc::channel(10);
 
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,

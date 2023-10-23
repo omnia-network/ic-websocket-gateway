@@ -210,7 +210,7 @@ pub enum EventsCollectionType {
 impl EventsCollectionType {
     /// returns the types of the events groups that must be found in a collection to be considered complete,
     /// to then compute the total collection latency
-    fn get_events_type_in_collection(&self) -> Option<Vec<EventsType>> {
+    fn get_expected_events_type_in_collection(&self) -> Option<Vec<EventsType>> {
         match self {
             Self::NewClientConnection => Some(vec![
                 ListenerEventsMetrics::default().get_struct_name(),
@@ -253,11 +253,13 @@ impl EventsLatencies {
         self.0.insert((events_type, latency));
     }
 
-    fn has_received_all_events(&self, events_type_in_collection: &Vec<String>) -> bool {
-        let found_event_types: BTreeSet<&EventsType> =
+    /// checks if all the events groups, with the same reference, expected for the corresponding collection have already been recorded
+    fn has_received_all_events(&self, expected_events_type_in_collection: &Vec<String>) -> bool {
+        let recorded_event_types: BTreeSet<&EventsType> =
             self.0.iter().map(|(event_type, _)| event_type).collect();
-        for event_type in events_type_in_collection {
-            if !found_event_types.contains(event_type) {
+        // for each event type expected in the collection, check if it has been recorded
+        for event_type in expected_events_type_in_collection {
+            if !recorded_event_types.contains(event_type) {
                 return false;
             }
         }
@@ -281,7 +283,7 @@ pub struct EventsAnalyzer {
     /// receiver side of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
     /// sender side of the channel used to send the limiting rate to the WS listener
-    rate_limiting_channel_tx: Sender<f64>,
+    rate_limiting_channel_tx: Sender<Option<f64>>,
     /// minimum interval between consecutive incoming connections
     /// if below this threshold, rate limiting will start
     /// proportionally to the difference between the measured interval and the threshold
@@ -296,7 +298,7 @@ pub struct EventsAnalyzer {
 impl EventsAnalyzer {
     pub fn new(
         events_channel_rx: Receiver<Box<dyn Events + Send>>,
-        rate_limiting_channel_tx: Sender<f64>,
+        rate_limiting_channel_tx: Sender<Option<f64>>,
         min_incoming_interval: u64,
     ) -> Self {
         Self {
@@ -345,27 +347,27 @@ impl EventsAnalyzer {
         let latency = deltas.get_latency();
         let reference = deltas.get_reference();
 
-        if let Some(collection_data) = self
+        if let Some(collection_latencies) = self
             .map_latencies_by_collection_type
             .get_mut(collection_type)
         {
-            if let Some(latencies) = collection_data.get_mut(reference) {
+            if let Some(latencies) = collection_latencies.get_mut(reference) {
                 // inserts the events group type and the corresponding latency of the delta computed from the events group into its correpsonding collection
                 // this will contain all the other latencies computed from the events groups with the same reference and collection type
                 latencies.insert(events_type, latency);
             } else {
                 let mut latencies = EventsLatencies::default();
                 latencies.insert(events_type, latency);
-                collection_data.insert(reference.to_owned(), latencies);
+                collection_latencies.insert(reference.to_owned(), latencies);
             }
         } else {
             let mut latencies = EventsLatencies::default();
             latencies.insert(events_type, latency);
             let mut latencies_map = CollectionLatencies::default();
             latencies_map.insert(reference.to_owned(), latencies);
-            let collection_data = latencies_map;
+            let collection_latencies = latencies_map;
             self.map_latencies_by_collection_type
-                .insert(collection_type.to_owned(), collection_data);
+                .insert(collection_type.to_owned(), collection_latencies);
         }
     }
 
@@ -387,50 +389,55 @@ impl EventsAnalyzer {
 
     async fn compute_average_intervals(&mut self) {
         let min_incoming_interval = self.min_incoming_interval;
-        for (events_type, events_data) in self.map_intervals_by_events_type.iter_mut() {
-            // TODO: rolling average
-            if events_data.intervals.len() > 10 {
-                let intervals =
-                    events_data
-                        .intervals
-                        .iter()
-                        .fold(Vec::new(), |mut intervals, interval| {
-                            intervals.push(interval);
-                            intervals
-                        });
-                let intervals_count = intervals.len();
+        for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
+            let intervals_count = events_intervals.intervals.len();
+            if intervals_count > 10 {
+                // if we recorded at least 10 intervals from events groups of the same type, compute the average interval
+                let intervals = events_intervals.intervals.iter().fold(
+                    Vec::new(),
+                    |mut intervals, interval| {
+                        intervals.push(interval);
+                        intervals
+                    },
+                );
                 let sum_intervals: Duration = intervals.into_iter().sum();
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
                 info!(
-                    "Average interval for {:?}: {:?} computed over: {:?} metrics",
+                    "Average interval for {:?}: {:?} computed over: {:?} intervals",
                     events_type, avg_interval, intervals_count
                 );
-                let limiting_rate;
+                // if we computed the average interval for events groups representing the frequency of incoming connections, compute limiting rate
                 if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
+                    // if the average interval of incoming connections is above the minimum threshold
+                    // the listener should accept all connections (limiting_rate = None)
+                    let mut limiting_rate = None;
                     if avg_interval < Duration::from_millis(min_incoming_interval) {
                         warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval);
-                        limiting_rate = get_limiting_rate(min_incoming_interval, avg_interval);
-                    } else {
-                        // if the average interval of incoming connections is above the minimum (MIN_INCOMING_INTERVAL)
-                        // the listener should accept all connections (limiting_rate = 0)
-                        limiting_rate = 0.0;
+                        limiting_rate =
+                            Some(get_limiting_rate(min_incoming_interval, avg_interval));
                     }
                     if let Err(e) = self.rate_limiting_channel_tx.send(limiting_rate).await {
                         error!("Rate limiting channel closed on the receiver side: {:?}", e);
                     }
                 }
 
-                events_data.intervals = BTreeSet::default();
+                events_intervals.intervals = BTreeSet::default();
             }
         }
     }
 
     fn compute_collections_latencies(&mut self) {
-        for (collection_type, collection_data) in self.map_latencies_by_collection_type.iter_mut() {
-            if let Some(events_type_in_collection) = collection_type.get_events_type_in_collection()
+        for (collection_type, collection_latencies) in
+            self.map_latencies_by_collection_type.iter_mut()
+        {
+            // get the expected events type in the collection
+            // we compute the total latency of the collection only once all the events groups - with the same reference - expected from the collection have been received
+            if let Some(expected_events_type_in_collection) =
+                collection_type.get_expected_events_type_in_collection()
             {
-                for (_events_reference, latencies) in collection_data.iter_mut() {
-                    if latencies.has_received_all_events(&events_type_in_collection) {
+                for (_events_reference, latencies) in collection_latencies.iter_mut() {
+                    if latencies.has_received_all_events(&expected_events_type_in_collection) {
+                        // if all the events groups expected from the collection have been recorded, compute the total latency of the collection
                         let total_latency: Duration = latencies.sum();
                         latencies.clear();
                         if let Some(aggregated_latencies) =

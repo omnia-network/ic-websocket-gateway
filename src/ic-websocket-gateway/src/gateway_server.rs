@@ -129,7 +129,7 @@ impl GatewayServer {
     pub fn start_accepting_incoming_connections(
         &self,
         tls_config: Option<TlsConfig>,
-        rate_limiting_channel_rx: Receiver<f64>,
+        rate_limiting_channel_rx: Receiver<Option<f64>>,
     ) {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
