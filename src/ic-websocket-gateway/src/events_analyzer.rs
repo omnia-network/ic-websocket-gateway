@@ -297,6 +297,8 @@ pub struct EventsAnalyzer {
     /// if below this threshold, rate limiting will start
     /// proportionally to the difference between the measured interval and the threshold
     min_incoming_interval: u64,
+    /// threshold after which we compute the averages of the intervals/latencies
+    compute_averages_threshold: u64,
     /// maps the type of an events group to the intervals computed from consecutive events groups of that type
     pub map_intervals_by_events_type: BTreeMap<EventsType, IntervalsForEventsType>,
     /// maps the type of a collection to a map of containing all the recorded latencies for events groups with the same reference
@@ -309,11 +311,13 @@ impl EventsAnalyzer {
         events_channel_rx: Receiver<Box<dyn Events + Send>>,
         rate_limiting_channel_tx: Sender<Option<f64>>,
         min_incoming_interval: u64,
+        compute_averages_threshold: u64,
     ) -> Self {
         Self {
             events_channel_rx,
             rate_limiting_channel_tx,
             min_incoming_interval,
+            compute_averages_threshold,
             map_intervals_by_events_type: BTreeMap::default(),
             map_latencies_by_collection_type: HashMap::default(),
             aggregated_latencies_map: HashMap::default(),
@@ -420,7 +424,7 @@ impl EventsAnalyzer {
         let min_incoming_interval = self.min_incoming_interval;
         for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
             let intervals_count = events_intervals.intervals.len();
-            if intervals_count > 10 {
+            if intervals_count as u64 > self.compute_averages_threshold {
                 // if we recorded at least 10 intervals from events groups of the same type, compute the average interval
                 let sum_intervals = events_intervals.sum();
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
@@ -450,7 +454,7 @@ impl EventsAnalyzer {
 
     fn compute_collections_latencies(&mut self) {
         for (collection_type, aggregated_latencies) in self.aggregated_latencies_map.iter_mut() {
-            if aggregated_latencies.len() > 10 {
+            if aggregated_latencies.len() as u64 > self.compute_averages_threshold {
                 let sum_latencies: Duration = aggregated_latencies.iter().sum();
                 let avg_latencies = sum_latencies.div_f64(aggregated_latencies.len() as f64);
                 info!(

@@ -34,7 +34,7 @@ mod tests {
         ) = mpsc::channel(10);
 
         let mut events_analyzer =
-            EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx, 100);
+            EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx, 100, 1);
 
         let client_id = 0;
         let events = get_listener_events_with_one_ms_latency(client_id).await;

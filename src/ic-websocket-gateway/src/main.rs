@@ -49,6 +49,10 @@ struct DeploymentInfo {
     /// if below this threshold, the gateway starts rate liimiting
     min_incoming_interval: u64,
 
+    #[structopt(long, default_value = "10")]
+    /// threshold after which the metrics analyzer computes the averages of the intervals/latencies
+    compute_averages_threshold: u64,
+
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
 
@@ -149,6 +153,7 @@ async fn main() -> Result<(), String> {
             events_channel_rx,
             rate_limiting_channel_tx,
             deployment_info.min_incoming_interval,
+            deployment_info.compute_averages_threshold,
         );
         events_analyzer.start_processing().await;
     });
