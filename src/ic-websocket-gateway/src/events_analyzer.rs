@@ -18,6 +18,7 @@ use tokio::{
 };
 use tracing::{error, info, trace, warn};
 
+/// name of the struct implementing EventsMetrics
 type EventsType = String;
 
 /// trait implemented by the structs containing the relevant events of each component
@@ -27,13 +28,13 @@ pub trait Events: Debug {
         self.get_metrics().get_struct_name()
     }
 
-    /// returns the reference used to collect events from different components
+    /// returns the reference used to collect events groups from different components in the same collection
     fn get_reference(&self) -> Option<&EventsReference>;
 
-    /// returns the name of the collection which the events in the struct belong to
+    /// returns the name of the collection which the events groups in the struct belong to
     fn get_collection_type(&self) -> &EventsCollectionType;
 
-    /// returns the metrics computed from events
+    /// returns the metrics computed from an events group
     fn get_metrics(&self) -> &dyn EventsMetrics;
 }
 
@@ -110,13 +111,13 @@ pub trait EventsMetrics: Debug {
 
 /// trait implemented by the structs containing the deltas computed within each component
 pub trait Deltas: Debug {
-    /// displays all the deltas of an event
+    /// displays all the deltas of an events group
     fn display(&self);
 
-    /// returns the reference used to identify the event
+    /// returns the reference used to identify a delta computed from an events group
     fn get_reference(&self) -> &EventsReference;
 
-    /// returns the latency of the component
+    /// returns the latency of an events group
     fn get_latency(&self) -> Duration;
 }
 
@@ -152,14 +153,20 @@ impl TimeableEvent {
     }
 }
 
+// TODO: make sure that iterations from different pollers are not grouped together (same for messages from different canisters)
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// reference used to identify an events group
 pub enum EventsReference {
+    /// reference of an events group related to an incoming or outgoing message
     MessageNonce(u64),
+    /// reference of an events group related to a client connection
     ClientId(u64),
+    /// reference of an events group related to a poller
     Iteration(u64),
 }
 
 impl EventsReference {
+    /// returns the value wrappd by the enum variant
     fn get_inner_value(&self) -> Option<&dyn Any> {
         match self {
             Self::MessageNonce(nonce) => Some(nonce as &dyn Any),
@@ -190,15 +197,19 @@ impl PartialOrd for EventsReference {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
+/// possible collections which events groups belong to
 pub enum EventsCollectionType {
+    /// collection of events groups related to a new client connection
     NewClientConnection,
+    /// collection of events groups related to a incoming or outgoing canister message
     CanisterMessage,
+    /// collection of events groups related to a poller
     PollerStatus,
 }
 
 impl EventsCollectionType {
-    /// returns the events of the components whose latencies affect the relative collection
-    /// returns None, if the latency of a collection is irrelevant
+    /// returns the types of the events groups that must be found in a collection to be considered complete,
+    /// to then compute the total collection latency
     fn get_events_type_in_collection(&self) -> Option<Vec<EventsType>> {
         match self {
             Self::NewClientConnection => Some(vec![
@@ -226,12 +237,12 @@ impl AggregatedMetrics {
     }
 }
 
-struct EventsData {
+struct EventsDataForInterval {
     aggregated_metrics_map: BTreeMap<EventsReference, AggregatedMetrics>,
     previous: Box<dyn Events + Send>,
 }
 
-impl EventsData {
+impl EventsDataForInterval {
     fn new(
         aggregated_metrics_map: BTreeMap<EventsReference, AggregatedMetrics>,
         previous: Box<dyn Events + Send>,
@@ -278,11 +289,17 @@ type CollectionData = BTreeMap<EventsReference, EventsLatencies>;
 
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
-    /// receiver of the channel used to send metrics to the analyzer
+    /// receiver side of the channel used to send metrics to the analyzer
     events_channel_rx: Receiver<Box<dyn Events + Send>>,
+    /// sender side of the channel used to send the limiting rate to the WS listener
     rate_limiting_channel_tx: Sender<f64>,
+    /// minimum interval between consecutive incoming connections
+    /// if below this threshold, rate limiting will start
+    /// proportionally to the difference between the measured interval and the threshold
     min_incoming_interval: u64,
-    map_by_events_type: BTreeMap<EventsType, EventsData>,
+    ///
+    map_by_events_type: BTreeMap<EventsType, EventsDataForInterval>,
+    ///
     map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
     aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
 }
@@ -309,7 +326,7 @@ impl EventsAnalyzer {
         tokio::pin!(periodic_check_operation);
         loop {
             select! {
-                // collect each event received on the channel for periodic processing
+                // register each event received on the channel for periodic processing
                 Some(events) = self.events_channel_rx.recv() => {
                     let reference = events.get_reference();
                     if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
@@ -317,7 +334,7 @@ impl EventsAnalyzer {
                         self.add_interval_to_events(events, deltas);
                     }
                 },
-                // periodically process latest events
+                // periodically process previously registered events
                 _ = &mut periodic_check_operation => {
                     self.compute_average_intervals().await;
                     self.compute_collections_latencies();
@@ -328,6 +345,7 @@ impl EventsAnalyzer {
         }
     }
 
+    /// deltas computed from an events group are collected by reference in the collection type they belong to
     fn add_latency_to_collection(
         &mut self,
         events: &Box<dyn Events + Send>,
@@ -340,6 +358,8 @@ impl EventsAnalyzer {
 
         if let Some(collection_data) = self.map_by_collection_type.get_mut(collection_type) {
             if let Some(latencies) = collection_data.get_mut(reference) {
+                // inserts the events group type and the corresponding latency of the delta computed from the events group into its correpsonding collection
+                // this will contain all the other latencies computed from the events groups with the same reference and collection type
                 latencies.insert(events_type, latency);
             } else {
                 let mut latencies = EventsLatencies::default();
@@ -365,7 +385,7 @@ impl EventsAnalyzer {
         let events_type = events.get_metrics_type();
         let reference = deltas.get_reference().to_owned();
 
-        // first events received for each type is not processed further as there is no previous event for computing interval
+        // first events group received for each type is not processed further as there is no previous event for computing interval
         if let Some(data) = self.map_by_events_type.get_mut(&events_type) {
             let aggregated_metrics = AggregatedMetrics::new(
                 deltas,
@@ -377,7 +397,7 @@ impl EventsAnalyzer {
                 .insert(reference, aggregated_metrics);
             data.previous = events;
         } else {
-            let data = EventsData::new(BTreeMap::default(), events);
+            let data = EventsDataForInterval::new(BTreeMap::default(), events);
             self.map_by_events_type.insert(events_type, data);
         }
     }
