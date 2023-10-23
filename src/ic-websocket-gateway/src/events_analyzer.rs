@@ -19,7 +19,7 @@ use tokio::{
 use tracing::{error, info, warn};
 
 /// name of the struct implementing EventsMetrics
-type EventsType = String;
+pub type EventsType = String;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
@@ -226,7 +226,7 @@ impl EventsCollectionType {
     }
 }
 
-struct IntervalsForEventsType {
+pub struct IntervalsForEventsType {
     intervals: BTreeSet<Duration>,
     previous_events_group: Box<dyn Events + Send>,
 }
@@ -246,7 +246,7 @@ impl IntervalsForEventsType {
 
 /// set of latencies - and their events type - for events groups with the same reference
 /// for a given events reference,once all the events expected for the corresponding collection are recorded, the sum of these latencies gives the total collection latency
-struct EventsLatencies(BTreeSet<(EventsType, Duration)>);
+pub struct EventsLatencies(BTreeSet<(EventsType, Duration)>);
 
 impl EventsLatencies {
     fn default() -> Self {
@@ -293,10 +293,10 @@ pub struct EventsAnalyzer {
     /// proportionally to the difference between the measured interval and the threshold
     min_incoming_interval: u64,
     /// maps the type of an events group to the intervals computed from consecutive events groups of that type
-    map_intervals_by_events_type: BTreeMap<EventsType, IntervalsForEventsType>,
+    pub map_intervals_by_events_type: BTreeMap<EventsType, IntervalsForEventsType>,
     /// maps the type of a collection to a map of containing all the recorded latencies for events groups with the same reference
-    map_latencies_by_collection_type: HashMap<EventsCollectionType, CollectionLatencies>,
-    aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
+    pub map_latencies_by_collection_type: HashMap<EventsCollectionType, CollectionLatencies>,
+    pub aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
 }
 
 impl EventsAnalyzer {
@@ -341,7 +341,7 @@ impl EventsAnalyzer {
     }
 
     /// deltas computed from an events group are collected by reference in the collection type they belong to
-    fn add_latency_to_collection(
+    pub fn add_latency_to_collection(
         &mut self,
         events: &Box<dyn Events + Send>,
         deltas: &Box<dyn Deltas + Send>,
@@ -396,7 +396,7 @@ impl EventsAnalyzer {
         }
     }
 
-    fn add_interval_to_events(&mut self, events: Box<dyn Events + Send>) {
+    pub fn add_interval_to_events(&mut self, events: Box<dyn Events + Send>) {
         let events_type = events.get_metrics_type();
 
         // first events group received for each type is not processed further as there is no previous event for computing interval

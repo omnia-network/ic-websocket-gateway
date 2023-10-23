@@ -28,6 +28,7 @@ mod metrics {
 mod tests {
     pub mod canister_poller;
     pub mod client_connection_handler;
+    pub mod events_analyzer;
 }
 
 #[derive(Debug, StructOpt)]
