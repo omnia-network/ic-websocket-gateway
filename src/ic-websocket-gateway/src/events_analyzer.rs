@@ -238,6 +238,10 @@ impl IntervalsForEventsType {
             previous_events_group,
         }
     }
+
+    fn sum(&self) -> Duration {
+        self.intervals.iter().sum()
+    }
 }
 
 /// set of latencies - and their events type - for events groups with the same reference
@@ -355,6 +359,27 @@ impl EventsAnalyzer {
                 // inserts the events group type and the corresponding latency of the delta computed from the events group into its correpsonding collection
                 // this will contain all the other latencies computed from the events groups with the same reference and collection type
                 latencies.insert(events_type, latency);
+                // check if all the events groups expected from the collection have been recorded
+                // get the expected events type in the collection
+                if let Some(expected_events_type_in_collection) =
+                    collection_type.get_expected_events_type_in_collection()
+                {
+                    if latencies.has_received_all_events(&expected_events_type_in_collection) {
+                        // if all the events groups expected from the collection have been recorded, compute the total latency of the collection
+                        let total_latency = latencies.sum();
+                        if let Some(aggregated_latencies) =
+                            self.aggregated_latencies_map.get_mut(collection_type)
+                        {
+                            aggregated_latencies.insert(total_latency);
+                        } else {
+                            let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
+                            aggregated_latencies.insert(total_latency);
+                            self.aggregated_latencies_map
+                                .insert(collection_type.to_owned(), aggregated_latencies);
+                        }
+                        latencies.clear();
+                    }
+                }
             } else {
                 let mut latencies = EventsLatencies::default();
                 latencies.insert(events_type, latency);
@@ -393,14 +418,7 @@ impl EventsAnalyzer {
             let intervals_count = events_intervals.intervals.len();
             if intervals_count > 10 {
                 // if we recorded at least 10 intervals from events groups of the same type, compute the average interval
-                let intervals = events_intervals.intervals.iter().fold(
-                    Vec::new(),
-                    |mut intervals, interval| {
-                        intervals.push(interval);
-                        intervals
-                    },
-                );
-                let sum_intervals: Duration = intervals.into_iter().sum();
+                let sum_intervals = events_intervals.sum();
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
                 info!(
                     "Average interval for {:?}: {:?} computed over: {:?} intervals",
@@ -427,42 +445,15 @@ impl EventsAnalyzer {
     }
 
     fn compute_collections_latencies(&mut self) {
-        for (collection_type, collection_latencies) in
-            self.map_latencies_by_collection_type.iter_mut()
-        {
-            // get the expected events type in the collection
-            // we compute the total latency of the collection only once all the events groups - with the same reference - expected from the collection have been received
-            if let Some(expected_events_type_in_collection) =
-                collection_type.get_expected_events_type_in_collection()
-            {
-                for (_events_reference, latencies) in collection_latencies.iter_mut() {
-                    if latencies.has_received_all_events(&expected_events_type_in_collection) {
-                        // if all the events groups expected from the collection have been recorded, compute the total latency of the collection
-                        let total_latency: Duration = latencies.sum();
-                        latencies.clear();
-                        if let Some(aggregated_latencies) =
-                            self.aggregated_latencies_map.get_mut(collection_type)
-                        {
-                            if aggregated_latencies.len() > 10 {
-                                let sum_latencies: Duration = aggregated_latencies.iter().sum();
-                                let avg_latencies =
-                                    sum_latencies.div_f64(aggregated_latencies.len() as f64);
-                                info!(
-                                    "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
-                                    collection_type, avg_latencies, aggregated_latencies.len()
-                                );
-                                aggregated_latencies.clear();
-                            } else {
-                                aggregated_latencies.insert(total_latency);
-                            }
-                        } else {
-                            let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
-                            aggregated_latencies.insert(total_latency);
-                            self.aggregated_latencies_map
-                                .insert(collection_type.to_owned(), aggregated_latencies);
-                        }
-                    }
-                }
+        for (collection_type, aggregated_latencies) in self.aggregated_latencies_map.iter_mut() {
+            if aggregated_latencies.len() > 10 {
+                let sum_latencies: Duration = aggregated_latencies.iter().sum();
+                let avg_latencies = sum_latencies.div_f64(aggregated_latencies.len() as f64);
+                info!(
+                        "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
+                        collection_type, avg_latencies, aggregated_latencies.len()
+                    );
+                aggregated_latencies.clear();
             }
         }
     }
