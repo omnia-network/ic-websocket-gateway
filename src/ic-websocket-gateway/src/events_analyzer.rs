@@ -16,7 +16,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
     time::Instant,
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
 /// name of the struct implementing EventsMetrics
 type EventsType = String;
@@ -226,34 +226,22 @@ impl EventsCollectionType {
     }
 }
 
-struct AggregatedMetrics {
-    deltas: Box<dyn Deltas + Send>,
-    interval: Duration,
+struct IntervalsForEventsType {
+    intervals: BTreeSet<Duration>,
+    previous_events_group: Box<dyn Events + Send>,
 }
 
-impl AggregatedMetrics {
-    fn new(deltas: Box<dyn Deltas + Send>, interval: Duration) -> Self {
-        Self { deltas, interval }
-    }
-}
-
-struct EventsDataForInterval {
-    aggregated_metrics_map: BTreeMap<EventsReference, AggregatedMetrics>,
-    previous: Box<dyn Events + Send>,
-}
-
-impl EventsDataForInterval {
-    fn new(
-        aggregated_metrics_map: BTreeMap<EventsReference, AggregatedMetrics>,
-        previous: Box<dyn Events + Send>,
-    ) -> Self {
+impl IntervalsForEventsType {
+    fn new(intervals: BTreeSet<Duration>, previous_events_group: Box<dyn Events + Send>) -> Self {
         Self {
-            aggregated_metrics_map,
-            previous,
+            intervals,
+            previous_events_group,
         }
     }
 }
 
+/// set of latencies - and their events type - for events groups with the same reference
+/// for a given events reference,once all the events expected for the corresponding collection are recorded, the sum of these latencies gives the total collection latency
 struct EventsLatencies(BTreeSet<(EventsType, Duration)>);
 
 impl EventsLatencies {
@@ -285,7 +273,8 @@ impl EventsLatencies {
     }
 }
 
-type CollectionData = BTreeMap<EventsReference, EventsLatencies>;
+/// for a given collection, collects all the latencies for events groups with the same reference
+type CollectionLatencies = BTreeMap<EventsReference, EventsLatencies>;
 
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
@@ -297,10 +286,10 @@ pub struct EventsAnalyzer {
     /// if below this threshold, rate limiting will start
     /// proportionally to the difference between the measured interval and the threshold
     min_incoming_interval: u64,
-    ///
-    map_by_events_type: BTreeMap<EventsType, EventsDataForInterval>,
-    ///
-    map_by_collection_type: HashMap<EventsCollectionType, CollectionData>,
+    /// maps the type of an events group to the intervals computed from consecutive events groups of that type
+    map_intervals_by_events_type: BTreeMap<EventsType, IntervalsForEventsType>,
+    /// maps the type of a collection to a map of containing all the recorded latencies for events groups with the same reference
+    map_latencies_by_collection_type: HashMap<EventsCollectionType, CollectionLatencies>,
     aggregated_latencies_map: HashMap<EventsCollectionType, BTreeSet<Duration>>,
 }
 
@@ -314,8 +303,8 @@ impl EventsAnalyzer {
             events_channel_rx,
             rate_limiting_channel_tx,
             min_incoming_interval,
-            map_by_events_type: BTreeMap::default(),
-            map_by_collection_type: HashMap::default(),
+            map_intervals_by_events_type: BTreeMap::default(),
+            map_latencies_by_collection_type: HashMap::default(),
             aggregated_latencies_map: HashMap::default(),
         }
     }
@@ -331,7 +320,7 @@ impl EventsAnalyzer {
                     let reference = events.get_reference();
                     if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
                         self.add_latency_to_collection(&events, &deltas);
-                        self.add_interval_to_events(events, deltas);
+                        self.add_interval_to_events(events);
                     }
                 },
                 // periodically process previously registered events
@@ -356,7 +345,10 @@ impl EventsAnalyzer {
         let latency = deltas.get_latency();
         let reference = deltas.get_reference();
 
-        if let Some(collection_data) = self.map_by_collection_type.get_mut(collection_type) {
+        if let Some(collection_data) = self
+            .map_latencies_by_collection_type
+            .get_mut(collection_type)
+        {
             if let Some(latencies) = collection_data.get_mut(reference) {
                 // inserts the events group type and the corresponding latency of the delta computed from the events group into its correpsonding collection
                 // this will contain all the other latencies computed from the events groups with the same reference and collection type
@@ -369,63 +361,49 @@ impl EventsAnalyzer {
         } else {
             let mut latencies = EventsLatencies::default();
             latencies.insert(events_type, latency);
-            let mut latencies_map = CollectionData::default();
+            let mut latencies_map = CollectionLatencies::default();
             latencies_map.insert(reference.to_owned(), latencies);
             let collection_data = latencies_map;
-            self.map_by_collection_type
+            self.map_latencies_by_collection_type
                 .insert(collection_type.to_owned(), collection_data);
         }
     }
 
-    fn add_interval_to_events(
-        &mut self,
-        events: Box<dyn Events + Send>,
-        deltas: Box<dyn Deltas + Send>,
-    ) {
+    fn add_interval_to_events(&mut self, events: Box<dyn Events + Send>) {
         let events_type = events.get_metrics_type();
-        let reference = deltas.get_reference().to_owned();
 
         // first events group received for each type is not processed further as there is no previous event for computing interval
-        if let Some(data) = self.map_by_events_type.get_mut(&events_type) {
-            let aggregated_metrics = AggregatedMetrics::new(
-                deltas,
-                events
-                    .get_metrics()
-                    .compute_interval(data.previous.get_metrics()),
-            );
-            data.aggregated_metrics_map
-                .insert(reference, aggregated_metrics);
-            data.previous = events;
+        if let Some(data) = self.map_intervals_by_events_type.get_mut(&events_type) {
+            let interval = events
+                .get_metrics()
+                .compute_interval(data.previous_events_group.get_metrics());
+            data.intervals.insert(interval);
+            data.previous_events_group = events;
         } else {
-            let data = EventsDataForInterval::new(BTreeMap::default(), events);
-            self.map_by_events_type.insert(events_type, data);
+            let data = IntervalsForEventsType::new(BTreeSet::default(), events);
+            self.map_intervals_by_events_type.insert(events_type, data);
         }
     }
 
     async fn compute_average_intervals(&mut self) {
         let min_incoming_interval = self.min_incoming_interval;
-        for (events_type, events_data) in self.map_by_events_type.iter_mut() {
+        for (events_type, events_data) in self.map_intervals_by_events_type.iter_mut() {
             // TODO: rolling average
-            if events_data.aggregated_metrics_map.len() > 10 {
-                let intervals = events_data.aggregated_metrics_map.iter().fold(
-                    Vec::new(),
-                    |mut intervals, (_, aggregated_metrics)| {
-                        trace!(
-                            "Deltas for {:?}: {:?}",
-                            events_type,
-                            aggregated_metrics.deltas
-                        );
-                        intervals.push(aggregated_metrics.interval);
-                        intervals
-                    },
-                );
-                let sum_intervals: Duration = intervals.iter().sum();
-                let avg_interval = sum_intervals.div_f64(intervals.len() as f64);
+            if events_data.intervals.len() > 10 {
+                let intervals =
+                    events_data
+                        .intervals
+                        .iter()
+                        .fold(Vec::new(), |mut intervals, interval| {
+                            intervals.push(interval);
+                            intervals
+                        });
+                let intervals_count = intervals.len();
+                let sum_intervals: Duration = intervals.into_iter().sum();
+                let avg_interval = sum_intervals.div_f64(intervals_count as f64);
                 info!(
                     "Average interval for {:?}: {:?} computed over: {:?} metrics",
-                    events_type,
-                    avg_interval,
-                    intervals.len()
+                    events_type, avg_interval, intervals_count
                 );
                 let limiting_rate;
                 if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
@@ -442,13 +420,13 @@ impl EventsAnalyzer {
                     }
                 }
 
-                events_data.aggregated_metrics_map = BTreeMap::default();
+                events_data.intervals = BTreeSet::default();
             }
         }
     }
 
     fn compute_collections_latencies(&mut self) {
-        for (collection_type, collection_data) in self.map_by_collection_type.iter_mut() {
+        for (collection_type, collection_data) in self.map_latencies_by_collection_type.iter_mut() {
             if let Some(events_type_in_collection) = collection_type.get_events_type_in_collection()
             {
                 for (_events_reference, latencies) in collection_data.iter_mut() {
