@@ -9,7 +9,7 @@ use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
 use std::any::{type_name, Any};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::{collections::BTreeMap, time::Duration};
 use tokio::select;
 use tokio::{
@@ -207,6 +207,16 @@ pub enum EventsCollectionType {
     PollerStatus,
 }
 
+impl fmt::Display for EventsCollectionType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::NewClientConnection => write!(f, "NewClientConnection"),
+            Self::CanisterMessage => write!(f, "CanisterMessage"),
+            Self::PollerStatus => write!(f, "PollerStatus"),
+        }
+    }
+}
+
 impl EventsCollectionType {
     /// returns the types of the events groups that must be found in a collection to be considered complete,
     /// to then compute the total collection latency
@@ -287,6 +297,12 @@ impl EventsLatencies {
 /// for a given collection, collects all the latencies for events groups with the same reference
 type CollectionLatencies = BTreeMap<EventsReference, EventsLatencies>;
 
+struct AverageData {
+    avg_type: String,
+    avg_value: Duration,
+    count: usize,
+}
+
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
     /// receiver side of the channel used to send metrics to the analyzer
@@ -340,8 +356,35 @@ impl EventsAnalyzer {
                 },
                 // periodically process previously registered events
                 _ = &mut periodic_check_operation => {
-                    self.compute_average_intervals().await;
-                    self.compute_collections_latencies();
+                    let intervals = self.compute_average_intervals().await;
+                    for avg_interval in intervals {
+                        info!(
+                            "Average interval for {:?}: {:?} computed over: {:?} intervals",
+                            avg_interval.avg_type, avg_interval.avg_value, avg_interval.count
+                        );
+                        // if we computed the average interval for events groups representing the frequency of incoming connections, compute limiting rate
+                        if String::from("RequestConnectionSetupEventsMetrics").eq(&avg_interval.avg_type) {
+                            // if the average interval of incoming connections is above the minimum threshold
+                            // the listener should accept all connections (limiting_rate = None)
+                            let mut limiting_rate = None;
+                            if avg_interval.avg_value < Duration::from_millis(self.min_incoming_interval) {
+                                warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval.avg_value);
+                                limiting_rate =
+                                    Some(get_limiting_rate(self.min_incoming_interval, avg_interval.avg_value));
+                            }
+                            if let Err(e) = self.rate_limiting_channel_tx.send(limiting_rate).await {
+                                error!("Rate limiting channel closed on the receiver side: {:?}", e);
+                            }
+                        }
+                    }
+
+                    let latencies = self.compute_collections_latencies();
+                    for avg_latency in latencies {
+                        info!(
+                            "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
+                            avg_latency.avg_type, avg_latency.avg_value, avg_latency.count
+                        );
+                    }
 
                     periodic_check_operation.set(periodic_check());
                 }
@@ -420,50 +463,42 @@ impl EventsAnalyzer {
         }
     }
 
-    async fn compute_average_intervals(&mut self) {
-        let min_incoming_interval = self.min_incoming_interval;
+    /// computes the average of the time between two consecutive events groups of the same type, for each type
+    async fn compute_average_intervals(&mut self) -> Vec<AverageData> {
+        let mut intervals = Vec::new();
         for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
             let intervals_count = events_intervals.intervals.len();
             if intervals_count as u64 > self.compute_averages_threshold {
                 // if we recorded at least 10 intervals from events groups of the same type, compute the average interval
                 let sum_intervals = events_intervals.sum();
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
-                info!(
-                    "Average interval for {:?}: {:?} computed over: {:?} intervals",
-                    events_type, avg_interval, intervals_count
-                );
-                // if we computed the average interval for events groups representing the frequency of incoming connections, compute limiting rate
-                if String::from("RequestConnectionSetupEventsMetrics").eq(events_type) {
-                    // if the average interval of incoming connections is above the minimum threshold
-                    // the listener should accept all connections (limiting_rate = None)
-                    let mut limiting_rate = None;
-                    if avg_interval < Duration::from_millis(min_incoming_interval) {
-                        warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval);
-                        limiting_rate =
-                            Some(get_limiting_rate(min_incoming_interval, avg_interval));
-                    }
-                    if let Err(e) = self.rate_limiting_channel_tx.send(limiting_rate).await {
-                        error!("Rate limiting channel closed on the receiver side: {:?}", e);
-                    }
-                }
-
+                intervals.push(AverageData {
+                    avg_type: events_type.to_owned(),
+                    avg_value: avg_interval,
+                    count: intervals_count,
+                });
                 events_intervals.intervals = BTreeSet::default();
             }
         }
+        intervals
     }
 
-    fn compute_collections_latencies(&mut self) {
+    /// computes the average of the total latency of events in each collection
+    fn compute_collections_latencies(&mut self) -> Vec<AverageData> {
+        let mut latencies = Vec::new();
         for (collection_type, aggregated_latencies) in self.aggregated_latencies_map.iter_mut() {
             if aggregated_latencies.len() as u64 > self.compute_averages_threshold {
                 let sum_latencies: Duration = aggregated_latencies.iter().sum();
                 let avg_latencies = sum_latencies.div_f64(aggregated_latencies.len() as f64);
-                info!(
-                        "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
-                        collection_type, avg_latencies, aggregated_latencies.len()
-                    );
+                latencies.push(AverageData {
+                    avg_type: collection_type.to_owned().to_string(),
+                    avg_value: avg_latencies,
+                    count: aggregated_latencies.len(),
+                });
                 aggregated_latencies.clear();
             }
         }
+        latencies
     }
 }
 
