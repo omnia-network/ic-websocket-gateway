@@ -227,7 +227,7 @@ impl EventsCollectionType {
 }
 
 pub struct IntervalsForEventsType {
-    intervals: BTreeSet<Duration>,
+    pub intervals: BTreeSet<Duration>,
     previous_events_group: Box<dyn Events + Send>,
 }
 
@@ -251,6 +251,11 @@ pub struct EventsLatencies(BTreeSet<(EventsType, Duration)>);
 impl EventsLatencies {
     fn default() -> Self {
         Self(BTreeSet::default())
+    }
+
+    #[cfg(test)]
+    pub fn get_inner(&self) -> &BTreeSet<(EventsType, Duration)> {
+        &self.0
     }
 
     fn insert(&mut self, events_type: EventsType, latency: Duration) {
@@ -398,7 +403,6 @@ impl EventsAnalyzer {
 
     pub fn add_interval_to_events(&mut self, events: Box<dyn Events + Send>) {
         let events_type = events.get_metrics_type();
-
         // first events group received for each type is not processed further as there is no previous event for computing interval
         if let Some(data) = self.map_intervals_by_events_type.get_mut(&events_type) {
             let interval = events

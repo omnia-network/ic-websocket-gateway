@@ -25,7 +25,7 @@ mod tests {
         Box::new(listener_events)
     }
     #[tokio::test()]
-    async fn should_record_first_latency_and_interval() {
+    async fn should_record_first_latency_but_not_interval() {
         let (_events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
         let (rate_limiting_channel_tx, _rate_limiting_channel_rx): (
@@ -36,15 +36,40 @@ mod tests {
         let mut events_analyzer =
             EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx, 100);
 
-        let events = get_listener_events_with_one_ms_latency(0).await;
+        let client_id = 0;
+        let events = get_listener_events_with_one_ms_latency(client_id).await;
         let reference = events.get_reference();
         if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
             events_analyzer.add_latency_to_collection(&events, &deltas);
             events_analyzer.add_interval_to_events(events);
         }
 
+        // first latency should be recorded
         assert_eq!(events_analyzer.map_latencies_by_collection_type.len(), 1);
+        assert_eq!(
+            events_analyzer
+                .map_latencies_by_collection_type
+                .get(&EventsCollectionType::NewClientConnection)
+                .unwrap()
+                .get(&EventsReference::ClientId(client_id))
+                .unwrap()
+                .get_inner()
+                .len(),
+            1
+        );
         assert_eq!(events_analyzer.aggregated_latencies_map.len(), 0);
+
+        // first interval should not be recorded
+        // however the event should be stored so that we can compute the interval once we receive the next event of the same type
         assert_eq!(events_analyzer.map_intervals_by_events_type.len(), 1);
+        assert_eq!(
+            events_analyzer
+                .map_intervals_by_events_type
+                .get("ListenerEventsMetrics")
+                .unwrap()
+                .intervals
+                .len(),
+            0
+        )
     }
 }
