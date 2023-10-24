@@ -297,10 +297,10 @@ impl EventsLatencies {
 /// for a given collection, collects all the latencies for events groups with the same reference
 type CollectionLatencies = BTreeMap<EventsReference, EventsLatencies>;
 
-struct AverageData {
-    avg_type: String,
-    avg_value: Duration,
-    count: usize,
+pub struct AverageData {
+    pub avg_type: String,
+    pub avg_value: Duration,
+    pub count: usize,
 }
 
 /// events analyzer receives metrics from different components of the WS Gateway
@@ -468,7 +468,7 @@ impl EventsAnalyzer {
         let mut intervals = Vec::new();
         for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
             let intervals_count = events_intervals.intervals.len();
-            if intervals_count as u64 > self.compute_averages_threshold {
+            if intervals_count as u64 >= self.compute_averages_threshold {
                 // if we recorded at least 10 intervals from events groups of the same type, compute the average interval
                 let sum_intervals = events_intervals.sum();
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
@@ -484,10 +484,10 @@ impl EventsAnalyzer {
     }
 
     /// computes the average of the total latency of events in each collection
-    fn compute_collections_latencies(&mut self) -> Vec<AverageData> {
+    pub fn compute_collections_latencies(&mut self) -> Vec<AverageData> {
         let mut latencies = Vec::new();
         for (collection_type, aggregated_latencies) in self.aggregated_latencies_map.iter_mut() {
-            if aggregated_latencies.len() as u64 > self.compute_averages_threshold {
+            if aggregated_latencies.len() as u64 >= self.compute_averages_threshold {
                 let sum_latencies: Duration = aggregated_latencies.iter().sum();
                 let avg_latencies = sum_latencies.div_f64(aggregated_latencies.len() as f64);
                 latencies.push(AverageData {
