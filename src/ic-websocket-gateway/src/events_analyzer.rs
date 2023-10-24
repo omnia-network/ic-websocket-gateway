@@ -464,7 +464,7 @@ impl EventsAnalyzer {
     }
 
     /// computes the average of the time between two consecutive events groups of the same type, for each type
-    async fn compute_average_intervals(&mut self) -> Vec<AverageData> {
+    pub async fn compute_average_intervals(&mut self) -> Vec<AverageData> {
         let mut intervals = Vec::new();
         for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
             let intervals_count = events_intervals.intervals.len();

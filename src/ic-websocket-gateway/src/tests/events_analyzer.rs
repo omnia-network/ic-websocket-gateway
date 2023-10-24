@@ -157,14 +157,37 @@ mod tests {
         }
 
         let latencies = events_analyzer.compute_collections_latencies();
-        let overhead_latency = 7;
+        let latency_overhead = 7;
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
             latencies[0].avg_value >= Duration::from_millis(events_count * latency_ms)
                 && latencies[0].avg_value
-                    <= Duration::from_millis(events_count * latency_ms + overhead_latency)
+                    <= Duration::from_millis(events_count * latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, 1);
+    }
+
+    #[tokio::test()]
+    async fn should_compute_average_interval() {
+        let compute_average_threshold = 1;
+        let mut events_analyzer = init_events_analyzer(compute_average_threshold);
+
+        let interval_ms = 1000;
+        let events = get_listener_events_with_one_ms_latency(0, 0).await;
+        events_analyzer.add_interval_to_events(events);
+        sleep(Duration::from_millis(interval_ms)).await;
+        let events = get_listener_events_with_one_ms_latency(1, 0).await;
+        events_analyzer.add_interval_to_events(events);
+
+        let intervals = events_analyzer.compute_average_intervals().await;
+        let interval_overhead = 10;
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].avg_type, "ListenerEventsMetrics");
+        assert!(
+            intervals[0].avg_value >= Duration::from_millis(interval_ms)
+                && intervals[0].avg_value <= Duration::from_millis(interval_ms + interval_overhead)
+        );
+        assert_eq!(intervals[0].count, 1);
     }
 }
