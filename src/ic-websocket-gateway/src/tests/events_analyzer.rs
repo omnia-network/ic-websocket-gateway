@@ -11,7 +11,8 @@ mod tests {
         events_analyzer::{Events, EventsAnalyzer, EventsCollectionType, EventsReference},
         metrics::{
             canister_poller_metrics::{
-                IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
+                IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
+                PollerEventsMetrics,
             },
             client_connection_handler_metrics::{
                 OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
@@ -133,6 +134,23 @@ mod tests {
             .metrics
             .set_message_relayed();
         Box::new(incoming_canister_message_events)
+    }
+
+    async fn get_poller_events_with_latency(
+        polling_iteration: u64,
+        latency_ms: u64,
+    ) -> Box<dyn Events + Send> {
+        let mut poller_events = PollerEvents::new(
+            Some(EventsReference::Iteration(polling_iteration)),
+            EventsCollectionType::PollerStatus,
+            PollerEventsMetrics::default(),
+        );
+        poller_events.metrics.set_start_polling();
+        poller_events.metrics.set_received_messages();
+        sleep(Duration::from_millis(latency_ms)).await;
+        poller_events.metrics.set_start_relaying_messages();
+        poller_events.metrics.set_finished_relaying_messages();
+        Box::new(poller_events)
     }
 
     #[tokio::test()]
@@ -362,7 +380,7 @@ mod tests {
             }
         }
 
-        let message_nonce = 0;
+        let message_nonce = 1;
         let message_latency_ms = 100;
         let canister_message_collection = vec![
             get_incoming_canister_message_events_with_latency(message_nonce, message_latency_ms)
@@ -378,12 +396,24 @@ mod tests {
             }
         }
 
+        let polling_iteration = 2;
+        let polling_latency_ms = 500;
+        let poller_status_collection =
+            vec![get_poller_events_with_latency(polling_iteration, polling_latency_ms).await];
+        let events_in_poller_status_collection = poller_status_collection.len() as u64;
+        for events in poller_status_collection {
+            let reference = events.get_reference();
+            if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
+                events_analyzer.add_latency_to_collection(&events, &deltas);
+            }
+        }
+
         let latency_overhead = 7;
         let mut latencies = events_analyzer.compute_collections_latencies();
         // sort is only needed to make sure that the test is stable
         latencies.sort_by(|l1, l2| l1.avg_type.cmp(&l2.avg_type));
 
-        assert_eq!(latencies.len(), 2);
+        assert_eq!(latencies.len(), 3);
 
         assert_eq!(latencies[0].avg_type, "CanisterMessage");
         assert!(
@@ -412,5 +442,16 @@ mod tests {
                     )
         );
         assert_eq!(latencies[1].count, compute_average_threshold as usize);
+
+        assert_eq!(latencies[2].avg_type, "PollerStatus");
+        assert!(
+            latencies[2].avg_value
+                >= Duration::from_millis(events_in_poller_status_collection * polling_latency_ms)
+                && latencies[2].avg_value
+                    <= Duration::from_millis(
+                        events_in_poller_status_collection * polling_latency_ms + latency_overhead
+                    )
+        );
+        assert_eq!(latencies[2].count, compute_average_threshold as usize);
     }
 }

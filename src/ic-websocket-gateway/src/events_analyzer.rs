@@ -411,27 +411,6 @@ impl EventsAnalyzer {
                 // inserts the events group type and the corresponding latency of the delta computed from the events group into its correpsonding collection
                 // this will contain all the other latencies computed from the events groups with the same reference and collection type
                 latencies.insert(events_type, latency);
-                // check if all the events groups expected from the collection have been recorded
-                // get the expected events type in the collection
-                if let Some(expected_events_type_in_collection) =
-                    collection_type.get_expected_events_type_in_collection()
-                {
-                    if latencies.has_received_all_events(&expected_events_type_in_collection) {
-                        // if all the events groups expected from the collection have been recorded, compute the total latency of the collection
-                        let total_latency = latencies.sum();
-                        if let Some(aggregated_latencies) =
-                            self.aggregated_latencies_map.get_mut(collection_type)
-                        {
-                            aggregated_latencies.insert(total_latency);
-                        } else {
-                            let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
-                            aggregated_latencies.insert(total_latency);
-                            self.aggregated_latencies_map
-                                .insert(collection_type.to_owned(), aggregated_latencies);
-                        }
-                        latencies.clear();
-                    }
-                }
             } else {
                 let mut latencies = EventsLatencies::default();
                 latencies.insert(events_type, latency);
@@ -445,6 +424,34 @@ impl EventsAnalyzer {
             let collection_latencies = latencies_map;
             self.map_latencies_by_collection_type
                 .insert(collection_type.to_owned(), collection_latencies);
+        }
+
+        // check if all the events groups expected from the collection have been recorded
+        // get the expected events type in the collection
+        let latencies = self
+            .map_latencies_by_collection_type
+            .get_mut(collection_type)
+            .expect("should have been created above")
+            .get_mut(reference)
+            .expect("should have been created above");
+        if let Some(expected_events_type_in_collection) =
+            collection_type.get_expected_events_type_in_collection()
+        {
+            if latencies.has_received_all_events(&expected_events_type_in_collection) {
+                // if all the events groups expected from the collection have been recorded, compute the total latency of the collection
+                let total_latency = latencies.sum();
+                if let Some(aggregated_latencies) =
+                    self.aggregated_latencies_map.get_mut(collection_type)
+                {
+                    aggregated_latencies.insert(total_latency);
+                } else {
+                    let mut aggregated_latencies: BTreeSet<_> = BTreeSet::default();
+                    aggregated_latencies.insert(total_latency);
+                    self.aggregated_latencies_map
+                        .insert(collection_type.to_owned(), aggregated_latencies);
+                }
+                latencies.clear();
+            }
         }
     }
 
