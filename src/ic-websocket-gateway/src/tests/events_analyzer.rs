@@ -217,6 +217,7 @@ mod tests {
         }
 
         let latencies = events_analyzer.compute_collections_latencies();
+        // if the test fails try to slightly increase 'latency_overhead'
         let latency_overhead = 7;
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
@@ -296,6 +297,7 @@ mod tests {
 
         let events_in_collection = 3;
         let latencies = events_analyzer.compute_collections_latencies();
+        // if the test fails try to slightly increase 'latency_overhead'
         let latency_overhead = 7;
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
@@ -358,6 +360,46 @@ mod tests {
     }
 
     #[tokio::test()]
+    async fn should_compute_average_latency_considering_all_complete_collections() {
+        let compute_average_threshold = 1;
+        let mut events_analyzer = init_events_analyzer(compute_average_threshold);
+
+        let latency_ms = 10;
+        let collections_count = 5;
+        for client_id in 0..collections_count {
+            let collection = vec![
+                get_listener_events_with_latency(client_id, latency_ms).await,
+                get_request_connection_setup_events_with_latency(client_id, latency_ms).await,
+                get_connection_establishment_events_with_latency(client_id, latency_ms).await,
+            ];
+            for events in collection {
+                let reference = events.get_reference();
+                if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
+                    events_analyzer.add_latency_to_collection(&events, &deltas);
+                }
+            }
+        }
+
+        // if the test fails try to slightly increase 'latency_overhead'
+        let latency_overhead = 7;
+        let latencies = events_analyzer.compute_collections_latencies();
+        assert_eq!(latencies.len(), 1);
+
+        assert_eq!(latencies[0].avg_type, "NewClientConnection");
+        assert!(
+            latencies[0].avg_value >= Duration::from_millis(3 * latency_ms)
+                && latencies[0].avg_value
+                    <= Duration::from_millis(3 * latency_ms + latency_overhead)
+        );
+        // even if the threshold for computing the average is set to 1, as we received more complete collections at the time when "compute_collections_latencies" is called,
+        // we compute the average total latency over all the complete collections received
+        assert_eq!(latencies[0].count, collections_count as usize);
+
+        let latencies = events_analyzer.compute_collections_latencies();
+        assert_eq!(latencies.len(), 0);
+    }
+
+    #[tokio::test()]
     async fn should_compute_multiple_average_latencies() {
         let compute_average_threshold = 1;
         let mut events_analyzer = init_events_analyzer(compute_average_threshold);
@@ -408,6 +450,7 @@ mod tests {
             }
         }
 
+        // if the test fails try to slightly increase 'latency_overhead'
         let latency_overhead = 7;
         let mut latencies = events_analyzer.compute_collections_latencies();
         // sort is only needed to make sure that the test is stable
@@ -453,5 +496,62 @@ mod tests {
                     )
         );
         assert_eq!(latencies[2].count, compute_average_threshold as usize);
+    }
+
+    #[tokio::test()]
+    async fn should_compute_average_latencies_only_for_complete_collections() {
+        let compute_average_threshold = 1;
+        let mut events_analyzer = init_events_analyzer(compute_average_threshold);
+
+        let client_id = 0;
+        let connection_latency_ms = 10;
+
+        let message_nonce = 1;
+        let message_latency_ms = 100;
+
+        let polling_iteration = 2;
+        let polling_latency_ms = 500;
+
+        for events in vec![
+            // complete CanisterMessage and PollerStatus collections
+            // incomplete NewClientConnection collection
+            get_listener_events_with_latency(client_id, connection_latency_ms).await,
+            get_incoming_canister_message_events_with_latency(message_nonce, message_latency_ms)
+                .await,
+            get_request_connection_setup_events_with_latency(client_id, connection_latency_ms)
+                .await,
+            get_poller_events_with_latency(polling_iteration, polling_latency_ms).await,
+            get_outgoing_canister_message_events_with_latency(message_nonce, message_latency_ms)
+                .await,
+        ] {
+            let reference = events.get_reference();
+            if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
+                events_analyzer.add_latency_to_collection(&events, &deltas);
+            }
+        }
+
+        // if the test fails try to slightly increase 'latency_overhead'
+        let latency_overhead = 7;
+        let mut latencies = events_analyzer.compute_collections_latencies();
+        // sort is only needed to make sure that the test is stable
+        latencies.sort_by(|l1, l2| l1.avg_type.cmp(&l2.avg_type));
+
+        assert_eq!(latencies.len(), 2);
+
+        assert_eq!(latencies[0].avg_type, "CanisterMessage");
+        assert!(
+            latencies[0].avg_value >= Duration::from_millis(2 * message_latency_ms)
+                && latencies[0].avg_value
+                    <= Duration::from_millis(2 * message_latency_ms + latency_overhead)
+        );
+        assert_eq!(latencies[0].count, compute_average_threshold as usize);
+
+        assert_eq!(latencies[1].avg_type, "PollerStatus");
+        assert!(
+            latencies[1].avg_value >= Duration::from_millis(polling_latency_ms)
+                && latencies[1].avg_value
+                    <= Duration::from_millis(polling_latency_ms + latency_overhead)
+        );
+        assert_eq!(latencies[1].count, compute_average_threshold as usize);
     }
 }
