@@ -12,8 +12,8 @@ use crate::{
 use candid::{decode_args, Principal};
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{
-    agent::{replica_api::Envelope, EnvelopeContent},
-    to_request_id, Agent, AgentError,
+    agent::{Envelope, EnvelopeContent},
+    Agent, AgentError,
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
@@ -290,7 +290,7 @@ impl ClientConnectionHandler {
                 self.canister_id.write().await.replace(canister_id);
             } else {
                 return Err(IcWsError::Initialization(String::from(
-                    "first message from client should contain canister id in envelope's content",
+                    "first message from client should contain canister id in envelope's content and should be of Call variant",
                 )));
             }
         }
@@ -362,19 +362,10 @@ impl ClientConnectionHandler {
         serialized_envelope: Vec<u8>,
         canister_id: Principal,
     ) -> Result<(), AgentError> {
-        let envelope: Envelope =
-            serde_cbor::from_slice(&serialized_envelope).map_err(AgentError::InvalidCborData)?;
-        let request_id = to_request_id(&envelope.content)?;
-        if let EnvelopeContent::Call { .. } = *envelope.content {
-            self.agent
-                .transport
-                .call(canister_id, serialized_envelope, request_id)
-                .await?;
-            return Ok(());
-        }
-        Err(AgentError::MessageError(String::from(
-            "Relay of envelope with content of Query or ReadState variant is not implemented",
-        )))
+        self.agent
+            .update_signed(canister_id, serialized_envelope)
+            .await?;
+        return Ok(());
     }
 
     async fn send_connection_state_to_clients_manager(

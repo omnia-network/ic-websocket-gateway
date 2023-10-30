@@ -996,8 +996,8 @@ dependencies = [
 
 [[package]]
 name = "ic-agent"
-version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc#ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc"
+version = "0.29.0"
+source = "git+https://github.com/omnia-network/agent-rs?rev=8c23cfe313aea75ab53cd71353c476002513ad3c#8c23cfe313aea75ab53cd71353c476002513ad3c"
 dependencies = [
  "backoff",
  "candid",
@@ -1006,6 +1006,7 @@ dependencies = [
  "http",
  "http-body",
  "ic-certification",
+ "ic-transport-types",
  "ic-verify-bls-signature",
  "k256",
  "leb128",
@@ -1071,8 +1072,9 @@ dependencies = [
 
 [[package]]
 name = "ic-certification"
-version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc#ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a59dc342d11b2067e19d0f146bdec3674de921303ffc762f114d201ebbe0e68a"
 dependencies = [
  "hex",
  "serde",
@@ -1097,6 +1099,22 @@ version = "0.1.0"
 dependencies = [
  "ic-agent",
  "ring",
+]
+
+[[package]]
+name = "ic-transport-types"
+version = "0.29.0"
+source = "git+https://github.com/omnia-network/agent-rs?rev=8c23cfe313aea75ab53cd71353c476002513ad3c#8c23cfe313aea75ab53cd71353c476002513ad3c"
+dependencies = [
+ "candid",
+ "hex",
+ "ic-certification",
+ "leb128",
+ "serde",
+ "serde_bytes",
+ "serde_repr",
+ "sha2 0.10.8",
+ "thiserror",
 ]
 
 [[package]]
