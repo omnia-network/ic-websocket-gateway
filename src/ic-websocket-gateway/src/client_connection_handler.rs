@@ -12,8 +12,8 @@ use crate::{
 use candid::{decode_args, Principal};
 use futures_util::{stream::SplitSink, SinkExt, StreamExt, TryStreamExt};
 use ic_agent::{
-    agent::{Envelope, EnvelopeContentVariant},
-    Agent,
+    agent::{replica_api::Envelope, EnvelopeContent},
+    to_request_id, Agent, AgentError,
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
@@ -284,41 +284,39 @@ impl ClientConnectionHandler {
         // if the canister_id field is None, it means that the handler hasn't received any envelopes yet from the client
         if self.canister_id.read().await.is_none() {
             // the first envelope should have content of variant Call, which contains canister_id
-            let canister_id = client_request.envelope.content.canister_id().ok_or(
-                // if the content of the first envelope does not contain the canister_id field, the client did not follow the IC WS establishment
-                IcWsError::Initialization(String::from(
+            if let EnvelopeContent::Call { canister_id, .. } = *client_request.envelope.content {
+                // replace the field with the canister_id received in the first envelope
+                // this should not be updated anymore
+                self.canister_id.write().await.replace(canister_id);
+            } else {
+                return Err(IcWsError::Initialization(String::from(
                     "first message from client should contain canister id in envelope's content",
-                )),
-            )?;
-            // replace the field with the canister_id received in the first envelope
-            // this should not be updated anymore
-            self.canister_id.write().await.replace(canister_id);
+                )));
+            }
         }
         // from here on, self.canister_id must not be None
-
         let client_principal = client_request.envelope.content.sender().to_owned();
-        let envelope_arg =
-            client_request
-                .envelope
-                .content
-                .arg()
-                .ok_or(IcWsError::Initialization(String::from(
-                    "first message from client should contain arg in envelope's content",
-                )))?;
-        let (ws_open_arguments,): (CanisterWsOpenArguments,) =
-            decode_args(&envelope_arg).map_err(|e| {
-                IcWsError::Initialization(format!(
-                    "arg field of envelope's content has the wrong type: {:?}",
-                    e.to_string()
-                ))
-            })?;
-        let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
-        // relay the request to the IC
-        self.relay_request_to_ic(client_request).await?;
+        if let EnvelopeContent::Call { arg, .. } = &*client_request.envelope.content {
+            let (ws_open_arguments,): (CanisterWsOpenArguments,) =
+                decode_args(arg).map_err(|e| {
+                    IcWsError::Initialization(format!(
+                        "arg field of envelope's content has the wrong type: {:?}",
+                        e.to_string()
+                    ))
+                })?;
+            let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
-        // consider the IC WS connection as requested
-        Ok(IcWsConnectionState::Requested(client_key))
+            // relay the request to the IC
+            self.relay_request_to_ic(client_request).await?;
+
+            // consider the IC WS connection as requested
+            Ok(IcWsConnectionState::Requested(client_key))
+        } else {
+            Err(IcWsError::Initialization(String::from(
+                "first message from client should contain arg in envelope's content",
+            )))
+        }
     }
 
     /// relays relays the client's request to the IC and then sends the response back to the client via WS
@@ -334,14 +332,13 @@ impl ClientConnectionHandler {
         &self,
         client_request: ClientRequest<'a>,
     ) -> Result<(), IcWsError> {
-        if let EnvelopeContentVariant::Call = client_request.envelope.content.variant() {
+        if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;
 
             let canister_id = self.canister_id.read().await.expect("must be some by now");
 
             // relay the envelope to the IC
-            self.agent
-                .relay_envelope_to_canister(serialized_envelope, canister_id.clone())
+            self.relay_envelope_to_canister(serialized_envelope, canister_id.clone())
                 .await
                 .map_err(|e| IcWsError::Initialization(e.to_string()))?;
 
@@ -358,6 +355,26 @@ impl ClientConnectionHandler {
                 "gateway can only relay envelopes with content of Call variant",
             )))
         }
+    }
+
+    async fn relay_envelope_to_canister(
+        &self,
+        serialized_envelope: Vec<u8>,
+        canister_id: Principal,
+    ) -> Result<(), AgentError> {
+        let envelope: Envelope =
+            serde_cbor::from_slice(&serialized_envelope).map_err(AgentError::InvalidCborData)?;
+        let request_id = to_request_id(&envelope.content)?;
+        if let EnvelopeContent::Call { .. } = *envelope.content {
+            self.agent
+                .transport
+                .call(canister_id, serialized_envelope, request_id)
+                .await?;
+            return Ok(());
+        }
+        Err(AgentError::MessageError(String::from(
+            "Relay of envelope with content of Query or ReadState variant is not implemented",
+        )))
     }
 
     async fn send_connection_state_to_clients_manager(

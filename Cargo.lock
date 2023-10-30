@@ -982,9 +982,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-tls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
+dependencies = [
+ "bytes 1.5.0",
+ "hyper 0.14.27",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+]
+
+[[package]]
 name = "ic-agent"
 version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=7bbf9b65bf7700b030e8f83447f397321fb02dcd#7bbf9b65bf7700b030e8f83447f397321fb02dcd"
+source = "git+https://github.com/omnia-network/agent-rs?rev=ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc#ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc"
 dependencies = [
  "backoff",
  "candid",
@@ -1059,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "ic-certification"
 version = "0.26.1"
-source = "git+https://github.com/omnia-network/agent-rs?rev=7bbf9b65bf7700b030e8f83447f397321fb02dcd#7bbf9b65bf7700b030e8f83447f397321fb02dcd"
+source = "git+https://github.com/omnia-network/agent-rs?rev=ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc#ac91df6686012a64adf2b7e9a21a5a2f3fddf9bc"
 dependencies = [
  "hex",
  "serde",
@@ -1135,6 +1148,7 @@ dependencies = [
  "ic-identity",
  "native-tls",
  "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_bytes",
  "serde_cbor",
@@ -2015,10 +2029,12 @@ dependencies = [
  "http-body",
  "hyper 0.14.27",
  "hyper-rustls",
+ "hyper-tls",
  "ipnet",
  "js-sys",
  "log 0.4.20",
  "mime 0.3.17",
+ "native-tls",
  "once_cell",
  "percent-encoding 2.3.0",
  "pin-project-lite",
@@ -2029,6 +2045,7 @@ dependencies = [
  "serde_urlencoded",
  "system-configuration",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-util",
  "tower-service",
