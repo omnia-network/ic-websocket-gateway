@@ -2,7 +2,7 @@ use crate::{
     canister_methods::{CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
-    gateway_server::GatewaySession,
+    gateway_server::ClientSession,
     messages_demux::get_nonce_from_message,
     metrics::client_connection_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
@@ -66,7 +66,7 @@ pub struct HttpResponsePayload {
 #[derive(Debug, Clone)]
 pub enum IcWsConnectionState {
     /// IC WebSocket connection between client and gateway has been setup
-    Setup(GatewaySession),
+    Setup(ClientSession),
     /// client requested IC WebSocket connection
     Requested(ClientKey),
     /// WebSocket connection between client and WS Gateway closed
@@ -205,10 +205,10 @@ impl ClientConnectionHandler {
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
                                         match self.handle_ic_ws_setup(message).await {
-                                            // if the IC WS connection is successfully established, register state in client manager
+                                            // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
                                                 ic_websocket_setup = true;
-                                                let gateway_session = GatewaySession::new(
+                                                let gateway_session = ClientSession::new(
                                                     self.id,
                                                     client_key, // TODO: determine if this is still needed or we can use client_id instead
                                                     self.canister_id
@@ -233,7 +233,7 @@ impl ClientConnectionHandler {
                                             }
                                             // in case of other errors, we report them and terminate the connection handler task
                                             Err(e) => {
-                                                warn!("{:?}", e);
+                                                warn!("IC WS setup failed. Error: {:?}", e);
                                                 break 'handler_loop;
                                             }
                                             Ok(variant) => error!("handle_ic_ws_setup should not return variant: {:?}", variant)
@@ -241,7 +241,7 @@ impl ClientConnectionHandler {
                                     } else {
                                         // relay the envelope to the IC and the response back to the client
                                         if let Err(e) = self.handle_ws_message(message).await {
-                                            warn!("{:?}", e);
+                                            warn!("Handling of WebSocket message failed. Error: {:?}", e);
                                             break 'handler_loop;
                                         }
                                     }

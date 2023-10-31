@@ -35,7 +35,7 @@ static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
 #[cfg(not(test))] // only compile and run the following block when not running tests
 #[derive(Debug, Clone)]
-pub struct GatewaySession {
+pub struct ClientSession {
     client_id: u64,
     client_key: ClientKey,
     canister_id: Principal,
@@ -46,14 +46,14 @@ pub struct GatewaySession {
 // set properties as public only for tests
 #[cfg(test)] // only compile and run the following block when running tests
 #[derive(Debug, Clone)]
-pub struct GatewaySession {
+pub struct ClientSession {
     pub client_id: u64,
     pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
 }
 
-impl GatewaySession {
+impl ClientSession {
     pub fn new(
         client_id: u64,
         client_key: ClientKey,
@@ -73,7 +73,7 @@ impl GatewaySession {
 pub struct GatewayServer {
     /// agent used to interact with the canisters
     agent: Arc<Agent>,
-    /// gateway address:
+    /// gateway address
     address: String,
     /// sender side of the channel used by the client's connection handler task to communicate the connection state to the main task
     client_connection_handler_tx: Sender<IcWsConnectionState>,
@@ -170,7 +170,7 @@ impl GatewayServer {
                 // check if a client's connection state changed
                 Some(connection_state) = self.recv_from_client_connection_handler() => {
                     // connection state can contain either:
-                    // - the GatewaySession if the connection was successful
+                    // - the ClientSession if the connection was successful
                     // - the client_id if the connection was closed before the client was registered
                     // - a connection error
                     self.state.manage_clients_connections(
@@ -279,7 +279,7 @@ struct GatewayState {
     connected_canisters: HashMap<Principal, Sender<PollerToClientChannelData>>,
     /// maps the client key to the state of the client's session
     /// clients are grouped by the principal of the canister they are connected to
-    client_session_map: HashMap<Principal, HashMap<ClientKey, GatewaySession>>,
+    client_session_map: HashMap<Principal, HashMap<ClientKey, ClientSession>>,
     /// maps the client id to a tuple containing its client key and the principal of the canister it's connected to
     // needed because when a client disconnects, we only know its id but in order to clean the state of the client's session
     // we need to know the client key
@@ -410,7 +410,7 @@ impl GatewayState {
             client_key = %gateway_session.client_key
         )
     )]
-    fn add_client(&mut self, gateway_session: GatewaySession) {
+    fn add_client(&mut self, gateway_session: ClientSession) {
         let client_key = gateway_session.client_key.clone();
         let client_id = gateway_session.client_id;
         let canister_id = gateway_session.canister_id;
