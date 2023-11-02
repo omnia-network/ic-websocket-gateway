@@ -1,34 +1,36 @@
 services:
-    ic_websocket_gateway:
-        build:
-            context: ./
-            dockerfile: Dockerfile
-        image: ic-websocket-gateway
-        container_name: ic-websocket-gateway
-        restart: unless-stopped
-        ports:
-            - ${LISTEN_PORT}:443
-        command:
-            [
-                "--gateway-address",
-                "0.0.0.0:443",
-                "--subnet-url",
-                "${IC_URL}",
-                "--polling-interval",
-                "${POLLING_INTERVAL}",
-                "--tls-certificate-pem-path",
-                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
-                "--tls-certificate-key-pem-path",
-                "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
-            ]
-        environment:
-            - RUST_LOG_FILE=${RUST_LOG_FILE}
-            - RUST_LOG_STDOUT=${RUST_LOG_STDOUT}
-        volumes:
-            - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
-        networks:
-            - ic-ws-gateway-network
+  ic_websocket_gateway:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    image: ic-websocket-gateway
+    container_name: ic-websocket-gateway
+    restart: unless-stopped
+    ports:
+      - ${LISTEN_PORT}:443
+    command:
+      [
+        "--gateway-address",
+        "0.0.0.0:443",
+        "--subnet-url",
+        "${IC_URL}",
+        "--polling-interval",
+        "${POLLING_INTERVAL}",
+        "--min-incoming-interval",
+        "${MIN_INCOMING_INTERVAL}",
+        "--tls-certificate-pem-path",
+        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
+        "--tls-certificate-key-pem-path",
+        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
+      ]
+    environment:
+      - RUST_LOG_FILE=${RUST_LOG_FILE}
+      - RUST_LOG_STDOUT=${RUST_LOG_STDOUT}
+    volumes:
+      - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
+    networks:
+      - ic-ws-gateway-network
 
 networks:
-    ic-ws-gateway-network:
-        name: ic-ws-gateway-network
+  ic-ws-gateway-network:
+    name: ic-ws-gateway-network

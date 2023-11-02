@@ -13,7 +13,7 @@ const pingPongCount = 20;
 let ws: IcWebSocket;
 
 /// jest configuration
-jest.setTimeout(30_000);
+jest.setTimeout(180_000);
 
 /// helpers
 // get the indices of a substring in a string
@@ -53,7 +53,7 @@ describe("WS client", () => {
       canisterId,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
-      // ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
+      ackMessageTimeout: 19_000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
 
     ws.onopen = () => {

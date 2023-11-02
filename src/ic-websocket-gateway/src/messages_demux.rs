@@ -180,22 +180,21 @@ impl MessagesDemux {
                         incoming_canister_message_events,
                     )
                     .await;
-
-                    // TODO: check without panicking
-                    // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
-
-                    *message_nonce.write().await = last_message_nonce + 1;
                 },
                 None => {
                     // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
                     //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                    warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_to_client_message.key, canister_output_message.client_key);
+                    warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_output_message.client_key, canister_to_client_message.key);
                     self.add_message_to_client_queue(
                         &canister_output_message.client_key,
                         (canister_to_client_message, incoming_canister_message_events),
                     )
                 },
             }
+            // TODO: check without panicking
+            // assert_eq!(*message_nonce, last_message_nonce); // check that messages are relayed in increasing order
+
+            *message_nonce.write().await = last_message_nonce + 1;
         }
         Ok(())
     }

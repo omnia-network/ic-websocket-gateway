@@ -28,6 +28,7 @@ mod metrics {
 mod tests {
     pub mod canister_poller;
     pub mod client_connection_handler;
+    pub mod events_analyzer;
 }
 
 #[derive(Debug, StructOpt)]
@@ -42,6 +43,15 @@ struct DeploymentInfo {
 
     #[structopt(long, default_value = "100")]
     polling_interval: u64,
+
+    #[structopt(long, default_value = "100")]
+    /// minimum interval between incoming messages
+    /// if below this threshold, the gateway starts rate liimiting
+    min_incoming_interval: u64,
+
+    #[structopt(long, default_value = "10")]
+    /// threshold after which the metrics analyzer computes the averages of the intervals/latencies
+    compute_averages_threshold: u64,
 
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
@@ -76,7 +86,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let env_filter_file = EnvFilter::builder()
         .with_env_var("RUST_LOG_FILE")
         .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("trace"));
+        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
 
     let file_tracing_layer = tracing_subscriber::fmt::layer()
         .json()
@@ -87,7 +97,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
     let env_filter_stdout = EnvFilter::builder()
         .with_env_var("RUST_LOG_STDOUT")
         .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=info"));
     let stdout_tracing_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking_stdout)
         .pretty()
@@ -114,8 +124,10 @@ async fn main() -> Result<(), String> {
 
     let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
-    let (rate_limiting_channel_tx, rate_limiting_channel_rx): (Sender<f64>, Receiver<f64>) =
-        mpsc::channel(10);
+    let (rate_limiting_channel_tx, rate_limiting_channel_rx): (
+        Sender<Option<f64>>,
+        Receiver<Option<f64>>,
+    ) = mpsc::channel(10);
 
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
@@ -137,7 +149,12 @@ async fn main() -> Result<(), String> {
     };
 
     tokio::spawn(async move {
-        let mut events_analyzer = EventsAnalyzer::new(events_channel_rx, rate_limiting_channel_tx);
+        let mut events_analyzer = EventsAnalyzer::new(
+            events_channel_rx,
+            rate_limiting_channel_tx,
+            deployment_info.min_incoming_interval,
+            deployment_info.compute_averages_threshold,
+        );
         events_analyzer.start_processing().await;
     });
 
