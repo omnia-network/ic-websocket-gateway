@@ -200,47 +200,41 @@ impl GatewayServer {
     #[tracing::instrument(name = "graceful_shutdown", skip_all)]
     async fn graceful_shutdown(
         &mut self,
-        mut _poller_channel_for_completion_rx: Receiver<TerminationInfo>,
+        mut poller_channel_for_completion_rx: Receiver<TerminationInfo>,
     ) {
         info!("Starting graceful shutdown");
         self.token.cancel();
-        // TODO: fix graceful shutdown
-        // loop {
-        //     if let Ok(IcWsConnectionState::Closed((client_key, canister_id))) =
-        //         self.client_connection_handler_rx.try_recv()
-        //     {
-        //         // cleanup client's session from WS Gateway state
-        //         // self.state
-        //         //     .remove_client(client_id, self.agent.clone())
-        //         //     .await;
-        //         // remove client's channel from poller, if it exists and is not finished
-        //         if let Some(poller_channel_for_client_channel_sender_tx) =
-        //             self.state.connected_canisters.get_mut(&canister_id)
-        //         {
-        //             // try sending message to poller task
-        //             if poller_channel_for_client_channel_sender_tx
-        //                 .send(PollerToClientChannelData::ClientDisconnected(client_key))
-        //                 .await
-        //                 .is_err()
-        //             {
-        //                 // if poller task is finished, remove its data from WS Gateway state
-        //                 warn!("Poller task closed but data is still in state");
-        //                 self.state.remove_poller_data(&canister_id)
-        //             }
-        //         }
-        //     }
-        // }
-        // loop {
-        //     if let Ok(TerminationInfo::LastClientDisconnected(canister_id)) =
-        //         poller_channel_for_completion_rx.try_recv()
-        //     {
-        //         self.state.remove_poller_data(&canister_id);
-        //     }
-        //     if self.state.count_connected_pollers() == 0 {
-        //         info!("All pollers data has been removed from the gateway state");
-        //         break;
-        //     }
-        // }
+        loop {
+            if let Ok(IcWsConnectionState::Closed((client_key, canister_id))) =
+                self.client_connection_handler_rx.try_recv()
+            {
+                // remove client's channel from poller, if it exists and is not finished
+                if let Some(poller_channel_for_client_channel_sender_tx) =
+                    self.state.connected_canisters.get_mut(&canister_id)
+                {
+                    // try sending message to poller task
+                    if poller_channel_for_client_channel_sender_tx
+                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .await
+                        .is_err()
+                    {
+                        // if poller task is finished, remove its data from WS Gateway state
+                        warn!("Poller task closed but data is still in state");
+                        self.state.remove_poller_data(&canister_id)
+                    }
+                }
+            }
+            if let Ok(TerminationInfo::LastClientDisconnected(canister_id)) =
+                poller_channel_for_completion_rx.try_recv()
+            {
+                self.state.remove_poller_data(&canister_id);
+            }
+            // TODO: wait for canister to process ws_close call
+            if self.state.count_connected_pollers() == 0 {
+                info!("All pollers data has been removed from the gateway state");
+                break;
+            }
+        }
     }
 
     pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsConnectionState> {
