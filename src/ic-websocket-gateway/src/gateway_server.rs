@@ -229,7 +229,6 @@ impl GatewayServer {
             {
                 self.state.remove_poller_data(&canister_id);
             }
-            // TODO: wait for canister to process ws_close call
             if self.state.count_connected_pollers() == 0 {
                 info!("All pollers data has been removed from the gateway state");
                 break;

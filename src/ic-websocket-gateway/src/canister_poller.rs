@@ -5,13 +5,16 @@ use crate::{
         CanisterWsGetMessagesArguments, ClientKey, WebsocketMessage,
     },
     events_analyzer::{Events, EventsCollectionType, EventsReference},
-    messages_demux::MessagesDemux,
+    messages_demux::{MessagesDemux, CLIENTS_REGISTERED_IN_CDK},
     metrics::canister_poller_metrics::{PollerEvents, PollerEventsMetrics},
 };
 use candid::{decode_one, Principal};
 use ic_agent::Agent;
 use serde_cbor::from_slice;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 use tokio::{
     select,
     sync::{
@@ -151,12 +154,6 @@ impl CanisterPoller {
                                 self.canister_id,
                                 client_key,
                             );
-                            // exit task if last client disconnected
-                            if messages_demux.count_client_channels() == 0 {
-                                info!("Terminating poller task as no clients are connected");
-                                signal_poller_task_termination(&mut poller_channels.poller_to_main, TerminationInfo::LastClientDisconnected(self.canister_id)).await;
-                                break;
-                            }
                         }
                     }
                 }
@@ -201,6 +198,16 @@ impl CanisterPoller {
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
                     get_messages_operation.set(self.get_canister_updates(first_client_key.clone()));
                 },
+            }
+            // exit task if last client disconnected
+            if messages_demux.count_registered_clients() == 0 {
+                info!("Terminating poller task as no clients are connected");
+                signal_poller_task_termination(
+                    &mut poller_channels.poller_to_main,
+                    TerminationInfo::LastClientDisconnected(self.canister_id),
+                )
+                .await;
+                break;
             }
         }
     }
@@ -376,5 +383,6 @@ fn call_ws_close_in_background(agent: Arc<Agent>, canister_id: Principal, client
         } else {
             debug!("Canister closed connection with client");
         }
+        CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
     });
 }
