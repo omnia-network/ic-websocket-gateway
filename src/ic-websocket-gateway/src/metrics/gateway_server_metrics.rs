@@ -48,15 +48,14 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
                 .duration_since(&self.added_client_to_state)
                 // if the poller has already been started, we consider this latency as zero
                 .unwrap_or(Duration::from_millis(0));
-            let time_to_send_client_channel = {
-                if self.started_new_poller.is_set() {
+            let time_to_send_client_channel = self
+                .sent_client_channel_to_poller
+                .duration_since(&self.started_new_poller)
+                // if the poller has already been started, we consider the latency since the client was added to the gateway state
+                .unwrap_or(
                     self.sent_client_channel_to_poller
-                        .duration_since(&self.started_new_poller)?
-                } else {
-                    self.sent_client_channel_to_poller
-                        .duration_since(&self.sent_client_channel_to_poller)?
-                }
-            };
+                        .duration_since(&self.added_client_to_state)?,
+                );
             let latency = self.compute_latency()?;
 
             return Some(Box::new(ConnectionEstablishmentDeltas::new(
@@ -102,8 +101,14 @@ impl ConnectionEstablishmentDeltas {
 impl Deltas for ConnectionEstablishmentDeltas {
     fn display(&self) {
         trace!(
-            "\nreference: {:?}\ntime_to_start_poller: {:?}\ntime_to_send_client_channel: {:?}\nlatency: {:?}",
-            self.reference, self.time_to_start_poller, self.time_to_send_client_channel, self.latency
+            "reference: {:?}
+            time_to_start_poller: {:?}
+            time_to_send_client_channel: {:?}
+            latency: {:?}",
+            self.reference,
+            self.time_to_start_poller,
+            self.time_to_send_client_channel,
+            self.latency
         );
     }
 

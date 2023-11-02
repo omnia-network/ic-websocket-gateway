@@ -18,7 +18,8 @@ license = "MIT"
 
 [workspace.dependencies]
 candid = "0.9.3"
-ic-agent = { git = "https://github.com/omnia-network/agent-rs", rev = "7bbf9b65bf7700b030e8f83447f397321fb02dcd" }
+ic-agent = { git = "https://github.com/dfinity/agent-rs", rev = "7ca38f584da9756878aa635bcb74d18dfffae19c" }
 ic-cdk = "0.10.0"
 ic-cdk-macros = "0.7.1"
 serde = "1.0.176"
+reqwest = "0.11.7"

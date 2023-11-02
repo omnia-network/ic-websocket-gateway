@@ -9,6 +9,8 @@ const {
   TEST_CANISTER_ID,
 } = process.env;
 
+const messagesSentPerClient = 20;
+
 async function connectClient(userContext, events, next) {
   try {
     const startTimestamp = Date.now();
@@ -16,7 +18,7 @@ async function connectClient(userContext, events, next) {
       canisterId: TEST_CANISTER_ID,
       networkUrl: IC_URL,
       identity: generateRandomIdentity(),
-      // ackMessageTimeout: 4_000, // the ack interval is set to 2 seconds on the CDK and the keep alive timeout is set to 1 second
+      ackMessageTimeout: 19_000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
 
     await new Promise((resolve, reject) => {
@@ -55,7 +57,7 @@ async function sendMessages(userContext, events, next) {
 
       ws.onmessage = (event) => {
         messageCounter++;
-        if (messageCounter === 5) {
+        if (messageCounter === messagesSentPerClient) {
           // close the test after the last message
           return resolve();
         }

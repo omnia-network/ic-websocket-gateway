@@ -129,7 +129,7 @@ impl GatewayServer {
     pub fn start_accepting_incoming_connections(
         &self,
         tls_config: Option<TlsConfig>,
-        rate_limiting_channel_rx: Receiver<f64>,
+        rate_limiting_channel_rx: Receiver<Option<f64>>,
     ) {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
@@ -406,7 +406,8 @@ impl GatewayState {
 
     #[tracing::instrument(name = "manage_clients_state", skip_all,
         fields(
-            client_id = gateway_session.client_id
+            client_id = gateway_session.client_id,
+            client_key = %gateway_session.client_key
         )
     )]
     fn add_client(&mut self, gateway_session: GatewaySession) {

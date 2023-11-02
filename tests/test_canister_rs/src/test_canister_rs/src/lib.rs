@@ -30,8 +30,11 @@ fn init(gateway_principal: Option<String>) {
         } else {
             GATEWAY_PRINCIPAL.to_string()
         },
-        // send_ack_interval_ms: 2_000,
-        // keep_alive_timeout_ms: 1_000,
+        send_ack_interval_ms: 10_000,
+        keep_alive_timeout_ms: 9_000,
+        // 30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
+        // as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
+        max_number_of_returned_messages: 30,
         ..Default::default()
     };
 
