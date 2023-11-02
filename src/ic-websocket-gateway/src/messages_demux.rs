@@ -49,8 +49,8 @@ impl MessagesDemux {
         self.remove_client_message_queue(client_key);
     }
 
-    pub fn client_channels(&self) -> Vec<&Sender<IcWsConnectionUpdate>> {
-        self.client_channels.values().collect()
+    pub fn client_channels(&self) -> &HashMap<ClientKey, Sender<IcWsConnectionUpdate>> {
+        &self.client_channels
     }
 
     pub fn add_client_channel(

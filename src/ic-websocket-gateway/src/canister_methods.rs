@@ -8,6 +8,8 @@ use std::fmt;
 
 pub type ClientPrincipal = Principal;
 
+pub type ClientId = u64;
+
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]
 pub struct ClientKey {
     client_principal: ClientPrincipal,

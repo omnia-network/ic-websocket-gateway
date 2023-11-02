@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::{CanisterWsOpenArguments, ClientKey},
+    canister_methods::{CanisterWsOpenArguments, ClientId, ClientKey},
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     gateway_server::ClientSession,
@@ -70,7 +70,7 @@ pub enum IcWsConnectionState {
     /// client requested IC WebSocket connection
     Requested(ClientKey),
     /// WebSocket connection between client and WS Gateway closed
-    Closed(u64),
+    Closed((ClientKey, Principal)),
 }
 
 /// possible errors that can occur during a IC WebSocket connection
@@ -83,7 +83,8 @@ pub enum IcWsError {
 }
 
 pub struct ClientConnectionHandler {
-    id: u64,
+    id: ClientId,
+    key: Option<ClientKey>,
     agent: Arc<Agent>,
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
@@ -94,7 +95,7 @@ pub struct ClientConnectionHandler {
 
 impl ClientConnectionHandler {
     pub fn new(
-        id: u64,
+        id: ClientId,
         agent: Arc<Agent>,
         client_connection_handler_tx: Sender<IcWsConnectionState>,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
@@ -102,6 +103,7 @@ impl ClientConnectionHandler {
     ) -> Self {
         Self {
             id,
+            key: None,
             agent,
             client_connection_handler_tx,
             events_channel_tx,
@@ -110,7 +112,7 @@ impl ClientConnectionHandler {
         }
     }
 
-    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&self, stream: S) {
+    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&mut self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let mut request_connection_setup_events = RequestConnectionSetupEvents::new(
@@ -146,7 +148,16 @@ impl ClientConnectionHandler {
                         // waits for the token to be cancelled
                         _ = &mut wait_for_cancellation => {
                             self.send_connection_state_to_clients_manager(
-                                IcWsConnectionState::Closed(self.id)
+                                IcWsConnectionState::Closed(
+                                    (
+                                        self.key.clone().expect("must be some by now"),
+                                        self.canister_id
+                                            .read()
+                                            .await
+                                            .expect("must be some by now")
+                                            .clone()
+                                    )
+                                )
                             )
                             .await;
                             // close the WebSocket connection
@@ -195,9 +206,18 @@ impl ClientConnectionHandler {
                                     // check if the WebSocket connection is closed
                                     if message.is_close() {
                                         // let the main task know that it should remove the client's session from the WS Gateway state
-                                        self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(
-                                            self.id,
-                                        ))
+                                        self.send_connection_state_to_clients_manager(
+                                            IcWsConnectionState::Closed(
+                                            (
+                                                self.key.clone().expect("must be some by now"),
+                                                self.canister_id
+                                                    .read()
+                                                    .await
+                                                    .expect("must be some by now")
+                                                    .clone()
+                                                ),
+                                            )
+                                        )
                                         .await;
                                         debug!("Terminating client connection handler task due to client disconnection");
                                         break 'handler_loop;
@@ -208,6 +228,7 @@ impl ClientConnectionHandler {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
                                                 ic_websocket_setup = true;
+                                                self.key = Some(client_key.clone());
                                                 let gateway_session = ClientSession::new(
                                                     self.id,
                                                     client_key, // TODO: determine if this is still needed or we can use client_id instead
@@ -251,16 +272,38 @@ impl ClientConnectionHandler {
                                 // just to be sure, send the cleanup message again
                                 // TODO: figure out if this is necessary or can be ignored
                                 Ok(None) => {
-                                    self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
-                                        .await;
+                                    self.send_connection_state_to_clients_manager(
+                                        IcWsConnectionState::Closed(
+                                            (
+                                                self.key.clone().expect("must be some by now"),
+                                                self.canister_id
+                                                    .read()
+                                                    .await
+                                                    .expect("must be some by now")
+                                                    .clone()
+                                            )
+                                        )
+                                    )
+                                    .await;
                                     warn!("Client WebSocket connection already closed");
                                     break 'handler_loop;
                                 },
                                 // the client's still needs to be cleaned up so it is necessary to return the client id
                                 Err(e) => {
                                     // let the main task know that it should remove the client's session from the WS Gateway state
-                                    self.send_connection_state_to_clients_manager(IcWsConnectionState::Closed(self.id))
-                                        .await;
+                                    self.send_connection_state_to_clients_manager(
+                                        IcWsConnectionState::Closed(
+                                            (
+                                                self.key.clone().expect("must be some by now"),
+                                                self.canister_id
+                                                    .read()
+                                                    .await
+                                                    .expect("must be some by now")
+                                                    .clone()
+                                            )
+                                        )
+                                    )
+                                    .await;
                                     warn!("Client WebSocket connection error: {:?}", e);
                                     break 'handler_loop;
                                 }
