@@ -92,7 +92,7 @@ impl WsListener {
         tokio::pin!(wait_for_cancellation);
 
         let mut limiting_rate: f64 = 0.0;
-        let timeout_duration = Duration::from_secs(1);
+        let tls_timeout_duration = Duration::from_secs(5);
         loop {
             select! {
                 // bias select! to check token cancellation first
@@ -130,7 +130,8 @@ impl WsListener {
 
                         let stream = match self.tls_acceptor {
                             Some(ref acceptor) => {
-                                match timeout(timeout_duration, acceptor.accept(stream)).await {
+                                // TODO: accept in a separate task as the handshake might block the WS listener for multiple seconds
+                                match timeout(tls_timeout_duration, acceptor.accept(stream)).await {
                                     Ok(Ok(tls_stream)) => {
                                         debug!("TLS handshake successful");
                                         listener_events.metrics.set_accepted_with_tls();
