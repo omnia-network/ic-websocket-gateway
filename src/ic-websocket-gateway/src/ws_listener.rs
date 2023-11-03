@@ -118,6 +118,8 @@ impl WsListener {
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     if !is_in_rate_limit(limiting_rate) {
                         let current_client_id = self.next_client_id;
+                        self.next_client_id += 1;
+
                         let mut listener_events = ListenerEvents::new(Some(EventsReference::ClientId(current_client_id)), EventsCollectionType::NewClientConnection, ListenerEventsMetrics::default());
                         listener_events.metrics.set_received_request();
                         let span = span!(
@@ -154,7 +156,6 @@ impl WsListener {
                         };
 
                         self.start_connection_handler(stream, current_client_id, child_token.clone(), span.clone());
-                        self.next_client_id += 1;
 
                         listener_events.metrics.set_started_handler();
                         self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped")
