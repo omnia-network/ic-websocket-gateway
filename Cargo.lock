@@ -997,7 +997,7 @@ dependencies = [
 [[package]]
 name = "ic-agent"
 version = "0.29.0"
-source = "git+https://github.com/omnia-network/agent-rs?rev=8c23cfe313aea75ab53cd71353c476002513ad3c#8c23cfe313aea75ab53cd71353c476002513ad3c"
+source = "git+https://github.com/dfinity/agent-rs?rev=7ca38f584da9756878aa635bcb74d18dfffae19c#7ca38f584da9756878aa635bcb74d18dfffae19c"
 dependencies = [
  "backoff",
  "candid",
@@ -1104,7 +1104,7 @@ dependencies = [
 [[package]]
 name = "ic-transport-types"
 version = "0.29.0"
-source = "git+https://github.com/omnia-network/agent-rs?rev=8c23cfe313aea75ab53cd71353c476002513ad3c#8c23cfe313aea75ab53cd71353c476002513ad3c"
+source = "git+https://github.com/dfinity/agent-rs?rev=7ca38f584da9756878aa635bcb74d18dfffae19c#7ca38f584da9756878aa635bcb74d18dfffae19c"
 dependencies = [
  "candid",
  "hex",
@@ -1155,7 +1155,7 @@ checksum = "576c539151d4769fb4d1a0c25c4108dd18facd04c5695b02cf2d226ab4e43aa5"
 
 [[package]]
 name = "ic_websocket_gateway"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "async-trait",
  "candid",
