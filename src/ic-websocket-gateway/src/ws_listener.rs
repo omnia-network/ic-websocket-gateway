@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Instrument, Level, Span};
 
 /// Possible TCP streams.
-enum CustomStream {
+pub enum CustomStream {
     Tcp(TcpStream),
     TcpWithTls(TlsStream<TcpStream>),
 }
@@ -101,7 +101,6 @@ impl WsListener {
         ) = mpsc::channel(1000);
 
         let mut limiting_rate: f64 = 0.0;
-        let tls_timeout_duration = Duration::from_secs(10);
         loop {
             select! {
                 // bias select! to check token cancellation first
@@ -126,53 +125,14 @@ impl WsListener {
                 }
                 Ok((stream, client_addr)) = self.listener.accept() => {
                     if !is_in_rate_limit(limiting_rate) {
-                        let current_client_id = self.next_client_id;
+                        accept_connection(
+                            self.next_client_id,
+                            client_addr,
+                            stream,
+                            self.tls_acceptor.clone(),
+                            tls_acceptor_tx.clone()
+                        );
                         self.next_client_id += 1;
-
-                        let tls_acceptor = self.tls_acceptor.clone();
-                        let tls_acceptor_tx_cl = tls_acceptor_tx.clone();
-
-                        tokio::spawn(async move {
-                            let mut listener_events = ListenerEvents::new(
-                                Some(EventsReference::ClientId(current_client_id)),
-                                EventsCollectionType::NewClientConnection,
-                                ListenerEventsMetrics::default(),
-                            );
-                            listener_events.metrics.set_received_request();
-
-                            let span = span!(
-                                Level::INFO,
-                                "handle_client_connection",
-                                client_addr = ?client_addr,
-                                client_id = current_client_id
-                            );
-                            let _guard = span.enter();
-
-                            let res = match tls_acceptor {
-                                Some(ref acceptor) => {
-                                    match timeout(tls_timeout_duration, acceptor.accept(stream)).await {
-                                        Ok(Ok(tls_stream)) => {
-                                            debug!("TLS handshake successful");
-                                            listener_events.metrics.set_accepted_with_tls();
-                                            Ok((current_client_id, CustomStream::TcpWithTls(tls_stream), listener_events, span.clone()))
-                                        },
-                                        Ok(Err(e)) => {
-                                            Err(format!("TLS handshake failed: {:?}", e))
-
-                                        },
-                                        Err(e) => {
-                                            Err(format!("Accepting TLS connection timed out: {:?}", e))
-
-                                        }
-                                    }
-                                },
-                                None => {
-                                    listener_events.metrics.set_accepted_without_tls();
-                                    Ok((current_client_id, CustomStream::Tcp(stream), listener_events, span.clone()))
-                                },
-                            };
-                            tls_acceptor_tx_cl.send(res).await.expect("ws listener's side of the channel dropped");
-                        });
                     } else {
                         warn!("Ignoring incoming connection due to rate limiting policy");
                     }
@@ -241,4 +201,61 @@ fn is_in_rate_limit(limiting_rate: f64) -> bool {
     let random_value: f64 = rng.gen(); // generate a random f64 between 0 and 1
 
     random_value < limiting_rate
+}
+
+pub fn accept_connection(
+    current_client_id: u64,
+    client_addr: std::net::SocketAddr,
+    stream: TcpStream,
+    tls_acceptor: Option<TlsAcceptor>,
+    tls_acceptor_tx: Sender<Result<(u64, CustomStream, ListenerEvents, Span), String>>,
+) {
+    tokio::spawn(async move {
+        let mut listener_events = ListenerEvents::new(
+            Some(EventsReference::ClientId(current_client_id)),
+            EventsCollectionType::NewClientConnection,
+            ListenerEventsMetrics::default(),
+        );
+        listener_events.metrics.set_received_request();
+
+        let span = span!(
+            Level::INFO,
+            "handle_client_connection",
+            client_addr = ?client_addr,
+            client_id = current_client_id
+        );
+        let _guard = span.enter();
+
+        let res = match tls_acceptor {
+            Some(ref acceptor) => {
+                match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
+                    Ok(Ok(tls_stream)) => {
+                        debug!("TLS handshake successful");
+                        listener_events.metrics.set_accepted_with_tls();
+                        Ok((
+                            current_client_id,
+                            CustomStream::TcpWithTls(tls_stream),
+                            listener_events,
+                            span.clone(),
+                        ))
+                    },
+                    Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
+                    Err(e) => Err(format!("Accepting TLS connection timed out: {:?}", e)),
+                }
+            },
+            None => {
+                listener_events.metrics.set_accepted_without_tls();
+                Ok((
+                    current_client_id,
+                    CustomStream::Tcp(stream),
+                    listener_events,
+                    span.clone(),
+                ))
+            },
+        };
+        tls_acceptor_tx
+            .send(res)
+            .await
+            .expect("ws listener's side of the channel dropped");
+    });
 }
