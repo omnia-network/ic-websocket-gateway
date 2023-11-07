@@ -1,9 +1,6 @@
 services:
   ic_websocket_gateway:
-    build:
-      context: ./
-      dockerfile: Dockerfile
-    image: ic-websocket-gateway
+    image: omniadevs/ic-websocket-gateway:latest
     container_name: ic-websocket-gateway
     restart: unless-stopped
     ports:
