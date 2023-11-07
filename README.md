@@ -43,6 +43,10 @@ There are some command line arguments that you can set when running the gateway:
 
 A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](./docker-compose.yml) file to run the gateway. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
 
+A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway).
+
+Steps to run the gateway with Docker:
+
 1. Set the environment variables:
 
     ```
