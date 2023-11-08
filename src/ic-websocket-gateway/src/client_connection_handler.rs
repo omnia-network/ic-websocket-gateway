@@ -1,7 +1,7 @@
 use crate::{
     canister_methods::{CanisterWsOpenArguments, ClientId, ClientKey},
     canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    events_analyzer::{Events, EventsCollectionType, EventsReference, MessageReference},
     gateway_server::ClientSession,
     messages_demux::get_nonce_from_message,
     metrics::client_connection_handler_metrics::{
@@ -172,8 +172,15 @@ impl ClientConnectionHandler {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
                                 IcWsConnectionUpdate::Message(canister_message) => {
-                                    let message_nonce = get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted");
-                                    let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageNonce(message_nonce)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
+                                    let message_key = MessageReference::new(
+                                        self.canister_id
+                                            .read()
+                                            .await
+                                            .expect("must be some by now")
+                                            .clone(),
+                                        get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted")
+                                    );
+                                    let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageReference(message_key)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
                                     outgoing_canister_message_events.metrics.set_received_canister_message();
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {

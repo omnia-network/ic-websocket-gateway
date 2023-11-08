@@ -4,7 +4,7 @@ use crate::{
         CanisterServiceMessage, CanisterToClientMessage, CanisterWsCloseArguments,
         CanisterWsGetMessagesArguments, ClientKey, WebsocketMessage,
     },
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    events_analyzer::{Events, EventsCollectionType, EventsReference, IterationReference},
     messages_demux::{MessagesDemux, CLIENTS_REGISTERED_IN_CDK},
     metrics::canister_poller_metrics::{PollerEvents, PollerEventsMetrics},
 };
@@ -121,7 +121,8 @@ impl CanisterPoller {
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) {
         info!("Started runnning canister poller");
-        let mut messages_demux = MessagesDemux::new(poller_channels.poller_to_analyzer.clone());
+        let mut messages_demux =
+            MessagesDemux::new(poller_channels.poller_to_analyzer.clone(), self.canister_id);
         // the channel used to send updates to the first client is passed as an argument to the poller
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
         // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
@@ -216,10 +217,10 @@ impl CanisterPoller {
         &self,
         first_client_key: ClientKey,
     ) -> Option<CanisterGetMessagesWithEvents> {
+        let iteration_key =
+            IterationReference::new(self.canister_id, *self.polling_iteration.read().await);
         let mut poller_events = PollerEvents::new(
-            Some(EventsReference::Iteration(
-                *self.polling_iteration.read().await,
-            )),
+            Some(EventsReference::IterationReference(iteration_key)),
             EventsCollectionType::PollerStatus,
             PollerEventsMetrics::default(),
         );

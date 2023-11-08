@@ -43,7 +43,7 @@ mod tests {
     }
 
     fn init_messages_demux(analyzer_channel_tx: Sender<Box<dyn Events + Send>>) -> MessagesDemux {
-        MessagesDemux::new(analyzer_channel_tx)
+        MessagesDemux::new(analyzer_channel_tx, Principal::anonymous())
     }
 
     fn cbor_serialize<T: Serialize>(m: T) -> Vec<u8> {

@@ -6,13 +6,16 @@ use std::{
     },
 };
 
+use candid::Principal;
 use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
     canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
     canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{Events, EventsCollectionType, EventsImpl, EventsReference},
+    events_analyzer::{
+        Events, EventsCollectionType, EventsImpl, EventsReference, MessageReference,
+    },
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
     },
@@ -22,6 +25,7 @@ use crate::{
 pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 
 pub struct MessagesDemux {
+    canister_id: Principal,
     /// channels used to communicate with the connection handler task of the client identified by the client key
     client_channels: HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
     clients_message_queues: HashMap<
@@ -36,7 +40,10 @@ pub struct MessagesDemux {
 }
 
 impl MessagesDemux {
-    pub fn new(analyzer_channel_tx: Sender<Box<dyn Events + Send>>) -> Self {
+    pub fn new(
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        canister_id: Principal,
+    ) -> Self {
         // queues where the poller temporarily stores messages received from the canister before a client is registered
         // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
         let clients_message_queues: HashMap<
@@ -48,6 +55,7 @@ impl MessagesDemux {
         > = HashMap::new();
 
         Self {
+            canister_id,
             client_channels: HashMap::new(),
             clients_message_queues,
             recently_removed_clients: HashSet::new(),
@@ -177,8 +185,9 @@ impl MessagesDemux {
                 .set_start_relaying_message();
 
             let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+            let message_key = MessageReference::new(self.canister_id, last_message_nonce.clone());
             incoming_canister_message_events.reference =
-                Some(EventsReference::MessageNonce(last_message_nonce));
+                Some(EventsReference::MessageReference(message_key));
             match self
                 .client_channels
                 .get(&canister_output_message.client_key)

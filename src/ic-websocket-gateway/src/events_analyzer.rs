@@ -1,3 +1,4 @@
+use crate::canister_methods::ClientId;
 use crate::metrics::canister_poller_metrics::{
     IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
 };
@@ -6,6 +7,7 @@ use crate::metrics::client_connection_handler_metrics::{
 };
 use crate::metrics::gateway_server_metrics::ConnectionEstablishmentEventsMetrics;
 use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
+use candid::Principal;
 use std::any::{type_name, Any};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
@@ -20,6 +22,28 @@ use tracing::{error, info, warn};
 
 /// name of the struct implementing EventsMetrics
 pub type EventsType = String;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    principal: Principal,
+    nonce: u64,
+}
+
+impl Reference {
+    pub fn new(principal: Principal, nonce: u64) -> Self {
+        Self { principal, nonce }
+    }
+}
+
+impl fmt::Display for Reference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}_{}", self.principal, self.nonce)
+    }
+}
+
+pub type MessageReference = Reference;
+
+pub type IterationReference = Reference;
 
 /// trait implemented by the structs containing the relevant events of each component
 pub trait Events: Debug {
@@ -153,25 +177,25 @@ impl TimeableEvent {
     }
 }
 
-// TODO: make sure that iterations from different pollers are not grouped together (same for messages from different canisters)
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// reference used to identify an events group
 pub enum EventsReference {
     /// reference of an events group related to an incoming or outgoing message
-    MessageNonce(u64),
+    MessageReference(MessageReference),
     /// reference of an events group related to a client connection
-    ClientId(u64),
+    // cannot use ClientKey as it is not known by 'ws_listener'
+    ClientId(ClientId),
     /// reference of an events group related to a poller
-    Iteration(u64),
+    IterationReference(IterationReference),
 }
 
 impl EventsReference {
     /// returns the value wrappd by the enum variant
     fn get_inner_value(&self) -> Option<&dyn Any> {
         match self {
-            Self::MessageNonce(nonce) => Some(nonce as &dyn Any),
+            Self::MessageReference(nonce) => Some(nonce as &dyn Any),
             Self::ClientId(id) => Some(id as &dyn Any),
-            Self::Iteration(id) => Some(id as &dyn Any),
+            Self::IterationReference(id) => Some(id as &dyn Any),
         }
     }
 }
