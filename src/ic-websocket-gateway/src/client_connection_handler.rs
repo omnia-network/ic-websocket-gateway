@@ -224,12 +224,12 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        match self.handle_ic_ws_setup(message).await {
+                                        match self.inspect_ic_ws_setup_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
                                                 ic_websocket_setup = true;
                                                 self.key = Some(client_key.clone());
-                                                let gateway_session = ClientSession::new(
+                                                let client_session = ClientSession::new(
                                                     self.id,
                                                     client_key, // TODO: determine if this is still needed or we can use client_id instead
                                                     self.canister_id
@@ -240,9 +240,17 @@ impl ClientConnectionHandler {
                                                     message_for_client_tx.clone(),
                                                 );
                                                 self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
-                                                    gateway_session,
+                                                    client_session,
                                                 ))
                                                 .await;
+
+                                                // relay the request to the IC
+                                                // done it after sending client session to gateway server so that it has time to start a new poller
+                                                // or send the client channel to an existing one
+                                                if let Err(e) = self.relay_call_request_to_ic(message).await {
+                                                    warn!("Could not relay request to IC. Error: {:?}", e);
+                                                }
+
                                                 debug!("Created new client session");
                                                 request_connection_setup_events
                                                     .metrics
@@ -319,7 +327,7 @@ impl ClientConnectionHandler {
         }
     }
 
-    async fn handle_ic_ws_setup(
+    async fn inspect_ic_ws_setup_message(
         &self,
         ws_message: Message,
     ) -> Result<IcWsConnectionState, IcWsError> {
@@ -350,9 +358,6 @@ impl ClientConnectionHandler {
                 })?;
             let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
-            // relay the request to the IC
-            self.relay_request_to_ic(client_request).await?;
-
             // consider the IC WS connection as requested
             Ok(IcWsConnectionState::Requested(client_key))
         } else {
@@ -365,16 +370,13 @@ impl ClientConnectionHandler {
     /// relays relays the client's request to the IC and then sends the response back to the client via WS
     /// the caller does not need to check the state fo the response, it just relays the messages back and forth
     async fn handle_ws_message(&self, message: Message) -> Result<(), IcWsError> {
-        let client_request = get_client_request(message)?;
-        self.relay_request_to_ic(client_request).await?;
+        self.relay_call_request_to_ic(message).await?;
         Ok(())
     }
 
     /// relays the client's request to the IC only if the content of the envelope is of the Call variant
-    async fn relay_request_to_ic<'a>(
-        &self,
-        client_request: ClientRequest<'a>,
-    ) -> Result<(), IcWsError> {
+    async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+        let client_request = get_client_request(message)?;
         if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;
 

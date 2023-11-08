@@ -37,7 +37,7 @@ pub struct WsListener {
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
-    // needed to know which gateway_session to delete in case of error or WS closed
+    // needed to know which client_session to delete in case of error or WS closed
     next_client_id: u64,
 }
 
