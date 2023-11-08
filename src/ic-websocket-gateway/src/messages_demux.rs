@@ -1,4 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, error, trace, warn};
@@ -11,6 +17,9 @@ use crate::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
     },
 };
+
+/// number of clients registered in the CDK
+pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 
 pub struct MessagesDemux {
     /// channels used to communicate with the connection handler task of the client identified by the client key
@@ -49,8 +58,8 @@ impl MessagesDemux {
         self.remove_client_message_queue(client_key);
     }
 
-    pub fn client_channels(&self) -> Vec<&Sender<IcWsConnectionUpdate>> {
-        self.client_channels.values().collect()
+    pub fn client_channels(&self) -> &HashMap<ClientKey, Sender<IcWsConnectionUpdate>> {
+        &self.client_channels
     }
 
     pub fn add_client_channel(
@@ -59,6 +68,7 @@ impl MessagesDemux {
         client_channel: Sender<IcWsConnectionUpdate>,
     ) {
         debug!("Added new channel to poller for client: {:?}", client_key);
+        CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         self.client_channels
             .insert(client_key.clone(), client_channel);
     }
@@ -71,9 +81,9 @@ impl MessagesDemux {
         self.client_channels.remove(client_key);
     }
 
-    pub fn count_client_channels(&self) -> usize {
-        let count = self.client_channels.len();
-        debug!("{} clients connected to poller", count);
+    pub fn count_registered_clients(&self) -> usize {
+        let count = CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst);
+        trace!("{} clients connected to poller", count);
         count
     }
 

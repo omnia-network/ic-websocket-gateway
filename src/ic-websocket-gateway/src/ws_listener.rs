@@ -164,7 +164,7 @@ impl WsListener {
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
-                let client_connection_handler = ClientConnectionHandler::new(
+                let mut client_connection_handler = ClientConnectionHandler::new(
                     client_id,
                     agent,
                     client_connection_handler_tx,

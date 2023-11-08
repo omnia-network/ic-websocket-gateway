@@ -1,6 +1,6 @@
 [package]
 name = "ic_websocket_gateway"
-version = "1.0.4"
+version = "1.0.5"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true

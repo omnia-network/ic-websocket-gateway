@@ -16,7 +16,7 @@
 //     use crate::client_connection_handler::IcWsError;
 //     use crate::client_connection_handler::WsConnectionState;
 //     use crate::create_data_dir;
-//     use crate::gateway_server::GatewaySession;
+//     use crate::gateway_server::ClientSession;
 //     use crate::GatewayServer;
 
 //     fn get_mock_websocket_client(addr: &str) -> Client<TcpStream> {
@@ -286,7 +286,7 @@
 //         let expected_nonce = 0 as u64;
 
 //         let ws_connection_state = res.expect("should not be None");
-//         if let WsConnectionState::Established(GatewaySession {
+//         if let WsConnectionState::Established(ClientSession {
 //             client_id,
 //             client_principal,
 //             canister_id,
