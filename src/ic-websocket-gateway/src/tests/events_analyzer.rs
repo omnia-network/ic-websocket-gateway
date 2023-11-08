@@ -87,7 +87,7 @@ mod tests {
         );
         connection_establishment_events
             .metrics
-            .set_added_client_to_state();
+            .set_received_client_session();
         connection_establishment_events
             .metrics
             .set_started_new_poller();
