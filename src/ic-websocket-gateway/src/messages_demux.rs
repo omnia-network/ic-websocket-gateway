@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -31,6 +31,7 @@ pub struct MessagesDemux {
             EventsImpl<IncomingCanisterMessageEventsMetrics>,
         )>,
     >,
+    recently_removed_clients: HashSet<ClientKey>,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
 }
 
@@ -49,6 +50,7 @@ impl MessagesDemux {
         Self {
             client_channels: HashMap::new(),
             clients_message_queues,
+            recently_removed_clients: HashSet::new(),
             analyzer_channel_tx,
         }
     }
@@ -56,6 +58,8 @@ impl MessagesDemux {
     pub fn remove_client_state(&mut self, client_key: &ClientKey) {
         self.remove_client_channel(client_key);
         self.remove_client_message_queue(client_key);
+        // TODO: forget client keys after a while
+        self.recently_removed_clients.insert(client_key.to_owned());
     }
 
     pub fn client_channels(&self) -> &HashMap<ClientKey, Sender<IcWsConnectionUpdate>> {
@@ -192,13 +196,19 @@ impl MessagesDemux {
                     .await;
                 },
                 None => {
-                    // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-                    //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                    warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_output_message.client_key, canister_to_client_message.key);
-                    self.add_message_to_client_queue(
-                        &canister_output_message.client_key,
-                        (canister_to_client_message, incoming_canister_message_events),
-                    )
+                    // distinguish the case in which there is no client channel because the client's session hasn't been registered (yet)
+                    // from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+                    if !self
+                        .recently_removed_clients
+                        .contains(&canister_output_message.client_key)
+                    {
+                        // if the client wasn't previously removed, it hasn't connected yet and therefore the message should be added to the queue
+                        warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_output_message.client_key, canister_to_client_message.key);
+                        self.add_message_to_client_queue(
+                            &canister_output_message.client_key,
+                            (canister_to_client_message, incoming_canister_message_events),
+                        )
+                    }
                 },
             }
             // TODO: check without panicking
