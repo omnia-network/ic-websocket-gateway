@@ -158,10 +158,6 @@ impl GatewayServer {
             select! {
                 // check if a client's connection state changed
                 Some(connection_state) = self.recv_from_client_connection_handler() => {
-                    // connection state can contain either:
-                    // - the ClientSession if the connection was successful
-                    // - the client_id if the connection was closed before the client was registered
-                    // - a connection error
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
