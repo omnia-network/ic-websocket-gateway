@@ -4,7 +4,7 @@ use crate::{
         CanisterServiceMessage, CanisterToClientMessage, CanisterWsCloseArguments,
         CanisterWsGetMessagesArguments, ClientKey, WebsocketMessage,
     },
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    events_analyzer::{Events, EventsCollectionType, EventsReference, IterationReference},
     messages_demux::{MessagesDemux, CLIENTS_REGISTERED_IN_CDK},
     metrics::canister_poller_metrics::{PollerEvents, PollerEventsMetrics},
 };
@@ -121,17 +121,18 @@ impl CanisterPoller {
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
     ) {
         info!("Started runnning canister poller");
-        let mut messages_demux = MessagesDemux::new(poller_channels.poller_to_analyzer.clone());
+        let mut messages_demux =
+            MessagesDemux::new(poller_channels.poller_to_analyzer.clone(), self.canister_id);
         // the channel used to send updates to the first client is passed as an argument to the poller
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
         // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
         // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
         messages_demux.add_client_channel(first_client_key.clone(), message_for_client_tx);
 
-        let get_messages_operation = self.get_canister_updates(first_client_key.clone());
-        // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_messages_operation is continued
+        let get_canister_updates = self.get_canister_updates(first_client_key.clone());
+        // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_canister_updates is continued
         // instead of issuing a new call to get_canister_updates
-        tokio::pin!(get_messages_operation);
+        tokio::pin!(get_canister_updates);
 
         'poller_loop: loop {
             select! {
@@ -158,7 +159,7 @@ impl CanisterPoller {
                     }
                 }
                 // poll canister for updates across multiple select! iterations
-                res = &mut get_messages_operation => {
+                res = &mut get_canister_updates => {
                     // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
                     // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
                     messages_demux.process_queues().await;
@@ -196,7 +197,7 @@ impl CanisterPoller {
                     *self.polling_iteration.write().await += 1;
 
                     // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-                    get_messages_operation.set(self.get_canister_updates(first_client_key.clone()));
+                    get_canister_updates.set(self.get_canister_updates(first_client_key.clone()));
                 },
             }
             // exit task if last client disconnected
@@ -216,10 +217,10 @@ impl CanisterPoller {
         &self,
         first_client_key: ClientKey,
     ) -> Option<CanisterGetMessagesWithEvents> {
+        let iteration_key =
+            IterationReference::new(self.canister_id, *self.polling_iteration.read().await);
         let mut poller_events = PollerEvents::new(
-            Some(EventsReference::Iteration(
-                *self.polling_iteration.read().await,
-            )),
+            Some(EventsReference::IterationReference(iteration_key)),
             EventsCollectionType::PollerStatus,
             PollerEventsMetrics::default(),
         );

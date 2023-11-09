@@ -1,7 +1,7 @@
 use crate::{
     canister_methods::{CanisterWsOpenArguments, ClientId, ClientKey},
     canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    events_analyzer::{Events, EventsCollectionType, EventsReference, MessageReference},
     gateway_server::ClientSession,
     messages_demux::get_nonce_from_message,
     metrics::client_connection_handler_metrics::{
@@ -35,28 +35,6 @@ use tracing::{debug, error, info, trace, warn};
 struct ClientRequest<'a> {
     /// Envelope of the signed request to the IC
     envelope: Envelope<'a>,
-}
-
-/// Message sent back to the client via WS
-#[derive(Serialize, Deserialize)]
-struct ClientResponse {
-    /// HTTP response produced by the IC
-    payload: HttpResponsePayload,
-    /// Used by the client to identify which request this response corresponds to
-    #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
-}
-
-/// HTTP response produced by the IC
-#[derive(Serialize, Deserialize)]
-pub struct HttpResponsePayload {
-    /// The HTTP status code.
-    pub status: u16,
-    /// The MIME type of `content`.
-    pub content_type: Option<String>,
-    /// The body of the error.
-    #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>,
 }
 
 /// possible states of the IC WebSocket connection:
@@ -172,8 +150,15 @@ impl ClientConnectionHandler {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
                                 IcWsConnectionUpdate::Message(canister_message) => {
-                                    let message_nonce = get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted");
-                                    let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageNonce(message_nonce)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
+                                    let message_key = MessageReference::new(
+                                        self.canister_id
+                                            .read()
+                                            .await
+                                            .expect("must be some by now")
+                                            .clone(),
+                                        get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted")
+                                    );
+                                    let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageReference(message_key)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
                                     outgoing_canister_message_events.metrics.set_received_canister_message();
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
@@ -224,25 +209,36 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        match self.handle_ic_ws_setup(message).await {
+                                        match self.inspect_ic_ws_setup_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
                                                 ic_websocket_setup = true;
                                                 self.key = Some(client_key.clone());
-                                                let gateway_session = ClientSession::new(
-                                                    self.id,
-                                                    client_key, // TODO: determine if this is still needed or we can use client_id instead
-                                                    self.canister_id
+                                                let client_session = ClientSession::new(
+                                                    self.id,    // used as reference for events metrics of connection establishment in gateway server
+                                                    client_key, // used to identify the client in poller
+                                                    self.canister_id    // used to specify which canister the client wants to connect to
                                                         .read()
                                                         .await
                                                         .expect("must be some by now")
                                                         .clone(),
-                                                    message_for_client_tx.clone(),
+                                                    message_for_client_tx.clone(),  // used to send canister updates from the demux to the client connection handler
                                                 );
                                                 self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
-                                                    gateway_session,
+                                                    client_session,
                                                 ))
                                                 .await;
+                                                // at this point we are NOT guaranteed that the gateway server received the client session
+
+                                                // if the poller is already running, it might receive the first canister message before it receives the channel from the gateway server.
+                                                // relaying the request to the IC after sending the client session to gateway server might give it enough time to send the client channel to the poller
+                                                // but this is not guaranteed
+                                                // TODO: evaluate whether it is necessary to wait until the poller receives the channel or if we can assume that
+                                                //       time_to_relay_request_to_ic + time_to_poll_first_message >> time_to_send_channel_to_poller
+                                                if let Err(e) = self.relay_call_request_to_ic(message).await {
+                                                    warn!("Could not relay request to IC. Error: {:?}", e);
+                                                }
+
                                                 debug!("Created new client session");
                                                 request_connection_setup_events
                                                     .metrics
@@ -319,7 +315,7 @@ impl ClientConnectionHandler {
         }
     }
 
-    async fn handle_ic_ws_setup(
+    async fn inspect_ic_ws_setup_message(
         &self,
         ws_message: Message,
     ) -> Result<IcWsConnectionState, IcWsError> {
@@ -350,9 +346,6 @@ impl ClientConnectionHandler {
                 })?;
             let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
-            // relay the request to the IC
-            self.relay_request_to_ic(client_request).await?;
-
             // consider the IC WS connection as requested
             Ok(IcWsConnectionState::Requested(client_key))
         } else {
@@ -365,16 +358,13 @@ impl ClientConnectionHandler {
     /// relays relays the client's request to the IC and then sends the response back to the client via WS
     /// the caller does not need to check the state fo the response, it just relays the messages back and forth
     async fn handle_ws_message(&self, message: Message) -> Result<(), IcWsError> {
-        let client_request = get_client_request(message)?;
-        self.relay_request_to_ic(client_request).await?;
+        self.relay_call_request_to_ic(message).await?;
         Ok(())
     }
 
     /// relays the client's request to the IC only if the content of the envelope is of the Call variant
-    async fn relay_request_to_ic<'a>(
-        &self,
-        client_request: ClientRequest<'a>,
-    ) -> Result<(), IcWsError> {
+    async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+        let client_request = get_client_request(message)?;
         if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;
 

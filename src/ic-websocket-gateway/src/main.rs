@@ -39,9 +39,11 @@ struct DeploymentInfo {
     subnet_url: String,
 
     #[structopt(long, default_value = "0.0.0.0:8080")]
+    /// address at which the WebSocket Gateway is reachable
     gateway_address: String,
 
     #[structopt(long, default_value = "100")]
+    /// time interval at which the canister is polled
     polling_interval: u64,
 
     #[structopt(long, default_value = "100")]
@@ -122,8 +124,17 @@ async fn main() -> Result<(), String> {
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    // [any task]               [events analyzer task]
+    // events_channel_tx -----> events_channel_rx
+
+    // channel used to send events to the events analyzer which groups and processes them
     let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
 
+    // [events analyzer task]          [ws_listener]
+    // rate_limiting_channel_tx -----> rate_limiting_channel_rx
+
+    // channel used by the events analyzer to send the percentage of connections that should be ignored by the WS listener
+    // due to the rate limiting policy
     let (rate_limiting_channel_tx, rate_limiting_channel_rx): (
         Sender<Option<f64>>,
         Receiver<Option<f64>>,

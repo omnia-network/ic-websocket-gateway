@@ -37,7 +37,7 @@ pub struct WsListener {
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
-    // needed to know which gateway_session to delete in case of error or WS closed
+    // needed to know which client_session to delete in case of error or WS closed
     next_client_id: u64,
 }
 
@@ -138,6 +138,7 @@ impl WsListener {
                     }
                 },
                 Some(tls_acceptor_result) = tls_acceptor_rx.recv() => {
+                    // a client completed the TLS handshake and therefore the connection hanlder has to be started
                     match tls_acceptor_result {
                         Ok((current_client_id , stream, mut listener_events, span)) => {
                             self.start_connection_handler(stream, current_client_id, child_token.clone(), span);
@@ -203,6 +204,7 @@ fn is_in_rate_limit(limiting_rate: f64) -> bool {
     random_value < limiting_rate
 }
 
+/// the TLS handshake is performed in a separate task because it could take several seconds to complete and this would otherwise block other incoming connections
 pub fn accept_connection(
     current_client_id: u64,
     client_addr: std::net::SocketAddr,

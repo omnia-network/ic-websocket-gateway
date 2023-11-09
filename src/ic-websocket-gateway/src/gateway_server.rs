@@ -158,10 +158,6 @@ impl GatewayServer {
             select! {
                 // check if a client's connection state changed
                 Some(connection_state) = self.recv_from_client_connection_handler() => {
-                    // connection state can contain either:
-                    // - the ClientSession if the connection was successful
-                    // - the client_id if the connection was closed before the client was registered
-                    // - a connection error
                     self.state.manage_clients_connections(
                         connection_state,
                         poller_channel_for_completion_tx.clone(),
@@ -270,13 +266,12 @@ impl GatewayState {
                     EventsCollectionType::NewClientConnection,
                     ConnectionEstablishmentEventsMetrics::default(),
                 );
-                let client_key = client_session.client_key.clone();
-                let canister_id = client_session.canister_id;
-
-                // TODO: remove this event
                 connection_establishment_events
                     .metrics
-                    .set_added_client_to_state();
+                    .set_received_client_session();
+
+                let client_key = client_session.client_key.clone();
+                let canister_id = client_session.canister_id;
 
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
