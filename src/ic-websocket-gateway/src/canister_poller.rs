@@ -22,7 +22,7 @@ use tokio::{
         RwLock,
     },
 };
-use tracing::{debug, error, info, span, trace, warn, Level};
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
 
 // TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
 //       maybe get it once starting to poll the canister (?)
@@ -164,6 +164,7 @@ impl CanisterPoller {
                                 self.agent.clone(),
                                 self.canister_id,
                                 client_key,
+                                Span::current(),
                             );
                         }
                     }
@@ -212,6 +213,9 @@ impl CanisterPoller {
                 .await;
                 break;
             }
+            // prevents the poller from blocking the thread
+            // TODO: figure out if it is necessary
+            tokio::task::yield_now().await;
         }
     }
 
@@ -355,7 +359,12 @@ async fn signal_termination_and_cleanup(
     // let each client connection handler task connected to this poller know that the poller will terminate
     // and thus they also have to close the WebSocket connection and terminate
     for (client_key, client_channel_tx) in messages_demux.read().await.client_channels() {
-        call_ws_close_in_background(agent.clone(), canister_id, client_key.to_owned());
+        call_ws_close_in_background(
+            agent.clone(),
+            canister_id,
+            client_key.to_owned(),
+            Span::current(),
+        );
         if let Err(channel_err) = client_channel_tx
             .send(IcWsConnectionUpdate::Error(format!(
                 "Terminating poller task due to error: {}",
@@ -384,26 +393,33 @@ async fn sleep(millis: u64) {
     tokio::time::sleep(Duration::from_millis(millis)).await;
 }
 
-fn call_ws_close_in_background(agent: Arc<Agent>, canister_id: Principal, client_key: ClientKey) {
+fn call_ws_close_in_background(
+    agent: Arc<Agent>,
+    canister_id: Principal,
+    client_key: ClientKey,
+    span: Span,
+) {
     // close client connection on canister
     // sending the request to the canister takes a few seconds
     // therefore this is done in a separate task
-    // in order to not slow down the main task
-    tokio::spawn(async move {
-        debug!("Calling ws_close for client");
-        // TODO: figure out why it takes 10-30 seconds for the canister to close the connection
-        if let Err(e) = canister_methods::ws_close(
-            &agent,
-            &canister_id,
-            CanisterWsCloseArguments { client_key },
-        )
-        .await
-        // TODO: make sure the following logs are in the span
-        {
-            error!("Calling ws_close on canister failed: {}", e);
-        } else {
-            debug!("Canister closed connection with client");
+    // in order to not slow down the poller task
+    tokio::spawn(
+        async move {
+            debug!("Calling ws_close for client");
+            // TODO: figure out why it takes 10-30 seconds for the canister to close the connection
+            if let Err(e) = canister_methods::ws_close(
+                &agent,
+                &canister_id,
+                CanisterWsCloseArguments { client_key },
+            )
+            .await
+            {
+                error!("Calling ws_close on canister failed: {}", e);
+            } else {
+                debug!("Canister closed connection with client");
+            }
+            CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
         }
-        CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
-    });
+        .instrument(span),
+    );
 }

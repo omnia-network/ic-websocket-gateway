@@ -101,10 +101,7 @@ impl ConnectionEstablishmentDeltas {
 impl Deltas for ConnectionEstablishmentDeltas {
     fn display(&self) {
         trace!(
-            "reference: {:?}
-            time_to_start_poller: {:?}
-            time_to_send_client_channel: {:?}
-            latency: {:?}",
+            "reference: {:?}, time_to_start_poller: {:?}, time_to_send_client_channel: {:?}, latency: {:?}",
             self.reference,
             self.time_to_start_poller,
             self.time_to_send_client_channel,
