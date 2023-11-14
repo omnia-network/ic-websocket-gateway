@@ -77,9 +77,7 @@ impl RequestConnectionSetupDeltas {
 impl Deltas for RequestConnectionSetupDeltas {
     fn display(&self) {
         trace!(
-            "reference: {:?}
-            time_to_setup: {:?}
-            latency: {:?}",
+            "reference: {:?}, time_to_setup: {:?}, latency: {:?}",
             self.reference,
             self.time_to_setup,
             self.latency
@@ -174,9 +172,7 @@ impl OutgoingCanisterMessageDeltas {
 impl Deltas for OutgoingCanisterMessageDeltas {
     fn display(&self) {
         trace!(
-            "reference: {:?}
-            time_to_send: {:?}
-            latency: {:?}",
+            "reference: {:?}, time_to_send: {:?}, latency: {:?}",
             self.reference,
             self.time_to_send,
             self.latency

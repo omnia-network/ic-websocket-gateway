@@ -365,7 +365,7 @@ impl GatewayState {
                     }
                 }
             },
-            _ => error!("should not receive variants other than 'Setup' and 'Closed'"),
+            _ => unreachable!("should not receive variants other than 'Setup' and 'Closed'"),
         }
 
         let _entered = span!(Level::INFO, "manage_clients_state").entered();

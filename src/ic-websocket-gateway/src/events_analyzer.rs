@@ -323,7 +323,7 @@ type CollectionLatencies = BTreeMap<EventsReference, EventsLatencies>;
 
 pub struct AverageData {
     pub avg_type: String,
-    pub avg_value: Duration,
+    pub value: Duration,
     pub count: usize,
 }
 
@@ -374,27 +374,28 @@ impl EventsAnalyzer {
                 Some(events) = self.events_channel_rx.recv() => {
                     let reference = events.get_reference();
                     if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
+                        deltas.display();
                         self.add_latency_to_collection(&events, &deltas);
                         self.add_interval_to_events(events);
                     }
                 },
                 // periodically process previously registered events
                 _ = &mut periodic_check_operation => {
-                    let intervals = self.compute_average_intervals().await;
+                    let intervals = self.compute_average_intervals();
                     for avg_interval in intervals {
                         info!(
                             "Average interval for {:?}: {:?} computed over: {:?} intervals",
-                            avg_interval.avg_type, avg_interval.avg_value, avg_interval.count
+                            avg_interval.avg_type, avg_interval.value, avg_interval.count
                         );
                         // if we computed the average interval for events groups representing the frequency of incoming connections, compute limiting rate
                         if String::from("RequestConnectionSetupEventsMetrics").eq(&avg_interval.avg_type) {
                             // if the average interval of incoming connections is above the minimum threshold
                             // the listener should accept all connections (limiting_rate = None)
                             let mut limiting_rate = None;
-                            if avg_interval.avg_value < Duration::from_millis(self.min_incoming_interval) {
-                                warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval.avg_value);
+                            if avg_interval.value < Duration::from_millis(self.min_incoming_interval) {
+                                warn!("Signaling WS listener for rate limiting due to too many incoming connections. Average interval {:?}", avg_interval.value);
                                 limiting_rate =
-                                    Some(get_limiting_rate(self.min_incoming_interval, avg_interval.avg_value));
+                                    Some(get_limiting_rate(self.min_incoming_interval, avg_interval.value));
                             }
                             if let Err(e) = self.rate_limiting_channel_tx.send(limiting_rate).await {
                                 error!("Rate limiting channel closed on the receiver side: {:?}", e);
@@ -406,7 +407,7 @@ impl EventsAnalyzer {
                     for avg_latency in latencies {
                         info!(
                             "Average total latency of events in collection: {:?}: {:?} computed over: {:?} collections",
-                            avg_latency.avg_type, avg_latency.avg_value, avg_latency.count
+                            avg_latency.avg_type, avg_latency.value, avg_latency.count
                         );
                     }
 
@@ -495,7 +496,7 @@ impl EventsAnalyzer {
     }
 
     /// computes the average of the time between two consecutive events groups of the same type, for each type
-    pub async fn compute_average_intervals(&mut self) -> Vec<AverageData> {
+    pub fn compute_average_intervals(&mut self) -> Vec<AverageData> {
         let mut intervals = Vec::new();
         for (events_type, events_intervals) in self.map_intervals_by_events_type.iter_mut() {
             let intervals_count = events_intervals.intervals.len();
@@ -505,7 +506,7 @@ impl EventsAnalyzer {
                 let avg_interval = sum_intervals.div_f64(intervals_count as f64);
                 intervals.push(AverageData {
                     avg_type: events_type.to_owned(),
-                    avg_value: avg_interval,
+                    value: avg_interval,
                     count: intervals_count,
                 });
                 events_intervals.intervals = BTreeSet::default();
@@ -523,7 +524,7 @@ impl EventsAnalyzer {
                 let avg_latencies = sum_latencies.div_f64(aggregated_latencies.len() as f64);
                 latencies.push(AverageData {
                     avg_type: collection_type.to_owned().to_string(),
-                    avg_value: avg_latencies,
+                    value: avg_latencies,
                     count: aggregated_latencies.len(),
                 });
                 aggregated_latencies.clear();

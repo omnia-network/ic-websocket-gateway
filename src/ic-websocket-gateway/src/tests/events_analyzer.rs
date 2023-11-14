@@ -232,8 +232,8 @@ mod tests {
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(events_count * latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(events_count * latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(events_count * latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, 1);
@@ -251,13 +251,13 @@ mod tests {
         let events = get_listener_events_with_latency(1, 0).await;
         events_analyzer.add_interval_to_events(events);
 
-        let intervals = events_analyzer.compute_average_intervals().await;
+        let intervals = events_analyzer.compute_average_intervals();
         let interval_overhead = 10;
         assert_eq!(intervals.len(), 1);
         assert_eq!(intervals[0].avg_type, "ListenerEventsMetrics");
         assert!(
-            intervals[0].avg_value >= Duration::from_millis(interval_ms)
-                && intervals[0].avg_value <= Duration::from_millis(interval_ms + interval_overhead)
+            intervals[0].value >= Duration::from_millis(interval_ms)
+                && intervals[0].value <= Duration::from_millis(interval_ms + interval_overhead)
         );
         assert_eq!(intervals[0].count, 1);
     }
@@ -312,8 +312,8 @@ mod tests {
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(events_in_collection * latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(events_in_collection * latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(events_in_collection * latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, compute_average_threshold as usize);
@@ -397,9 +397,8 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(3 * latency_ms)
-                && latencies[0].avg_value
-                    <= Duration::from_millis(3 * latency_ms + latency_overhead)
+            latencies[0].value >= Duration::from_millis(3 * latency_ms)
+                && latencies[0].value <= Duration::from_millis(3 * latency_ms + latency_overhead)
         );
         // even if the threshold for computing the average is set to 1, as we received more complete collections at the time when "compute_collections_latencies" is called,
         // we compute the average total latency over all the complete collections received
@@ -482,11 +481,11 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "CanisterMessage");
         assert!(
-            latencies[0].avg_value
+            latencies[0].value
                 >= Duration::from_millis(
                     events_in_canister_message_collection * message_latency_ms
                 )
-                && latencies[0].avg_value
+                && latencies[0].value
                     <= Duration::from_millis(
                         events_in_canister_message_collection * message_latency_ms
                             + latency_overhead
@@ -496,11 +495,11 @@ mod tests {
 
         assert_eq!(latencies[1].avg_type, "NewClientConnection");
         assert!(
-            latencies[1].avg_value
+            latencies[1].value
                 >= Duration::from_millis(
                     events_in_new_client_connection_collection * connection_latency_ms
                 )
-                && latencies[1].avg_value
+                && latencies[1].value
                     <= Duration::from_millis(
                         events_in_new_client_connection_collection * connection_latency_ms
                             + latency_overhead
@@ -510,9 +509,9 @@ mod tests {
 
         assert_eq!(latencies[2].avg_type, "PollerStatus");
         assert!(
-            latencies[2].avg_value
+            latencies[2].value
                 >= Duration::from_millis(events_in_poller_status_collection * polling_latency_ms)
-                && latencies[2].avg_value
+                && latencies[2].value
                     <= Duration::from_millis(
                         events_in_poller_status_collection * polling_latency_ms + latency_overhead
                     )
@@ -573,16 +572,16 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "CanisterMessage");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(2 * message_latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(2 * message_latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(2 * message_latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, compute_average_threshold as usize);
 
         assert_eq!(latencies[1].avg_type, "PollerStatus");
         assert!(
-            latencies[1].avg_value >= Duration::from_millis(polling_latency_ms)
-                && latencies[1].avg_value
+            latencies[1].value >= Duration::from_millis(polling_latency_ms)
+                && latencies[1].value
                     <= Duration::from_millis(polling_latency_ms + latency_overhead)
         );
         assert_eq!(latencies[1].count, compute_average_threshold as usize);
