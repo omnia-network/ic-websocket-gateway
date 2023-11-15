@@ -212,52 +212,55 @@ pub fn accept_connection(
     tls_acceptor: Option<TlsAcceptor>,
     tls_acceptor_tx: Sender<Result<(u64, CustomStream, ListenerEvents, Span), String>>,
 ) {
-    tokio::spawn(async move {
-        let mut listener_events = ListenerEvents::new(
-            Some(EventsReference::ClientId(current_client_id)),
-            EventsCollectionType::NewClientConnection,
-            ListenerEventsMetrics::default(),
-        );
-        listener_events.metrics.set_received_request();
+    let span = span!(
+        Level::INFO,
+        "handle_client_connection",
+        client_addr = ?client_addr,
+        client_id = current_client_id
+    );
 
-        let span = span!(
-            Level::INFO,
-            "handle_client_connection",
-            client_addr = ?client_addr,
-            client_id = current_client_id
-        );
-        let _guard = span.enter();
+    tokio::spawn(
+        async move {
+            let mut listener_events = ListenerEvents::new(
+                Some(EventsReference::ClientId(current_client_id)),
+                EventsCollectionType::NewClientConnection,
+                ListenerEventsMetrics::default(),
+            );
+            listener_events.metrics.set_received_request();
 
-        let res = match tls_acceptor {
-            Some(ref acceptor) => {
-                match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
-                    Ok(Ok(tls_stream)) => {
-                        debug!("TLS handshake successful");
-                        listener_events.metrics.set_accepted_with_tls();
-                        Ok((
-                            current_client_id,
-                            CustomStream::TcpWithTls(tls_stream),
-                            listener_events,
-                            span.clone(),
-                        ))
-                    },
-                    Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
-                    Err(e) => Err(format!("Accepting TLS connection timed out: {:?}", e)),
-                }
-            },
-            None => {
-                listener_events.metrics.set_accepted_without_tls();
-                Ok((
-                    current_client_id,
-                    CustomStream::Tcp(stream),
-                    listener_events,
-                    span.clone(),
-                ))
-            },
-        };
-        tls_acceptor_tx
-            .send(res)
-            .await
-            .expect("ws listener's side of the channel dropped");
-    });
+            let res = match tls_acceptor {
+                Some(ref acceptor) => {
+                    match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
+                        Ok(Ok(tls_stream)) => {
+                            debug!("TLS handshake successful");
+                            listener_events.metrics.set_accepted_with_tls();
+                            Ok((
+                                current_client_id,
+                                CustomStream::TcpWithTls(tls_stream),
+                                listener_events,
+                                Span::current(),
+                            ))
+                        },
+                        Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
+                        Err(e) => Err(format!("Accepting TLS connection timed out: {:?}", e)),
+                    }
+                },
+                None => {
+                    listener_events.metrics.set_accepted_without_tls();
+                    debug!("Accepted connection without TLS");
+                    Ok((
+                        current_client_id,
+                        CustomStream::Tcp(stream),
+                        listener_events,
+                        Span::current(),
+                    ))
+                },
+            };
+            tls_acceptor_tx
+                .send(res)
+                .await
+                .expect("ws listener's side of the channel dropped");
+        }
+        .instrument(span),
+    );
 }
