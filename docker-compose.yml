@@ -23,6 +23,7 @@ services:
     environment:
       - RUST_LOG_FILE=${RUST_LOG_FILE}
       - RUST_LOG_STDOUT=${RUST_LOG_STDOUT}
+      - RUST_LOG_TELEMETRY=${RUST_LOG_TELEMETRY}
     volumes:
       - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
     networks:
