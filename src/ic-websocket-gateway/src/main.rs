@@ -1,7 +1,6 @@
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
-use opentelemetry::global;
 use std::{
     fs::{self, File},
     path::Path,
@@ -11,7 +10,7 @@ use structopt::StructOpt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod canister_methods;
@@ -107,7 +106,6 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .pretty()
         .with_filter(env_filter_stdout);
 
-    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("ic-ws-gw")
         .install_batch(opentelemetry_sdk::runtime::Tokio)
@@ -120,11 +118,13 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with_tracer(tracer)
         .with_filter(env_filter_telemetry);
 
-    tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(file_tracing_layer)
         .with(stdout_tracing_layer)
-        .with(opentelemetry)
-        .init();
+        .with(opentelemetry);
+
+    tracing::subscriber::set_global_default(subscriber).expect("should set subscriber");
+    opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
 
     Ok((guard_file, guard_stdout))
 }
