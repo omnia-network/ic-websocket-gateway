@@ -108,9 +108,9 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with_filter(env_filter_stdout);
 
     global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-    let tracer = opentelemetry_jaeger::new_pipeline()
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("ic-ws-gw")
-        .install_simple()
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("should set up machinery to export data");
     let env_filter_telemetry = EnvFilter::builder()
         .with_env_var("RUST_LOG_TELEMETRY")
@@ -193,6 +193,8 @@ async fn main() -> Result<(), String> {
         .manage_state(deployment_info.polling_interval)
         .await;
     info!("Terminated state manager");
+
+    opentelemetry::global::shutdown_tracer_provider();
 
     Ok(())
 }
