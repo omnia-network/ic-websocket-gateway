@@ -3,7 +3,6 @@ use crate::{
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
-
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;

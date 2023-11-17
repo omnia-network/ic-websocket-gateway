@@ -41,6 +41,7 @@ pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, S
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenArguments {
     pub client_nonce: u64,
+    pub gateway_principal: Principal,
 }
 
 /// The arguments for [ws_close].

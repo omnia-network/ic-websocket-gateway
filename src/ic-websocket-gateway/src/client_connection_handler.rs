@@ -105,6 +105,21 @@ impl ClientConnectionHandler {
                 debug!("Accepted WebSocket connection");
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
+                // as soon as the WS connection with the client is established, send the gateway principal
+                // needed because the client doesn't know the principal of the gateway it is connecting to but only it's IP
+                // however, the client has to tell the canister CDK which principal is authorized to poll its updates from the canister queue,
+                // the returned principal will be included by the client in the first envelope it sends via WS
+                let gateway_principal =
+                    self.agent.get_principal().expect("Principal should be set");
+
+                send_ws_message_to_client(
+                    &mut ws_write,
+                    Message::Binary(
+                        serialize(gateway_principal).expect("Principal should be serializable"),
+                    ),
+                )
+                .await;
+
                 // [client connection handler task]        [poller task]
                 // message_for_client_rx            <----- message_for_client_tx
 
@@ -438,7 +453,7 @@ fn serialize<S: Serialize>(message: S) -> Result<Vec<u8>, IcWsError> {
     let mut serializer = serde_cbor::Serializer::new(&mut serialized_message);
     serializer.self_describe().map_err(|e| {
         IcWsError::WebSocket(format!(
-            "could not write sel-describe tag to stream. Error: {:?}",
+            "could not write self-describe tag to stream. Error: {:?}",
             e.to_string()
         ))
     })?;
