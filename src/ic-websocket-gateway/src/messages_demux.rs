@@ -150,17 +150,18 @@ impl MessagesDemux {
                 true
             });
         // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-        for ((client_channel_tx, _parent_span), message_queue) in to_be_relayed {
+        for ((client_channel_tx, parent_span), message_queue) in to_be_relayed {
             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
-                warn!(
-                    "Processing message with key: {:?} from queue",
-                    canister_to_client_message.key
-                );
+                let relay_message_span = span!(parent: &parent_span, Level::TRACE, "relay_message", message_key = canister_to_client_message.key);
+                relay_message_span.in_scope(|| {
+                    warn!("Processing message from queue");
+                });
                 self.relay_message(
                     canister_to_client_message,
                     &client_channel_tx,
                     incoming_canister_message_events,
                 )
+                .instrument(relay_message_span)
                 .await;
             }
         }
