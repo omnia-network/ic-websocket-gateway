@@ -215,10 +215,10 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        let ic_websocket_setup_span = span!(parent: &client_connection_handler_span, Level::DEBUG, "ic_websocket_setup");
                                         match self.inspect_ic_ws_open_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
+                                                let ic_websocket_setup_span = span!(parent: &client_connection_handler_span, Level::DEBUG, "ic_websocket_setup", client_key = %client_key);
                                                 ic_websocket_setup_span.in_scope(|| {
                                                     debug!("Validated WS open message");
                                                 });
@@ -261,6 +261,7 @@ impl ClientConnectionHandler {
                                             }
                                             // in case of other errors, we report them and terminate the connection handler task
                                             Err(e) => {
+                                                let ic_websocket_setup_span = span!(parent: &client_connection_handler_span, Level::DEBUG, "ic_websocket_setup");
                                                 ic_websocket_setup_span.in_scope(|| {
                                                     warn!("IC WS setup failed. Error: {:?}", e);
                                                 });
