@@ -8,7 +8,7 @@ use std::{
 
 use candid::Principal;
 use tokio::sync::{mpsc::Sender, RwLock};
-use tracing::{debug, error, trace, warn, Span};
+use tracing::{debug, error, span, trace, warn, Instrument, Level, Span};
 
 use crate::{
     canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
@@ -195,16 +195,15 @@ impl MessagesDemux {
                 .client_channels
                 .get(&canister_output_message.client_key)
             {
-                Some((client_channel_tx, _parent_span)) => {
-                    trace!(
-                        "Received message with key: {:?} from canister",
-                        canister_to_client_message.key
-                    );
+                Some((client_channel_tx, parent_span)) => {
+                    let relay_message_span = span!(parent: parent_span, Level::TRACE, "relay_message", message_key = canister_to_client_message.key);
+                    relay_message_span.in_scope(|| trace!("Received message from canister",));
                     self.relay_message(
                         canister_to_client_message,
                         client_channel_tx,
                         incoming_canister_message_events,
                     )
+                    .instrument(relay_message_span)
                     .await;
                 },
                 None => {
@@ -249,6 +248,7 @@ impl MessagesDemux {
             incoming_canister_message_events
                 .metrics
                 .set_message_relayed();
+            trace!("Message relayed to connection handler");
         }
         self.analyzer_channel_tx
             .send(Box::new(incoming_canister_message_events))
