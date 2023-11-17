@@ -71,6 +71,8 @@ fn create_data_dir() -> Result<(), String> {
 }
 
 fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
+    opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
     if !Path::new("./data/traces").is_dir() {
         fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
     }
@@ -124,7 +126,6 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with(opentelemetry);
 
     tracing::subscriber::set_global_default(subscriber).expect("should set subscriber");
-    opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
 
     Ok((guard_file, guard_stdout))
 }
