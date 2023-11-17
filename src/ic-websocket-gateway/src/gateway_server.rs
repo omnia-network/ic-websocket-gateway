@@ -282,10 +282,13 @@ impl GatewayState {
 
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
+                let guard = new_client_connection_span.enter();
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
                     client_key.clone(),
                     client_session.message_for_client_tx.clone(),
+                    Span::current(),
                 );
+                drop(guard);
                 // check if client is connecting to a canister that is not yet being polled
                 // if so, create new poller task
                 let needs_new_poller = match self.connected_canisters.get_mut(&canister_id) {
@@ -329,7 +332,7 @@ impl GatewayState {
                     new_client_connection_span
                         .in_scope(|| debug!("Client connecting to a new canister"));
                     let start_new_poller_span = span!(
-                        parent: &new_client_connection_span, Level::DEBUG, "start_new_poller_span",
+                        parent: &new_client_connection_span, Level::DEBUG, "start_new_poller_span", %canister_id
                     );
                     // spawn new canister poller task
                     tokio::spawn(async move {

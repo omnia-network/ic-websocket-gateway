@@ -22,7 +22,7 @@ use tokio::{
         RwLock,
     },
 };
-use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
+use tracing::{debug, error, info, trace, warn, Span};
 
 // TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
 //       maybe get it once starting to poll the canister (?)
@@ -67,7 +67,7 @@ pub enum IcWsConnectionUpdate {
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
     /// contains the sending side of the channel use by the poller to send messages to the client
-    NewClientChannel(ClientKey, Sender<IcWsConnectionUpdate>),
+    NewClientChannel(ClientKey, Sender<IcWsConnectionUpdate>, Span),
     /// signals the poller which cllient disconnected
     ClientDisconnected(ClientKey),
 }
@@ -105,13 +105,6 @@ impl CanisterPoller {
         }
     }
 
-    #[tracing::instrument(
-        name = "poll_canister",
-        skip_all,
-        fields(
-            canister_id = %self.canister_id
-        )
-    )]
     pub async fn run_polling(
         &mut self,
         mut poller_channels: PollerChannelsPollerEnds,
@@ -122,7 +115,7 @@ impl CanisterPoller {
         start_new_poller_span.in_scope(|| {
             info!("Started runnning canister poller");
         });
-        drop(start_new_poller_span);
+
         let messages_demux = Arc::new(RwLock::new(MessagesDemux::new(
             poller_channels.poller_to_analyzer.clone(),
             self.canister_id,
@@ -131,10 +124,11 @@ impl CanisterPoller {
         // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
         // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
         // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
-        messages_demux
-            .write()
-            .await
-            .add_client_channel(first_client_key.clone(), message_for_client_tx);
+        messages_demux.write().await.add_client_channel(
+            first_client_key.clone(),
+            message_for_client_tx,
+            start_new_poller_span,
+        );
 
         let get_canister_updates =
             self.get_canister_updates(first_client_key.clone(), Arc::clone(&messages_demux));
@@ -147,19 +141,13 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(client_key, client_channel) => {
+                        PollerToClientChannelData::NewClientChannel(client_key, client_channel, new_client_connection_span) => {
                             messages_demux
                                 .write()
                                 .await
-                                .add_client_channel(client_key, client_channel);
+                                .add_client_channel(client_key, client_channel, new_client_connection_span);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
-                            let span = span!(
-                                Level::DEBUG,
-                                "client_disconnection",
-                                client_key = ?client_key,
-                            );
-                            let _guard = span.enter();
                             messages_demux
                                 .write()
                                 .await
@@ -168,7 +156,6 @@ impl CanisterPoller {
                                 self.agent.clone(),
                                 self.canister_id,
                                 client_key,
-                                Span::current(),
                             );
                         }
                     }
@@ -362,13 +349,10 @@ async fn signal_termination_and_cleanup(
     .await;
     // let each client connection handler task connected to this poller know that the poller will terminate
     // and thus they also have to close the WebSocket connection and terminate
-    for (client_key, client_channel_tx) in messages_demux.read().await.client_channels() {
-        call_ws_close_in_background(
-            agent.clone(),
-            canister_id,
-            client_key.to_owned(),
-            Span::current(),
-        );
+    for (client_key, (client_channel_tx, _parent_span)) in
+        messages_demux.read().await.client_channels()
+    {
+        call_ws_close_in_background(agent.clone(), canister_id, client_key.to_owned());
         if let Err(channel_err) = client_channel_tx
             .send(IcWsConnectionUpdate::Error(format!(
                 "Terminating poller task due to error: {}",
@@ -397,33 +381,25 @@ async fn sleep(millis: u64) {
     tokio::time::sleep(Duration::from_millis(millis)).await;
 }
 
-fn call_ws_close_in_background(
-    agent: Arc<Agent>,
-    canister_id: Principal,
-    client_key: ClientKey,
-    span: Span,
-) {
+fn call_ws_close_in_background(agent: Arc<Agent>, canister_id: Principal, client_key: ClientKey) {
     // close client connection on canister
     // sending the request to the canister takes a few seconds
     // therefore this is done in a separate task
     // in order to not slow down the poller task
-    tokio::spawn(
-        async move {
-            debug!("Calling ws_close for client");
-            // TODO: figure out why it takes 10-30 seconds for the canister to close the connection
-            if let Err(e) = canister_methods::ws_close(
-                &agent,
-                &canister_id,
-                CanisterWsCloseArguments { client_key },
-            )
-            .await
-            {
-                error!("Calling ws_close on canister failed: {}", e);
-            } else {
-                debug!("Canister closed connection with client");
-            }
-            CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
+    tokio::spawn(async move {
+        debug!("Calling ws_close for client");
+        // TODO: figure out why it takes 10-30 seconds for the canister to close the connection
+        if let Err(e) = canister_methods::ws_close(
+            &agent,
+            &canister_id,
+            CanisterWsCloseArguments { client_key },
+        )
+        .await
+        {
+            error!("Calling ws_close on canister failed: {}", e);
+        } else {
+            debug!("Canister closed connection with client");
         }
-        .instrument(span),
-    );
+        CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
+    });
 }

@@ -8,7 +8,7 @@ use std::{
 
 use candid::Principal;
 use tokio::sync::{mpsc::Sender, RwLock};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace, warn, Span};
 
 use crate::{
     canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
@@ -27,7 +27,7 @@ pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 pub struct MessagesDemux {
     canister_id: Principal,
     /// channels used to communicate with the connection handler task of the client identified by the client key
-    client_channels: HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
+    client_channels: HashMap<ClientKey, (Sender<IcWsConnectionUpdate>, Span)>,
     clients_message_queues: HashMap<
         ClientKey,
         Vec<(
@@ -70,7 +70,7 @@ impl MessagesDemux {
         self.recently_removed_clients.insert(client_key.to_owned());
     }
 
-    pub fn client_channels(&self) -> &HashMap<ClientKey, Sender<IcWsConnectionUpdate>> {
+    pub fn client_channels(&self) -> &HashMap<ClientKey, (Sender<IcWsConnectionUpdate>, Span)> {
         &self.client_channels
     }
 
@@ -78,11 +78,14 @@ impl MessagesDemux {
         &mut self,
         client_key: ClientKey,
         client_channel: Sender<IcWsConnectionUpdate>,
+        parent_span: Span,
     ) {
-        debug!("Added new channel to poller for client: {:?}", client_key);
+        parent_span.in_scope(|| {
+            debug!("Added new channel to poller");
+        });
         CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         self.client_channels
-            .insert(client_key.clone(), client_channel);
+            .insert(client_key.clone(), (client_channel, parent_span));
     }
 
     fn remove_client_channel(&mut self, client_key: &ClientKey) {
@@ -147,7 +150,7 @@ impl MessagesDemux {
                 true
             });
         // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-        for (client_channel_tx, message_queue) in to_be_relayed {
+        for ((client_channel_tx, _parent_span), message_queue) in to_be_relayed {
             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
                 warn!(
                     "Processing message with key: {:?} from queue",
@@ -192,7 +195,7 @@ impl MessagesDemux {
                 .client_channels
                 .get(&canister_output_message.client_key)
             {
-                Some(client_channel_tx) => {
+                Some((client_channel_tx, _parent_span)) => {
                     trace!(
                         "Received message with key: {:?} from canister",
                         canister_to_client_message.key
