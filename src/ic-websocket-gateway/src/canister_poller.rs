@@ -22,7 +22,7 @@ use tokio::{
         RwLock,
     },
 };
-use tracing::{debug, error, info, trace, warn, Span};
+use tracing::{debug, error, info, span, trace, warn, Level, Span};
 
 // TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
 //       maybe get it once starting to poll the canister (?)
@@ -110,11 +110,11 @@ impl CanisterPoller {
         mut poller_channels: PollerChannelsPollerEnds,
         first_client_key: ClientKey,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        start_new_poller_span: Span,
+        parent_span: Span,
     ) {
-        start_new_poller_span.in_scope(|| {
-            info!("Started runnning canister poller");
-        });
+        let start_new_poller_span = span!(
+            parent: &parent_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id
+        );
 
         let messages_demux = Arc::new(RwLock::new(MessagesDemux::new(
             poller_channels.poller_to_analyzer.clone(),
@@ -127,7 +127,7 @@ impl CanisterPoller {
         messages_demux.write().await.add_client_channel(
             first_client_key.clone(),
             message_for_client_tx,
-            start_new_poller_span,
+            parent_span,
         );
 
         let get_canister_updates =
@@ -135,6 +135,11 @@ impl CanisterPoller {
         // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_canister_updates is continued
         // instead of issuing a new call to get_canister_updates
         tokio::pin!(get_canister_updates);
+
+        start_new_poller_span.in_scope(|| {
+            info!("Started runnning canister poller");
+        });
+        drop(start_new_poller_span);
 
         'poller_loop: loop {
             select! {
