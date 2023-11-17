@@ -328,7 +328,9 @@ impl GatewayState {
                     let agent = Arc::clone(&agent);
                     new_client_connection_span
                         .in_scope(|| debug!("Client connecting to a new canister"));
-
+                    let start_new_poller_span = span!(
+                        parent: &new_client_connection_span, Level::DEBUG, "start_new_poller_span",
+                    );
                     // spawn new canister poller task
                     tokio::spawn(async move {
                         let mut poller = CanisterPoller::new(canister_id, agent, polling_interval);
@@ -339,6 +341,7 @@ impl GatewayState {
                                 poller_channels_poller_ends,
                                 client_key,
                                 client_session.message_for_client_tx.clone(),
+                                start_new_poller_span,
                             )
                             .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
