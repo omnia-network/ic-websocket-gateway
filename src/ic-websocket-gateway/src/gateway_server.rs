@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{debug, error, info, span, warn, Level, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
@@ -29,6 +29,7 @@ pub struct ClientSession {
     client_key: ClientKey,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
+    span: Span,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -40,6 +41,7 @@ pub struct ClientSession {
     pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
+    pub span: Span,
 }
 
 impl ClientSession {
@@ -48,12 +50,14 @@ impl ClientSession {
         client_key: ClientKey,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
+        span: Span,
     ) -> Self {
         Self {
             client_id,
             client_key,
             canister_id,
             message_for_client_tx,
+            span,
         }
     }
 }
@@ -261,6 +265,9 @@ impl GatewayState {
     ) {
         match connection_state {
             IcWsConnectionState::Setup(client_session) => {
+                let new_client_connection_span = span!(
+                    parent: &client_session.span, Level::DEBUG, "new_client_connection",
+                );
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(client_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -319,6 +326,8 @@ impl GatewayState {
                         events_channel_tx.clone(),
                     );
                     let agent = Arc::clone(&agent);
+                    new_client_connection_span
+                        .in_scope(|| debug!("Client connecting to a new canister"));
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
@@ -338,7 +347,11 @@ impl GatewayState {
                     connection_establishment_events
                         .metrics
                         .set_started_new_poller();
+                } else {
+                    new_client_connection_span
+                        .in_scope(|| debug!("Client connecting to an already polled canister"));
                 }
+                drop(new_client_connection_span);
                 connection_establishment_events
                     .metrics
                     .set_sent_client_channel_to_poller();

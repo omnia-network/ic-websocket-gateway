@@ -28,7 +28,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, span, trace, warn, Level, Span};
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -90,7 +90,11 @@ impl ClientConnectionHandler {
         }
     }
 
-    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&mut self, stream: S) {
+    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        stream: S,
+        client_connection_handler_span: Span,
+    ) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let mut request_connection_setup_events = RequestConnectionSetupEvents::new(
@@ -102,7 +106,9 @@ impl ClientConnectionHandler {
                 request_connection_setup_events
                     .metrics
                     .set_accepted_ws_connection();
-                debug!("Accepted WebSocket connection");
+                client_connection_handler_span.in_scope(|| {
+                    debug!("Accepted WebSocket connection");
+                });
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
                 // [client connection handler task]        [poller task]
@@ -209,10 +215,16 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        match self.inspect_ic_ws_setup_message(message.clone()).await {
+                                        let ic_websocket_setup_span = span!(parent: &client_connection_handler_span, Level::DEBUG, "ic_websocket_setup");
+                                        match self.inspect_ic_ws_open_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
+                                                ic_websocket_setup_span.in_scope(|| {
+                                                    debug!("Validated WS open message");
+                                                });
+
                                                 ic_websocket_setup = true;
+
                                                 self.key = Some(client_key.clone());
                                                 let client_session = ClientSession::new(
                                                     self.id,    // used as reference for events metrics of connection establishment in gateway server
@@ -223,6 +235,7 @@ impl ClientConnectionHandler {
                                                         .expect("must be some by now")
                                                         .clone(),
                                                     message_for_client_tx.clone(),  // used to send canister updates from the demux to the client connection handler
+                                                    ic_websocket_setup_span,
                                                 );
                                                 self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
                                                     client_session,
@@ -238,8 +251,6 @@ impl ClientConnectionHandler {
                                                 if let Err(e) = self.relay_call_request_to_ic(message).await {
                                                     warn!("Could not relay request to IC. Error: {:?}", e);
                                                 }
-
-                                                debug!("Created new client session");
                                                 request_connection_setup_events
                                                     .metrics
                                                     .set_ws_connection_setup();
@@ -250,10 +261,12 @@ impl ClientConnectionHandler {
                                             }
                                             // in case of other errors, we report them and terminate the connection handler task
                                             Err(e) => {
-                                                warn!("IC WS setup failed. Error: {:?}", e);
+                                                ic_websocket_setup_span.in_scope(|| {
+                                                    warn!("IC WS setup failed. Error: {:?}", e);
+                                                });
                                                 break 'handler_loop;
                                             }
-                                            Ok(variant) => error!("handle_ic_ws_setup should not return variant: {:?}", variant)
+                                            Ok(variant) => unreachable!("handle_ic_ws_setup should not return variant: {:?}", variant)
                                         }
                                     } else {
                                         // relay the envelope to the IC and the response back to the client
@@ -313,9 +326,13 @@ impl ClientConnectionHandler {
                 info!("Refused WebSocket connection {:?}", e);
             },
         }
+        client_connection_handler_span.in_scope(|| {
+            debug!("Terminated client connection handler task");
+        });
+        drop(client_connection_handler_span);
     }
 
-    async fn inspect_ic_ws_setup_message(
+    async fn inspect_ic_ws_open_message(
         &self,
         ws_message: Message,
     ) -> Result<IcWsConnectionState, IcWsError> {

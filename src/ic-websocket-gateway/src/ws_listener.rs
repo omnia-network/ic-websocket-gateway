@@ -141,7 +141,7 @@ impl WsListener {
                     // the client connection has been accepted and therefore the connection handler has to be started
                     self.start_connection_handler(current_client_id, stream, child_token.clone(), accept_client_connection_span);
                     listener_events.metrics.set_started_handler();
-                    self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped")
+                    self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
             }
         }
@@ -172,16 +172,17 @@ impl WsListener {
                 debug!("Spawned new connection handler");
             });
             match stream {
-                CustomStream::Tcp(stream) => client_connection_handler.handle_stream(stream).await,
+                CustomStream::Tcp(stream) => {
+                    client_connection_handler
+                        .handle_stream(stream, client_connection_handler_span)
+                        .await
+                },
                 CustomStream::TcpWithTls(stream) => {
-                    client_connection_handler.handle_stream(stream).await
+                    client_connection_handler
+                        .handle_stream(stream, client_connection_handler_span)
+                        .await
                 },
             }
-            client_connection_handler_span.in_scope(|| {
-                debug!("Terminated client connection handler task");
-            });
-            // the telemetry trace is recorded once all the spans are dropped
-            drop(client_connection_handler_span);
         });
     }
 }
