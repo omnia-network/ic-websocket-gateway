@@ -9,7 +9,7 @@ const icUrl = environment.IC_URL;
 const canisterId = environment.TEST_CANISTER_ID;
 
 /// test constants & variables
-const pingPongCount = 5;
+const pingPongCount = 20;
 let ws: IcWebSocket;
 
 /// jest configuration

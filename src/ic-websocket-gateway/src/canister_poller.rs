@@ -250,7 +250,7 @@ impl CanisterPoller {
             messages_demux
                 .write()
                 .await
-                .process_queues(polling_iteration_span.id().expect("must have span id"))
+                .process_queues(polling_iteration_span.id())
                 .await;
 
             filter_canister_messages(

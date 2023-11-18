@@ -129,7 +129,7 @@ impl MessagesDemux {
         self.clients_message_queues.len()
     }
 
-    pub async fn process_queues(&mut self, polling_iteration_span_id: Id) {
+    pub async fn process_queues(&mut self, polling_iteration_span_id: Option<Id>) {
         let mut to_be_relayed = Vec::new();
         self.clients_message_queues
             .retain(|client_key, message_queue| {
@@ -148,7 +148,7 @@ impl MessagesDemux {
         for ((message_for_client_tx, parent_span), message_queue) in to_be_relayed {
             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
                 let canister_message_span = span!(parent: &parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
-                canister_message_span.follows_from(&polling_iteration_span_id);
+                canister_message_span.follows_from(polling_iteration_span_id.clone());
                 canister_message_span.in_scope(|| {
                     warn!("Processing message from queue");
                 });
