@@ -63,9 +63,10 @@ impl MessagesDemux {
         }
     }
 
-    pub fn remove_client_state(&mut self, client_key: &ClientKey) {
-        self.remove_client_channel(client_key);
-        self.remove_client_message_queue(client_key);
+    pub fn remove_client_state(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        self.remove_client_channel(client_key, Span::current());
+        self.remove_client_message_queue(client_key, Span::current());
         // TODO: forget client keys after a while
         self.recently_removed_clients.insert(client_key.to_owned());
     }
@@ -88,11 +89,9 @@ impl MessagesDemux {
             .insert(client_key.clone(), (client_channel, client_connection_span));
     }
 
-    fn remove_client_channel(&mut self, client_key: &ClientKey) {
-        debug!(
-            "Removed client channel from poller for client {:?}",
-            client_key
-        );
+    fn remove_client_channel(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        debug!("Removed client channel from poller");
         self.client_channels.remove(client_key);
     }
 
@@ -110,10 +109,7 @@ impl MessagesDemux {
             EventsImpl<IncomingCanisterMessageEventsMetrics>,
         ),
     ) {
-        debug!(
-            "Added message queue from poller for client {:?}",
-            client_key
-        );
+        debug!("Added message queue from poller");
         if let Some(message_queue) = self.clients_message_queues.get_mut(&client_key) {
             message_queue.push(message);
         } else {
@@ -122,11 +118,9 @@ impl MessagesDemux {
         }
     }
 
-    fn remove_client_message_queue(&mut self, client_key: &ClientKey) {
-        debug!(
-            "Removed message queue from poller for client {:?}",
-            client_key
-        );
+    fn remove_client_message_queue(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        debug!("Removed message queue from poller");
         self.clients_message_queues.remove(client_key);
     }
 

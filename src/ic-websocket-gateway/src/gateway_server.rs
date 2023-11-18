@@ -199,7 +199,7 @@ impl GatewayServer {
         info!("Starting graceful shutdown");
         self.token.cancel();
         loop {
-            if let Ok(IcWsConnectionState::Closed((client_key, canister_id))) =
+            if let Ok(IcWsConnectionState::Closed((client_key, canister_id, span))) =
                 self.client_connection_handler_rx.try_recv()
             {
                 // remove client's channel from poller, if it exists and is not finished
@@ -208,7 +208,9 @@ impl GatewayServer {
                 {
                     // try sending message to poller task
                     if poller_channel_for_client_channel_sender_tx
-                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .send(PollerToClientChannelData::ClientDisconnected(
+                            client_key, span,
+                        ))
                         .await
                         .is_err()
                     {
@@ -358,14 +360,16 @@ impl GatewayState {
                     .await
                     .expect("analyzer's side of the channel dropped");
             },
-            IcWsConnectionState::Closed((client_key, canister_id)) => {
+            IcWsConnectionState::Closed((client_key, canister_id, span)) => {
                 // remove client's channel from poller, if it exists and is not finished
                 if let Some(poller_channel_for_client_channel_sender_tx) =
                     self.connected_canisters.get_mut(&canister_id)
                 {
                     // try sending message to poller task
                     if poller_channel_for_client_channel_sender_tx
-                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .send(PollerToClientChannelData::ClientDisconnected(
+                            client_key, span,
+                        ))
                         .await
                         .is_err()
                     {
