@@ -109,6 +109,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .pretty()
         .with_filter(env_filter_stdout);
 
+    // deploy Jaeger container: docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("ic-ws-gw")
         .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
