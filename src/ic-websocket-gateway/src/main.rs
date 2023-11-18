@@ -110,6 +110,8 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
 
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("ic-ws-gw")
+        .with_max_packet_size(9216)
+        .with_auto_split_batch(true)
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("should set up machinery to export data");
     let env_filter_telemetry = EnvFilter::builder()
