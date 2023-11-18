@@ -110,11 +110,9 @@ impl CanisterPoller {
         mut poller_channels: PollerChannelsPollerEnds,
         first_client_key: ClientKey,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        parent_span: Span,
+        client_connection_span: Span,
     ) {
-        let start_new_poller_span = span!(
-            parent: &parent_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id
-        );
+        let start_new_poller_span = span!(parent: &client_connection_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id);
 
         let messages_demux = Arc::new(RwLock::new(MessagesDemux::new(
             poller_channels.poller_to_analyzer.clone(),
@@ -127,7 +125,7 @@ impl CanisterPoller {
         messages_demux.write().await.add_client_channel(
             first_client_key.clone(),
             message_for_client_tx,
-            parent_span,
+            client_connection_span,
         );
 
         let get_canister_updates =

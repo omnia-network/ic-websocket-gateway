@@ -262,7 +262,7 @@ impl ClientConnectionHandler {
                                                         .expect("must be some by now")
                                                         .clone(),
                                                     message_for_client_tx.clone(),  // used to send canister updates from the demux to the client connection handler
-                                                    ic_websocket_setup_span.id().expect("must have an id"),
+                                                    Span::current(),
                                                 );
                                                 self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
                                                     client_session,
@@ -275,11 +275,13 @@ impl ClientConnectionHandler {
                                                 // but this is not guaranteed
                                                 // TODO: evaluate whether it is necessary to wait until the poller receives the channel or if we can assume that
                                                 //       time_to_relay_request_to_ic + time_to_poll_first_message >> time_to_send_channel_to_poller
-                                                if let Err(e) = self.relay_call_request_to_ic(message).await {
-                                                    ic_websocket_setup_span.in_scope(|| {
-                                                        warn!("Could not relay request to IC. Error: {:?}", e);
-                                                    });
-                                                }
+                                                let try_relay = async {
+                                                    if let Err(e) = self.relay_call_request_to_ic(message).await {
+                                                        error!("Could not relay request to IC. Error: {:?}", e);
+                                                    }
+                                                };
+                                                try_relay.instrument(ic_websocket_setup_span).await;
+
                                                 request_connection_setup_events
                                                     .metrics
                                                     .set_ws_connection_setup();

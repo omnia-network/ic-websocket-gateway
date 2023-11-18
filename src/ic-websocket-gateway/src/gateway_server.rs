@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, warn, Id, Level, Span};
+use tracing::{debug, error, info, span, warn, Level, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
@@ -29,7 +29,7 @@ pub struct ClientSession {
     client_key: ClientKey,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    span_id: Id,
+    client_connection_span: Span,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -41,7 +41,7 @@ pub struct ClientSession {
     pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    pub span_id: Id,
+    client_connection_span: Span,
 }
 
 impl ClientSession {
@@ -50,14 +50,14 @@ impl ClientSession {
         client_key: ClientKey,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        span_id: Id,
+        client_connection_span: Span,
     ) -> Self {
         Self {
             client_id,
             client_key,
             canister_id,
             message_for_client_tx,
-            span_id,
+            client_connection_span,
         }
     }
 }
@@ -259,9 +259,7 @@ impl GatewayState {
     ) {
         match connection_state {
             IcWsConnectionState::Setup(client_session) => {
-                let new_client_connection_span = span!(
-                    parent: &client_session.span_id, Level::DEBUG, "new_client_connection", client_key = %client_session.client_key, canister_id = %client_session.canister_id
-                );
+                let new_client_connection_span = span!(parent: &client_session.client_connection_span, Level::DEBUG, "new_client_connection", client_key = %client_session.client_key, canister_id = %client_session.canister_id);
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(client_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -274,15 +272,16 @@ impl GatewayState {
                 let client_key = client_session.client_key.clone();
                 let canister_id = client_session.canister_id;
 
+                let guard = client_session.client_connection_span.enter();
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
-                let guard = new_client_connection_span.enter();
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
                     client_key.clone(),
                     client_session.message_for_client_tx.clone(),
                     Span::current(),
                 );
                 drop(guard);
+
                 // check if client is connecting to a canister that is not yet being polled
                 // if so, create new poller task
                 let needs_new_poller = match self.connected_canisters.get_mut(&canister_id) {
@@ -293,7 +292,7 @@ impl GatewayState {
                         // therefore, the canister poller task might have terminated even if the data is still in the WS Gateway state
                         // try to send channel data to poller
                         poller_channel_for_client_channel_sender_tx
-                            .send(poller_to_client_channel_data.clone())
+                            .send(poller_to_client_channel_data)
                             .await
                             .is_err()
                     },
@@ -336,7 +335,7 @@ impl GatewayState {
                                 poller_channels_poller_ends,
                                 client_key,
                                 client_session.message_for_client_tx.clone(),
-                                new_client_connection_span,
+                                client_session.client_connection_span,
                             )
                             .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
