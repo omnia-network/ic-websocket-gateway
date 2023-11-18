@@ -256,14 +256,22 @@ impl CanisterPoller {
             // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
             messages_demux.write().await.process_queues().await;
 
-            poller_events.metrics.set_start_relaying_messages();
-            if let Err(e) = messages_demux
-                .write()
-                .await
-                .relay_messages(certified_canister_output, self.message_nonce.clone())
-                .await
-            {
-                return Err(e);
+            if number_of_returned_messages > 0 {
+                let polling_iteration_span = span!(Level::TRACE, "polling_iteration");
+                polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
+                poller_events.metrics.set_start_relaying_messages();
+                if let Err(e) = messages_demux
+                    .write()
+                    .await
+                    .relay_messages(
+                        certified_canister_output,
+                        self.message_nonce.clone(),
+                        polling_iteration_span,
+                    )
+                    .await
+                {
+                    return Err(e);
+                }
             }
             poller_events.metrics.set_finished_relaying_messages();
             Ok(poller_events)

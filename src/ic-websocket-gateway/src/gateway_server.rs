@@ -266,7 +266,7 @@ impl GatewayState {
         match connection_state {
             IcWsConnectionState::Setup(client_session) => {
                 let new_client_connection_span = span!(
-                    parent: &client_session.span, Level::DEBUG, "new_client_connection", client_id =client_session.client_id, client_key = %client_session.client_key, canister_id = %client_session.canister_id
+                    parent: &client_session.span, Level::DEBUG, "new_client_connection", canister_id = %client_session.canister_id
                 );
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(client_session.client_id)),

@@ -164,6 +164,7 @@ impl MessagesDemux {
                 .instrument(relay_message_span)
                 .await;
             }
+            drop(parent_span);
         }
     }
 
@@ -171,6 +172,7 @@ impl MessagesDemux {
         &mut self,
         msgs: CanisterOutputCertifiedMessages,
         message_nonce: Arc<RwLock<u64>>,
+        polling_iteration_span: Span,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
             let canister_to_client_message = CanisterToClientMessage {
@@ -198,6 +200,7 @@ impl MessagesDemux {
             {
                 Some((client_channel_tx, parent_span)) => {
                     let relay_message_span = span!(parent: parent_span, Level::TRACE, "relay_message", message_key = canister_to_client_message.key);
+                    relay_message_span.follows_from(&polling_iteration_span);
                     relay_message_span.in_scope(|| trace!("Received message from canister",));
                     self.relay_message(
                         canister_to_client_message,
@@ -228,6 +231,7 @@ impl MessagesDemux {
 
             *message_nonce.write().await = last_message_nonce + 1;
         }
+        drop(polling_iteration_span);
         Ok(())
     }
 
