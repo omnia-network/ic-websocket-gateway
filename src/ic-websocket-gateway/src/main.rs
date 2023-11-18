@@ -111,7 +111,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
 
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("ic-ws-gw")
-        .with_max_packet_size(9216)
+        .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
         .with_auto_split_batch(true)
         .with_trace_config(trace::config().with_sampler(trace::Sampler::TraceIdRatioBased(1.0)))
         .install_batch(opentelemetry_sdk::runtime::Tokio)

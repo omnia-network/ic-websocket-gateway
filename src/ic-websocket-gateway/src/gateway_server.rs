@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, warn, Level, Span};
+use tracing::{debug, error, info, span, warn, Id, Level, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
@@ -29,7 +29,7 @@ pub struct ClientSession {
     client_key: ClientKey,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    span: Span,
+    span_id: Id,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -41,7 +41,7 @@ pub struct ClientSession {
     pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    pub span: Span,
+    pub span_id: Id,
 }
 
 impl ClientSession {
@@ -50,14 +50,14 @@ impl ClientSession {
         client_key: ClientKey,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        span: Span,
+        span_id: Id,
     ) -> Self {
         Self {
             client_id,
             client_key,
             canister_id,
             message_for_client_tx,
-            span,
+            span_id,
         }
     }
 }
@@ -260,7 +260,7 @@ impl GatewayState {
         match connection_state {
             IcWsConnectionState::Setup(client_session) => {
                 let new_client_connection_span = span!(
-                    parent: &client_session.span, Level::DEBUG, "new_client_connection", canister_id = %client_session.canister_id
+                    parent: &client_session.span_id, Level::DEBUG, "new_client_connection", client_key = %client_session.client_key, canister_id = %client_session.canister_id
                 );
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(client_session.client_id)),
