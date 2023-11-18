@@ -186,18 +186,12 @@ impl GatewayServer {
             .await;
     }
 
-    #[tracing::instrument(name = "manage_pollers_state", skip(self)
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     async fn handle_failed_poller(&mut self, canister_id: &Principal) {
         // the client connection handlers are terminated directly by the poller via the direct channel between them
         error!("Removed all client data for canister");
         self.state.remove_poller_data(canister_id);
     }
 
-    #[tracing::instrument(name = "graceful_shutdown", skip_all)]
     async fn graceful_shutdown(
         &mut self,
         mut poller_channel_for_completion_rx: Receiver<TerminationInfo>,
@@ -384,17 +378,8 @@ impl GatewayState {
             },
             _ => unreachable!("should not receive variants other than 'Setup' and 'Closed'"),
         }
-
-        let _entered = span!(Level::INFO, "manage_clients_state").entered();
     }
 
-    #[tracing::instrument(
-        name = "manage_pollers_state",
-        skip(self, poller_channel_for_client_channel_sender_tx),
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     fn add_poller_data(
         &mut self,
         canister_id: Principal,
@@ -406,13 +391,6 @@ impl GatewayState {
         info!("Created poller task data");
     }
 
-    #[tracing::instrument(
-        name = "manage_pollers_state",
-        skip(self),
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     fn remove_poller_data(&mut self, canister_id: &Principal) {
         // poller task has terminated, remove it from the map
         self.connected_canisters.remove(canister_id);
