@@ -1,6 +1,7 @@
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
+use opentelemetry_sdk::trace;
 use std::{
     fs::{self, File},
     path::Path,
@@ -112,6 +113,7 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .with_service_name("ic-ws-gw")
         .with_max_packet_size(9216)
         .with_auto_split_batch(true)
+        .with_trace_config(trace::config().with_sampler(trace::Sampler::TraceIdRatioBased(1.0)))
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("should set up machinery to export data");
     let env_filter_telemetry = EnvFilter::builder()
