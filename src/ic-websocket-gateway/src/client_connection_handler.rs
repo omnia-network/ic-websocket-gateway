@@ -198,9 +198,16 @@ impl ClientConnectionHandler {
                                 },
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 IcWsConnectionUpdate::Error(e) => {
+                                    let poller_error_span = span!(parent: &Span::current(), Level::DEBUG, "poller_error");
                                     // close the WebSocket connection
-                                    ws_write.close().await.unwrap();
-                                    error!("Terminating client connection handler task. Error: {}", e);
+                                    if let Err(e) = ws_write.close().await {
+                                        poller_error_span.in_scope(|| {
+                                            error!("Error closing the WS connection: {:?}", e);
+                                        });
+                                    }
+                                    poller_error_span.in_scope(|| {
+                                        error!("Terminating client connection handler task. Error: {}", e);
+                                    });
                                     break 'handler_loop;
                                 }
                             }
