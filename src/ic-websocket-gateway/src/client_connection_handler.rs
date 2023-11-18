@@ -93,8 +93,9 @@ impl ClientConnectionHandler {
     pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         stream: S,
-        client_connection_handler_span: Span,
+        parent_span: Span,
     ) {
+        let client_connection_handler_span = span!(parent: &parent_span, Level::DEBUG, "client_connection_handler", client_id = self.id);
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let mut request_connection_setup_events = RequestConnectionSetupEvents::new(

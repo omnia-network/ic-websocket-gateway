@@ -152,13 +152,11 @@ impl WsListener {
         client_id: u64,
         stream: CustomStream,
         token: CancellationToken,
-        parent_span: Span,
+        accept_client_connection_span: Span,
     ) {
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         let events_channel_tx = self.events_channel_tx.clone();
-        let client_connection_handler_span =
-            span!(parent: &parent_span, Level::DEBUG, "client_connection_handler", client_id);
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(async move {
             let mut client_connection_handler = ClientConnectionHandler::new(
@@ -168,18 +166,18 @@ impl WsListener {
                 events_channel_tx,
                 token,
             );
-            client_connection_handler_span.in_scope(|| {
-                debug!("Spawned new connection handler");
+            accept_client_connection_span.in_scope(|| {
+                debug!("Spawning new connection handler");
             });
             match stream {
                 CustomStream::Tcp(stream) => {
                     client_connection_handler
-                        .handle_stream(stream, client_connection_handler_span)
+                        .handle_stream(stream, accept_client_connection_span)
                         .await
                 },
                 CustomStream::TcpWithTls(stream) => {
                     client_connection_handler
-                        .handle_stream(stream, client_connection_handler_span)
+                        .handle_stream(stream, accept_client_connection_span)
                         .await
                 },
             }
