@@ -127,6 +127,8 @@ impl ClientConnectionHandler {
                         biased;
                         // waits for the token to be cancelled
                         _ = &mut wait_for_cancellation => {
+                            let graceful_shutdown_span = span!(parent: &Span::current(), Level::DEBUG, "graceful_shutdown");
+
                             self.send_connection_state_to_clients_manager(
                                 IcWsConnectionState::Closed(
                                     (
@@ -135,16 +137,20 @@ impl ClientConnectionHandler {
                                             .read()
                                             .await
                                             .expect("must be some by now")
-                                            .clone()
+                                            .clone(),
                                     )
                                 )
                             )
                             .await;
                             // close the WebSocket connection
                             if let Err(e) = ws_write.close().await {
-                                error!("Error closing the WS connection: {:?}", e);
+                                graceful_shutdown_span.in_scope(|| {
+                                    error!("Error closing the WS connection: {:?}", e);
+                                });
                             }
-                            debug!("Terminating client connection handler task due to graceful shutdown");
+                            graceful_shutdown_span.in_scope(|| {
+                                debug!("Terminating client connection handler task due to graceful shutdown");
+                            });
                             break 'handler_loop;
                         },
                         // wait for canister message to send to client
@@ -192,21 +198,25 @@ impl ClientConnectionHandler {
                                 Ok(Some(message)) => {
                                     // check if the WebSocket connection is closed
                                     if message.is_close() {
+                                        let client_disconnection_span = span!(parent: &Span::current(), Level::DEBUG, "client_disconnection");
+
                                         // let the main task know that it should remove the client's session from the WS Gateway state
                                         self.send_connection_state_to_clients_manager(
                                             IcWsConnectionState::Closed(
-                                            (
-                                                self.key.clone().expect("must be some by now"),
-                                                self.canister_id
-                                                    .read()
-                                                    .await
-                                                    .expect("must be some by now")
-                                                    .clone()
+                                                (
+                                                    self.key.clone().expect("must be some by now"),
+                                                    self.canister_id
+                                                        .read()
+                                                        .await
+                                                        .expect("must be some by now")
+                                                        .clone(),
                                                 ),
                                             )
                                         )
                                         .await;
-                                        debug!("Terminating client connection handler task due to client disconnection");
+                                        client_disconnection_span.in_scope(|| {
+                                            debug!("Terminating client connection handler task due to client disconnection");
+                                        });
                                         break 'handler_loop;
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
@@ -277,6 +287,7 @@ impl ClientConnectionHandler {
                                 // just to be sure, send the cleanup message again
                                 // TODO: figure out if this is necessary or can be ignored
                                 Ok(None) => {
+                                    let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
                                     self.send_connection_state_to_clients_manager(
                                         IcWsConnectionState::Closed(
                                             (
@@ -285,16 +296,19 @@ impl ClientConnectionHandler {
                                                     .read()
                                                     .await
                                                     .expect("must be some by now")
-                                                    .clone()
+                                                    .clone(),
                                             )
                                         )
                                     )
                                     .await;
-                                    warn!("Client WebSocket connection already closed");
+                                    websocket_error_span.in_scope(|| {
+                                        warn!("Client WebSocket connection already closed");
+                                    });
                                     break 'handler_loop;
                                 },
                                 // the client's still needs to be cleaned up so it is necessary to return the client id
                                 Err(e) => {
+                                    let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
                                     // let the main task know that it should remove the client's session from the WS Gateway state
                                     self.send_connection_state_to_clients_manager(
                                         IcWsConnectionState::Closed(
@@ -304,12 +318,14 @@ impl ClientConnectionHandler {
                                                     .read()
                                                     .await
                                                     .expect("must be some by now")
-                                                    .clone()
+                                                    .clone(),
                                             )
                                         )
                                     )
                                     .await;
-                                    warn!("Client WebSocket connection error: {:?}", e);
+                                    websocket_error_span.in_scope(|| {
+                                        warn!("Client WebSocket connection error: {:?}", e);
+                                    });
                                     break 'handler_loop;
                                 }
                             };
