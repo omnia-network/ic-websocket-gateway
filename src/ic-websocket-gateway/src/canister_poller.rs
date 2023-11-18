@@ -220,6 +220,8 @@ impl CanisterPoller {
         first_client_key: ClientKey,
         messages_demux: Arc<RwLock<MessagesDemux>>,
     ) -> Result<PollerEvents, String> {
+        let polling_iteration_span = span!(Level::TRACE, "polling_iteration");
+        polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
         let iteration_key =
             IterationReference::new(self.canister_id, *self.polling_iteration.read().await);
         let mut poller_events = PollerEvents::new(
@@ -238,12 +240,18 @@ impl CanisterPoller {
             },
         )
         .await?;
+        polling_iteration_span.in_scope(|| trace!("Polled canister for messages"));
+
         poller_events.metrics.set_received_messages();
 
         let relay_messages_async = async {
             // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
             // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
-            messages_demux.write().await.process_queues().await;
+            messages_demux
+                .write()
+                .await
+                .process_queues(polling_iteration_span.id().expect("must have span id"))
+                .await;
 
             filter_canister_messages(
                 &mut certified_canister_output.messages,
@@ -253,16 +261,15 @@ impl CanisterPoller {
 
             let number_of_returned_messages = certified_canister_output.messages.len();
             if number_of_returned_messages > 0 {
-                let polling_iteration_span =
-                    span!(Level::TRACE, "polling_iteration", iteration_key = %iteration_key);
-                polling_iteration_span.in_scope(|| {
+                let polled_messages_span = span!(parent: &polling_iteration_span, Level::TRACE, "polled_messages", iteration_key = %iteration_key);
+                polled_messages_span.in_scope(|| {
                     trace!(
                         "Polled {} messages from canister",
                         number_of_returned_messages
                     )
                 });
                 if number_of_returned_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
-                    polling_iteration_span.in_scope(|| {
+                    polled_messages_span.in_scope(|| {
                         warn!("Consider increasing the polling frequency or the maximum number of returned messages by the CDK");
                     });
                 };
@@ -274,21 +281,24 @@ impl CanisterPoller {
                     .relay_messages(
                         certified_canister_output,
                         self.message_nonce.clone(),
-                        polling_iteration_span.id().expect("must have span id"),
+                        polled_messages_span.id().expect("must have span id"),
                     )
                     .await
                 {
                     return Err(e);
                 }
-                polling_iteration_span
-                    .in_scope(|| trace!("Relayed messages to connection handlers"));
-                drop(polling_iteration_span);
+                polled_messages_span.in_scope(|| trace!("Relayed messages to connection handlers"));
+                drop(polled_messages_span);
+            } else {
+                polling_iteration_span.in_scope(|| trace!("No messages polled"));
             }
             poller_events.metrics.set_finished_relaying_messages();
             Ok(poller_events)
         };
 
         let (relay_result, _) = tokio::join!(relay_messages_async, sleep(self.polling_interval_ms));
+        polling_iteration_span.in_scope(|| trace!("Finished polling iteration"));
+        drop(polling_iteration_span);
         relay_result
     }
 }
