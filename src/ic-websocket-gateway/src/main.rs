@@ -1,6 +1,7 @@
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
+use opentelemetry_sdk::trace;
 use std::{
     fs::{self, File},
     path::Path,
@@ -10,6 +11,7 @@ use structopt::StructOpt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod canister_methods;
@@ -70,6 +72,8 @@ fn create_data_dir() -> Result<(), String> {
 }
 
 fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
+    opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
     if !Path::new("./data/traces").is_dir() {
         fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
     }
@@ -105,10 +109,28 @@ fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
         .pretty()
         .with_filter(env_filter_stdout);
 
-    tracing_subscriber::registry()
+    // deploy Jaeger container: docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
+        .with_service_name("ic-ws-gw")
+        .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
+        .with_auto_split_batch(true)
+        .with_trace_config(trace::config().with_sampler(trace::Sampler::TraceIdRatioBased(1.0)))
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
+        .expect("should set up machinery to export data");
+    let env_filter_telemetry = EnvFilter::builder()
+        .with_env_var("RUST_LOG_TELEMETRY")
+        .try_from_env()
+        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
+    let opentelemetry = tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_filter(env_filter_telemetry);
+
+    let subscriber = tracing_subscriber::registry()
         .with(file_tracing_layer)
         .with(stdout_tracing_layer)
-        .init();
+        .with(opentelemetry);
+
+    tracing::subscriber::set_global_default(subscriber).expect("should set subscriber");
 
     Ok((guard_file, guard_stdout))
 }
@@ -177,6 +199,8 @@ async fn main() -> Result<(), String> {
         .manage_state(deployment_info.polling_interval)
         .await;
     info!("Terminated state manager");
+
+    opentelemetry::global::shutdown_tracer_provider();
 
     Ok(())
 }

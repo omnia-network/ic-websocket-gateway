@@ -20,6 +20,7 @@ mod tests {
     use serde_cbor::{from_slice, Serializer};
     use tokio::sync::mpsc::{self, Receiver, Sender};
     use tokio::sync::RwLock;
+    use tracing::Span;
 
     fn init_poller() -> (
         Sender<IcWsConnectionUpdate>,
@@ -320,6 +321,7 @@ mod tests {
         messages_demux.add_client_channel(
             reconnecting_client_key.clone(),
             message_for_client_tx.clone(),
+            Span::current(),
         );
         // messages from 2chl6-4hpzw-vqaaa-aaaaa-c must be relayed as the client is registered in the poller
 
@@ -342,7 +344,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, message_nonce.clone())
+            .relay_messages(msgs, message_nonce.clone(), Span::current().id())
             .await
         {
             panic!("{:?}", e);
@@ -353,7 +355,7 @@ mod tests {
         for _ in 0..messages.len() {
             match message_for_client_rx.try_recv() {
                 Ok(update) => {
-                    if let IcWsConnectionUpdate::Message(m) = update {
+                    if let IcWsConnectionUpdate::Message((m, _span)) = update {
                         // counts the messages relayed should only be for client 2chl6-4hpzw-vqaaa-aaaaa-c
                         // as it is the only one registered in the poller
                         let websocket_message: WebsocketMessage = from_slice(&m.content)
@@ -407,7 +409,7 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, message_nonce.clone())
+            .relay_messages(msgs, message_nonce.clone(), Span::current().id())
             .await
         {
             panic!("{:?}", e);
@@ -448,9 +450,9 @@ mod tests {
             .add_message_to_client_queue(&client_key, (m, incoming_canister_message_events));
 
         // simulates the client being registered in the poller
-        messages_demux.add_client_channel(client_key, message_for_client_tx);
+        messages_demux.add_client_channel(client_key, message_for_client_tx, Span::current());
 
-        messages_demux.process_queues().await;
+        messages_demux.process_queues(Span::current().id()).await;
 
         if let None = message_for_client_rx.recv().await {
             panic!("should receive message");
@@ -485,7 +487,7 @@ mod tests {
         messages_demux
             .add_message_to_client_queue(&client_key, (m, incoming_canister_message_events));
 
-        messages_demux.process_queues().await;
+        messages_demux.process_queues(Span::current().id()).await;
 
         assert_eq!(messages_demux.count_clients_message_queues(), 1);
     }
@@ -527,12 +529,16 @@ mod tests {
         }
 
         // simulates the client being registered in the poller
-        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
+        messages_demux.add_client_channel(
+            client_key.clone(),
+            message_for_client_tx,
+            Span::current(),
+        );
 
-        messages_demux.process_queues().await;
+        messages_demux.process_queues(Span::current().id()).await;
 
         let mut expected_sequence_number = 0;
-        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+        while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
             let websocket_message: WebsocketMessage = from_slice(&m.content)
                 .expect("content of canister_output_message is not of type WebsocketMessage");
             assert_eq!(websocket_message.sequence_num, expected_sequence_number);
@@ -563,7 +569,11 @@ mod tests {
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
             0,
         );
-        messages_demux.add_client_channel(client_key.clone(), message_for_client_tx);
+        messages_demux.add_client_channel(
+            client_key.clone(),
+            message_for_client_tx,
+            Span::current(),
+        );
 
         let start_sequence_number = 0;
         let messages = mock_ordered_messages(&client_key, start_sequence_number);
@@ -576,14 +586,14 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, message_nonce.clone())
+            .relay_messages(msgs, message_nonce.clone(), Span::current().id())
             .await
         {
             panic!("{:?}", e);
         }
 
         let mut expected_sequence_number = 0;
-        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+        while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
             let websocket_message: WebsocketMessage = from_slice(&m.content)
                 .expect("content of canister_output_message is not of type WebsocketMessage");
             assert_eq!(websocket_message.sequence_num, expected_sequence_number);
@@ -614,7 +624,7 @@ mod tests {
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
             0,
         );
-        messages_demux.add_client_channel(client_key, message_for_client_tx);
+        messages_demux.add_client_channel(client_key, message_for_client_tx, Span::current());
 
         let mut messages_in_queue = Vec::new();
         let client_key = ClientKey::new(
@@ -638,7 +648,7 @@ mod tests {
             messages_demux.add_message_to_client_queue(&client_key, message);
         }
 
-        messages_demux.process_queues().await;
+        messages_demux.process_queues(Span::current().id()).await;
 
         let start_sequence_number = count_messages_in_queue;
         let polled_messages = mock_ordered_messages(&client_key, start_sequence_number);
@@ -652,14 +662,14 @@ mod tests {
         };
 
         if let Err(e) = messages_demux
-            .relay_messages(msgs, message_nonce.clone())
+            .relay_messages(msgs, message_nonce.clone(), Span::current().id())
             .await
         {
             panic!("{:?}", e);
         }
 
         let mut expected_sequence_number = 0;
-        while let Ok(IcWsConnectionUpdate::Message(m)) = message_for_client_rx.try_recv() {
+        while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
             let websocket_message: WebsocketMessage = from_slice(&m.content)
                 .expect("content of canister_output_message is not of type WebsocketMessage");
             assert_eq!(websocket_message.sequence_num, expected_sequence_number);

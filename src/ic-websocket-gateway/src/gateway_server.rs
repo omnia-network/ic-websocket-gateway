@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{debug, error, info, span, warn, Level, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
@@ -29,6 +29,7 @@ pub struct ClientSession {
     client_key: ClientKey,
     canister_id: Principal,
     message_for_client_tx: Sender<IcWsConnectionUpdate>,
+    client_connection_span: Span,
 }
 
 /// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
@@ -40,6 +41,7 @@ pub struct ClientSession {
     pub client_key: ClientKey,
     pub canister_id: Principal,
     pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
+    client_connection_span: Span,
 }
 
 impl ClientSession {
@@ -48,12 +50,14 @@ impl ClientSession {
         client_key: ClientKey,
         canister_id: Principal,
         message_for_client_tx: Sender<IcWsConnectionUpdate>,
+        client_connection_span: Span,
     ) -> Self {
         Self {
             client_id,
             client_key,
             canister_id,
             message_for_client_tx,
+            client_connection_span,
         }
     }
 }
@@ -182,18 +186,12 @@ impl GatewayServer {
             .await;
     }
 
-    #[tracing::instrument(name = "manage_pollers_state", skip(self)
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     async fn handle_failed_poller(&mut self, canister_id: &Principal) {
         // the client connection handlers are terminated directly by the poller via the direct channel between them
         error!("Removed all client data for canister");
         self.state.remove_poller_data(canister_id);
     }
 
-    #[tracing::instrument(name = "graceful_shutdown", skip_all)]
     async fn graceful_shutdown(
         &mut self,
         mut poller_channel_for_completion_rx: Receiver<TerminationInfo>,
@@ -201,7 +199,7 @@ impl GatewayServer {
         info!("Starting graceful shutdown");
         self.token.cancel();
         loop {
-            if let Ok(IcWsConnectionState::Closed((client_key, canister_id))) =
+            if let Ok(IcWsConnectionState::Closed((client_key, canister_id, span))) =
                 self.client_connection_handler_rx.try_recv()
             {
                 // remove client's channel from poller, if it exists and is not finished
@@ -210,7 +208,9 @@ impl GatewayServer {
                 {
                     // try sending message to poller task
                     if poller_channel_for_client_channel_sender_tx
-                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .send(PollerToClientChannelData::ClientDisconnected(
+                            client_key, span,
+                        ))
                         .await
                         .is_err()
                     {
@@ -261,6 +261,7 @@ impl GatewayState {
     ) {
         match connection_state {
             IcWsConnectionState::Setup(client_session) => {
+                let new_client_connection_span = span!(parent: &client_session.client_connection_span, Level::DEBUG, "new_client_connection", client_key = %client_session.client_key, canister_id = %client_session.canister_id);
                 let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
                     Some(EventsReference::ClientId(client_session.client_id)),
                     EventsCollectionType::NewClientConnection,
@@ -273,12 +274,16 @@ impl GatewayState {
                 let client_key = client_session.client_key.clone();
                 let canister_id = client_session.canister_id;
 
+                let guard = client_session.client_connection_span.enter();
                 // contains the sending side of the channel created by the client's connection handler which needs to be sent
                 // to the canister poller in order for it to be able to send messages directly to the client task
                 let poller_to_client_channel_data = PollerToClientChannelData::NewClientChannel(
                     client_key.clone(),
                     client_session.message_for_client_tx.clone(),
+                    Span::current(),
                 );
+                drop(guard);
+
                 // check if client is connecting to a canister that is not yet being polled
                 // if so, create new poller task
                 let needs_new_poller = match self.connected_canisters.get_mut(&canister_id) {
@@ -289,7 +294,7 @@ impl GatewayState {
                         // therefore, the canister poller task might have terminated even if the data is still in the WS Gateway state
                         // try to send channel data to poller
                         poller_channel_for_client_channel_sender_tx
-                            .send(poller_to_client_channel_data.clone())
+                            .send(poller_to_client_channel_data)
                             .await
                             .is_err()
                     },
@@ -319,6 +324,8 @@ impl GatewayState {
                         events_channel_tx.clone(),
                     );
                     let agent = Arc::clone(&agent);
+                    new_client_connection_span
+                        .in_scope(|| debug!("Client connecting to a new canister"));
 
                     // spawn new canister poller task
                     tokio::spawn(async move {
@@ -330,6 +337,7 @@ impl GatewayState {
                                 poller_channels_poller_ends,
                                 client_key,
                                 client_session.message_for_client_tx.clone(),
+                                client_session.client_connection_span,
                             )
                             .await;
                         // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
@@ -338,6 +346,10 @@ impl GatewayState {
                     connection_establishment_events
                         .metrics
                         .set_started_new_poller();
+                } else {
+                    new_client_connection_span
+                        .in_scope(|| debug!("Client connecting to an already polled canister"));
+                    drop(new_client_connection_span);
                 }
                 connection_establishment_events
                     .metrics
@@ -348,14 +360,16 @@ impl GatewayState {
                     .await
                     .expect("analyzer's side of the channel dropped");
             },
-            IcWsConnectionState::Closed((client_key, canister_id)) => {
+            IcWsConnectionState::Closed((client_key, canister_id, span)) => {
                 // remove client's channel from poller, if it exists and is not finished
                 if let Some(poller_channel_for_client_channel_sender_tx) =
                     self.connected_canisters.get_mut(&canister_id)
                 {
                     // try sending message to poller task
                     if poller_channel_for_client_channel_sender_tx
-                        .send(PollerToClientChannelData::ClientDisconnected(client_key))
+                        .send(PollerToClientChannelData::ClientDisconnected(
+                            client_key, span,
+                        ))
                         .await
                         .is_err()
                     {
@@ -367,17 +381,8 @@ impl GatewayState {
             },
             _ => unreachable!("should not receive variants other than 'Setup' and 'Closed'"),
         }
-
-        let _entered = span!(Level::INFO, "manage_clients_state").entered();
     }
 
-    #[tracing::instrument(
-        name = "manage_pollers_state",
-        skip(self, poller_channel_for_client_channel_sender_tx),
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     fn add_poller_data(
         &mut self,
         canister_id: Principal,
@@ -389,13 +394,6 @@ impl GatewayState {
         info!("Created poller task data");
     }
 
-    #[tracing::instrument(
-        name = "manage_pollers_state",
-        skip(self),
-        fields(
-            canister_id = %canister_id
-        )
-    )]
     fn remove_poller_data(&mut self, canister_id: &Principal) {
         // poller task has terminated, remove it from the map
         self.connected_canisters.remove(canister_id);
