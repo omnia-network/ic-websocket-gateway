@@ -154,34 +154,38 @@ impl WsListener {
         token: CancellationToken,
         accept_client_connection_span: Span,
     ) {
+        accept_client_connection_span.in_scope(|| {
+            debug!("Spawning new connection handler");
+        });
+        let client_connection_handler_span = span!(
+            parent: &accept_client_connection_span,
+            Level::TRACE,
+            "client_connection_handler"
+        );
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         let events_channel_tx = self.events_channel_tx.clone();
         // spawn a connection handler task for each incoming client connection
-        tokio::spawn(async move {
-            let mut client_connection_handler = ClientConnectionHandler::new(
-                client_id,
-                agent,
-                client_connection_handler_tx,
-                events_channel_tx,
-                token,
-            );
-            accept_client_connection_span.in_scope(|| {
-                debug!("Spawning new connection handler");
-            });
-            match stream {
-                CustomStream::Tcp(stream) => {
-                    client_connection_handler
-                        .handle_stream(stream, accept_client_connection_span)
-                        .await
-                },
-                CustomStream::TcpWithTls(stream) => {
-                    client_connection_handler
-                        .handle_stream(stream, accept_client_connection_span)
-                        .await
-                },
+        tokio::spawn(
+            async move {
+                let mut client_connection_handler = ClientConnectionHandler::new(
+                    client_id,
+                    agent,
+                    client_connection_handler_tx,
+                    events_channel_tx,
+                    token,
+                );
+                match stream {
+                    CustomStream::Tcp(stream) => {
+                        client_connection_handler.handle_stream(stream).await
+                    },
+                    CustomStream::TcpWithTls(stream) => {
+                        client_connection_handler.handle_stream(stream).await
+                    },
+                }
             }
-        });
+            .instrument(client_connection_handler_span),
+        );
     }
 }
 

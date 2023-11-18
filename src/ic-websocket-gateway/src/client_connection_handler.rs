@@ -28,7 +28,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, instrument, span, trace, warn, Level, Span};
+use tracing::{debug, error, info, span, trace, warn, Level, Span};
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -90,12 +90,7 @@ impl ClientConnectionHandler {
         }
     }
 
-    #[instrument(skip_all, parent = &parent_span, name = "client_connection_handler_span", level = "debug", fields(client_id = self.id))]
-    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(
-        &mut self,
-        stream: S,
-        parent_span: Span,
-    ) {
+    pub async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin>(&mut self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let mut request_connection_setup_events = RequestConnectionSetupEvents::new(
