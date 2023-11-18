@@ -58,7 +58,7 @@ impl PollerChannelsPollerEnds {
 /// updates the client connection handler on the IC WS connection state
 pub enum IcWsConnectionUpdate {
     /// contains a new message to be realyed to the client
-    Message(CanisterToClientMessage),
+    Message((CanisterToClientMessage, Span)),
     /// lets the client connection hanlder know that an error occurred and the connection should be closed
     Error(String),
 }

@@ -157,7 +157,8 @@ impl ClientConnectionHandler {
                         Some(poller_message) = message_for_client_rx.recv() => {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
-                                IcWsConnectionUpdate::Message(canister_message) => {
+                                IcWsConnectionUpdate::Message((canister_message, parent_span)) => {
+                                    let message_for_client_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
                                     let message_key = MessageReference::new(
                                         self.canister_id
                                             .read()
@@ -171,13 +172,26 @@ impl ClientConnectionHandler {
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
                                         Ok(bytes) => {
-                                            send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
-                                            outgoing_canister_message_events.metrics.set_message_sent_to_client();
-                                            trace!("Message with key: {:?} sent to client", canister_message.key);
+                                            match send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await {
+                                                Ok(_) => {
+                                                    outgoing_canister_message_events.metrics.set_message_sent_to_client();
+                                                    message_for_client_span.in_scope(|| {
+                                                        trace!("Message sent to client");
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    message_for_client_span.in_scope(|| {
+                                                        outgoing_canister_message_events.metrics.set_message_sent_to_client();
+                                                        error!("Could not send message to client. Error: {:?}", e);
+                                                    });
+                                                }
+                                            }
                                         },
                                         Err(e) => {
                                             outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
-                                            error!("Could not serialize canister message. Error: {:?}", e);
+                                            message_for_client_span.in_scope(|| {
+                                                error!("Could not serialize canister message. Error: {:?}", e);
+                                            });
                                         }
                                     }
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
@@ -405,10 +419,7 @@ impl ClientConnectionHandler {
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
-            trace!(
-                "Relayed serialized envelope of type Call to canister with principal: {:?}",
-                canister_id.to_string()
-            );
+            trace!("Relayed serialized envelope to canister");
             Ok(())
         } else {
             Err(IcWsError::Initialization(String::from(
@@ -481,9 +492,9 @@ fn serialize<S: Serialize>(message: S) -> Result<Vec<u8>, IcWsError> {
 async fn send_ws_message_to_client<S: AsyncRead + AsyncWrite + Unpin>(
     ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
     message: Message,
-) {
+) -> Result<(), IcWsError> {
     if let Err(e) = ws_write.send(message).await {
-        // TODO: graceful shutdown fo client task
-        error!("Could not send message to client: {:?}", e);
+        return Err(IcWsError::WebSocket(e.to_string()));
     }
+    Ok(())
 }

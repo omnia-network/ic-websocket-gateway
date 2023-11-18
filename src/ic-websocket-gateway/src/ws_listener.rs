@@ -157,11 +157,13 @@ impl WsListener {
         accept_client_connection_span.in_scope(|| {
             debug!("Spawning new connection handler");
         });
-        let client_connection_handler_span = span!(
-            parent: &accept_client_connection_span,
-            Level::TRACE,
-            "client_connection_handler"
+        let client_connection_span = span!(Level::DEBUG, "Client Connection", client_id);
+        client_connection_span.follows_from(
+            accept_client_connection_span
+                .id()
+                .expect("must have span id"),
         );
+
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         let events_channel_tx = self.events_channel_tx.clone();
@@ -184,7 +186,7 @@ impl WsListener {
                     },
                 }
             }
-            .instrument(client_connection_handler_span),
+            .instrument(client_connection_span),
         );
     }
 }

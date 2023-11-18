@@ -139,30 +139,31 @@ impl MessagesDemux {
         let mut to_be_relayed = Vec::new();
         self.clients_message_queues
             .retain(|client_key, message_queue| {
-                if let Some(client_channel_tx) = self.client_channels.get(&client_key) {
+                if let Some(message_for_client_tx) = self.client_channels.get(&client_key) {
                     // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
                     // thus the respective queue does not need to be retained
                     // relay all the messages previously received for the corresponding client
-                    to_be_relayed.push((client_channel_tx.to_owned(), message_queue.to_owned()));
+                    to_be_relayed
+                        .push((message_for_client_tx.to_owned(), message_queue.to_owned()));
                     return false;
                 }
                 // if the client channel has not been received yet, keep the messages in the queue
                 true
             });
         // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-        for ((client_channel_tx, parent_span), message_queue) in to_be_relayed {
+        for ((message_for_client_tx, parent_span), message_queue) in to_be_relayed {
             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
-                let relay_message_span = span!(parent: &parent_span, Level::TRACE, "relay_message", message_key = canister_to_client_message.key);
-                relay_message_span.follows_from(&polling_iteration_span_id);
-                relay_message_span.in_scope(|| {
+                let canister_message_span = span!(parent: &parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
+                canister_message_span.follows_from(&polling_iteration_span_id);
+                canister_message_span.in_scope(|| {
                     warn!("Processing message from queue");
                 });
                 self.relay_message(
                     canister_to_client_message,
-                    &client_channel_tx,
+                    &message_for_client_tx,
                     incoming_canister_message_events,
                 )
-                .instrument(relay_message_span)
+                .instrument(canister_message_span)
                 .await;
             }
             drop(parent_span);
@@ -199,16 +200,16 @@ impl MessagesDemux {
                 .client_channels
                 .get(&canister_output_message.client_key)
             {
-                Some((client_channel_tx, parent_span)) => {
-                    let relay_message_span = span!(parent: parent_span, Level::TRACE, "relay_message", message_key = canister_to_client_message.key);
-                    relay_message_span.follows_from(&polled_messages_span_id);
-                    relay_message_span.in_scope(|| trace!("Received message from canister",));
+                Some((message_for_client_tx, parent_span)) => {
+                    let canister_message_span = span!(parent: parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
+                    canister_message_span.follows_from(&polled_messages_span_id);
+                    canister_message_span.in_scope(|| trace!("Received message from canister",));
                     self.relay_message(
                         canister_to_client_message,
-                        client_channel_tx,
+                        message_for_client_tx,
                         incoming_canister_message_events,
                     )
-                    .instrument(relay_message_span)
+                    .instrument(canister_message_span)
                     .await;
                 },
                 None => {
@@ -238,11 +239,14 @@ impl MessagesDemux {
     pub async fn relay_message(
         &self,
         canister_to_client_message: CanisterToClientMessage,
-        client_channel_tx: &Sender<IcWsConnectionUpdate>,
+        message_for_client_tx: &Sender<IcWsConnectionUpdate>,
         mut incoming_canister_message_events: EventsImpl<IncomingCanisterMessageEventsMetrics>,
     ) {
-        if let Err(e) = client_channel_tx
-            .send(IcWsConnectionUpdate::Message(canister_to_client_message))
+        if let Err(e) = message_for_client_tx
+            .send(IcWsConnectionUpdate::Message((
+                canister_to_client_message,
+                Span::current(),
+            )))
             .await
         {
             error!("Client's thread terminated: {}", e);
