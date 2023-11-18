@@ -211,12 +211,8 @@ pub fn accept_connection(
     tls_acceptor: Option<TlsAcceptor>,
     tls_acceptor_tx: Sender<Result<(u64, CustomStream, ListenerEvents, Span), String>>,
 ) {
-    let accept_client_connection_span = span!(
-        Level::DEBUG,
-        "accept_client_connection",
-        ?client_addr,
-        client_id
-    );
+    let accept_client_connection_span =
+        span!(Level::DEBUG, "Accept Connection", ?client_addr, client_id);
 
     tokio::spawn(
         async move {

@@ -144,11 +144,11 @@ impl CanisterPoller {
                 // receive channel used to send canister updates to new client's task
                 Some(channel_data) = poller_channels.main_to_poller.recv() => {
                     match channel_data {
-                        PollerToClientChannelData::NewClientChannel(client_key, client_channel, new_client_connection_span) => {
+                        PollerToClientChannelData::NewClientChannel(client_key, client_channel, client_connection_span) => {
                             messages_demux
                                 .write()
                                 .await
-                                .add_client_channel(client_key, client_channel, new_client_connection_span);
+                                .add_client_channel(client_key, client_channel, client_connection_span);
                         },
                         PollerToClientChannelData::ClientDisconnected(client_key) => {
                             messages_demux
@@ -218,7 +218,7 @@ impl CanisterPoller {
         first_client_key: ClientKey,
         messages_demux: Arc<RwLock<MessagesDemux>>,
     ) -> Result<PollerEvents, String> {
-        let polling_iteration_span = span!(Level::TRACE, "polling_iteration");
+        let polling_iteration_span = span!(Level::TRACE, "Polling Iteration");
         polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
         let iteration_key =
             IterationReference::new(self.canister_id, *self.polling_iteration.read().await);
@@ -279,7 +279,7 @@ impl CanisterPoller {
                     .relay_messages(
                         certified_canister_output,
                         self.message_nonce.clone(),
-                        polled_messages_span.id().expect("must have span id"),
+                        polled_messages_span.id(),
                     )
                     .await
                 {

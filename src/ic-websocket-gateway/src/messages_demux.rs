@@ -78,14 +78,14 @@ impl MessagesDemux {
         &mut self,
         client_key: ClientKey,
         client_channel: Sender<IcWsConnectionUpdate>,
-        parent_span: Span,
+        client_connection_span: Span,
     ) {
-        parent_span.in_scope(|| {
+        client_connection_span.in_scope(|| {
             debug!("Added new channel to poller");
         });
         CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         self.client_channels
-            .insert(client_key.clone(), (client_channel, parent_span));
+            .insert(client_key.clone(), (client_channel, client_connection_span));
     }
 
     fn remove_client_channel(&mut self, client_key: &ClientKey) {
@@ -174,7 +174,7 @@ impl MessagesDemux {
         &mut self,
         msgs: CanisterOutputCertifiedMessages,
         message_nonce: Arc<RwLock<u64>>,
-        polled_messages_span_id: Id,
+        polled_messages_span_id: Option<Id>,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
             let canister_to_client_message = CanisterToClientMessage {
@@ -200,9 +200,9 @@ impl MessagesDemux {
                 .client_channels
                 .get(&canister_output_message.client_key)
             {
-                Some((message_for_client_tx, parent_span)) => {
-                    let canister_message_span = span!(parent: parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
-                    canister_message_span.follows_from(&polled_messages_span_id);
+                Some((message_for_client_tx, client_connection_span)) => {
+                    let canister_message_span = span!(parent: client_connection_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
+                    canister_message_span.follows_from(polled_messages_span_id.clone());
                     canister_message_span.in_scope(|| trace!("Received message from canister",));
                     self.relay_message(
                         canister_to_client_message,
