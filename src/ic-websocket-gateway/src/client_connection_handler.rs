@@ -28,7 +28,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, span, trace, warn, Level, Span};
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -275,8 +275,9 @@ impl ClientConnectionHandler {
                                             Ok(variant) => unreachable!("handle_ic_ws_setup should not return variant: {:?}", variant)
                                         }
                                     } else {
+                                        let client_message_span = span!(parent: &Span::current(), Level::TRACE, "client_message");
                                         // relay the envelope to the IC and the response back to the client
-                                        if let Err(e) = self.handle_ws_message(message).await {
+                                        if let Err(e) = self.handle_ws_message(message).instrument(client_message_span).await {
                                             warn!("Handling of WebSocket message failed. Error: {:?}", e);
                                             break 'handler_loop;
                                         }
@@ -411,7 +412,7 @@ impl ClientConnectionHandler {
             Ok(())
         } else {
             Err(IcWsError::Initialization(String::from(
-                "gateway can only relay envelopes with content of Call variant",
+                "Gateway can only relay envelopes with content of Call variant",
             )))
         }
     }
