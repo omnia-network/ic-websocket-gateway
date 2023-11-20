@@ -40,6 +40,7 @@ There are some command line arguments that you can set when running the gateway:
 | `--compute-averages-threshold` | The threshold after which the metrics analyzer computes the averages of the intervals/latencies. | `10` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
+| `--telemetry-jaeger-agent-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
 
 ## Docker
 
@@ -97,6 +98,14 @@ For example, to set the tracing level to `debug`, you can run:
 ```
 RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run
 ```
+
+## Tracing telemetry
+
+The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [Jaeger](https://www.jaegertracing.io/) for tracing telemetry. To enable tracing telemetry, you have to:
+
+- set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
+- optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
+
 
 # Development
 

@@ -1,24 +1,21 @@
+use crate::gateway_tracing::{init_tracing, InitTracingResult};
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
-use opentelemetry_sdk::trace;
 use std::{
-    fs::{self, File},
+    fs::{self},
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
 };
 use structopt::StructOpt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
 mod events_analyzer;
 mod gateway_server;
+mod gateway_tracing;
 mod messages_demux;
 mod ws_listener;
 mod metrics {
@@ -62,6 +59,15 @@ struct DeploymentInfo {
 
     #[structopt(long)]
     tls_certificate_key_pem_path: Option<String>,
+
+    #[structopt(long)]
+    /// Jaeger agent endpoint for the telemetry in the format <host>:<port>
+    ///
+    /// To run a Jaeger instance that listens on port 16686:
+    /// ```bash
+    /// docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
+    /// ```
+    telemetry_jaeger_agent_endpoint: Option<String>,
 }
 
 fn create_data_dir() -> Result<(), String> {
@@ -71,78 +77,16 @@ fn create_data_dir() -> Result<(), String> {
     Ok(())
 }
 
-fn init_tracing() -> Result<(WorkerGuard, WorkerGuard), String> {
-    opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-
-    if !Path::new("./data/traces").is_dir() {
-        fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
-    }
-
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?;
-    let filename = format!("./data/traces/gateway_{:?}.log", timestamp.as_millis());
-
-    println!("Tracing to file: {}", filename);
-
-    let log_file = File::create(filename).map_err(|e| e.to_string())?;
-    let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
-    let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
-
-    let env_filter_file = EnvFilter::builder()
-        .with_env_var("RUST_LOG_FILE")
-        .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
-
-    let file_tracing_layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_writer(non_blocking_file)
-        .with_thread_ids(true)
-        .with_filter(env_filter_file);
-
-    let env_filter_stdout = EnvFilter::builder()
-        .with_env_var("RUST_LOG_STDOUT")
-        .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=info"));
-    let stdout_tracing_layer = tracing_subscriber::fmt::layer()
-        .with_writer(non_blocking_stdout)
-        .pretty()
-        .with_filter(env_filter_stdout);
-
-    // deploy Jaeger container:
-    // docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
-    // Jaeger listens on port 16686
-    let tracer = opentelemetry_jaeger::new_agent_pipeline()
-        .with_service_name("ic-ws-gw")
-        .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
-        .with_auto_split_batch(true)
-        .with_trace_config(trace::config().with_sampler(trace::Sampler::TraceIdRatioBased(1.0)))
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .expect("should set up machinery to export data");
-    let env_filter_telemetry = EnvFilter::builder()
-        .with_env_var("RUST_LOG_TELEMETRY")
-        .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
-    let opentelemetry = tracing_opentelemetry::layer()
-        .with_tracer(tracer)
-        .with_filter(env_filter_telemetry);
-
-    let subscriber = tracing_subscriber::registry()
-        .with(file_tracing_layer)
-        .with(stdout_tracing_layer)
-        .with(opentelemetry);
-
-    tracing::subscriber::set_global_default(subscriber).expect("should set subscriber");
-
-    Ok((guard_file, guard_stdout))
-}
-
 #[tokio::main]
 async fn main() -> Result<(), String> {
     create_data_dir()?;
-    let _guards = init_tracing().expect("could not init tracing");
-
     let deployment_info = DeploymentInfo::from_args();
+    let InitTracingResult {
+        guards: _guards,
+        is_telemetry_enabled,
+    } = init_tracing(deployment_info.telemetry_jaeger_agent_endpoint.to_owned())
+        .expect("could not init tracing");
+
     info!("Deployment info: {:?}", deployment_info);
 
     let key_pair = load_key_pair("./data/key_pair")?;
@@ -202,7 +146,9 @@ async fn main() -> Result<(), String> {
         .await;
     info!("Terminated state manager");
 
-    opentelemetry::global::shutdown_tracer_provider();
+    if is_telemetry_enabled {
+        opentelemetry::global::shutdown_tracer_provider();
+    }
 
     Ok(())
 }
