@@ -22,7 +22,7 @@ echo "Deploying test canister..."
 cd tests/test_canister_rs
 dfx deploy test_canister_rs --no-wallet --argument "(opt \"$GATEWAY_PRINCIPAL\")"
 # generate test_canister JS declarations
-npm run generate
+dfx generate test_canister_rs
 # source the canister id from the generated .env file
 source .env
 

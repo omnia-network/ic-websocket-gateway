@@ -4,15 +4,19 @@
       "candid": "src/test_canister_rs/test_canister_rs.did",
       "package": "test_canister_rs",
       "type": "rust"
+    },
+    "test_canister_mo": {
+      "type": "motoko",
+      "main": "src/test_canister_mo/main.mo"
     }
   },
   "defaults": {
     "build": {
       "args": "",
-      "packtool": ""
+      "packtool": "npx mops sources"
     }
   },
   "output_env_file": ".env",
   "version": 1,
-  "dfx": "0.15.0"
+  "dfx": "0.15.1"
 }

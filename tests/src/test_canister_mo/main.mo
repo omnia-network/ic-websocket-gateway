@@ -100,11 +100,6 @@ actor class TestCanister() {
   };
 
   //// Debug/tests methods
-  // wipe all websocket data in the canister
-  public shared func ws_wipe() : async () {
-    await ws.wipe();
-  };
-
   // send a message to the client, usually called by the canister itself
   public shared func ws_send(client_principal : IcWebSocketCdk.ClientPrincipal, msg_bytes : Blob) : async IcWebSocketCdk.CanisterWsSendResult {
     await IcWebSocketCdk.ws_send(ws_state, client_principal, msg_bytes);

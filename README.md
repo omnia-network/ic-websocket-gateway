@@ -105,12 +105,12 @@ RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=de
 Some unit tests are provided in the [tests](./src/ic-websocket-gateway/src/tests) folder. You can run them with:
 
 ```
-cargo test
+./scripts/unit_test.sh
 ```
 
-### Integration tests (Rust test canister)
+### Integration tests
 
-Integration tests require:
+Integration tests use the IC WebSocket SDKs and are written in both Rust and Motoko. They require:
 
 -   [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
 -   [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/)
@@ -118,37 +118,28 @@ Integration tests require:
 
 After installing Node.js and dfx, you can run the integration tests as follows:
 
-1. Run a local replica:
+1. Install test dependencies:
+    ```
+    ./scripts/install_integration_test_deps.sh
+    ```
+2. To run integration tests using the Rust test canister:
+    ```
+    ./scripts/integration_test_rs.sh
+    ```
+3. To run integration tests using the Motoko test canister:
+    ```
+    ./scripts/integration_test_mo.sh
+    ```
 
-    ```
-    dfx start --clean --background
-    ```
+These scripts will take care of running the local replica and deploying the desired test canister.
 
-2. Run the gateway:
-    ```
-    cargo run
-    ```
-3. Copy the principal printed on the terminal (as explained above)
-4. Open a new terminal and install test dependencies:
-    ```
-    ./scripts/install_test_dependencies.sh
-    ```
-5. Move to the directory `tests/test_canister_rs` and deploy a test canister using the IC WebSocket CDK:
-    ```
-    dfx deploy test_canister_rs --argument '(opt "<gateway-principal-obtained-in-step-3>")'
-    ```
-6. Move to the directory `tests/integration` and set the environment variables:
-    ```
-    cp .env.example .env
-    ```
-7. Run the test:
-    ```
-    npm test
-    ```
+Integration tests can be found in the [tests/src/integration](./tests/src/integration/) folder.
+
+Tests canisters used in the integration tests can be found in the [tests/src/test_canister_rs](./tests/src/test_canister_rs/) and [tests/src/test_canister_mo](./tests/src/test_canister_mo/) folders.
 
 ### Local test script
 
-To make it easier to run both the unit and integration tests, a script is provided that runs the local replica, the gateway and the tests in sequence. You can run it with:
+To make it easier to run both the unit and integration tests (using Rust test canister), the [scripts/local_test.sh](./scripts/local_test.sh) script is provided. You can run it with:
 
 ```
 ./scripts/local_test.sh

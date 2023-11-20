@@ -1,0 +1,10 @@
+.env
+dist/
+reports/
+
+.dfx/
+declarations/
+
+node_modules/
+
+.mops

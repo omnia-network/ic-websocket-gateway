@@ -3,11 +3,11 @@ members = [
     "src/ic-websocket-gateway",
     "src/ic-identity",
     "src/scripts",
-    "tests/test_canister_rs/src/test_canister_rs",
+    "tests/src/test_canister_rs",
 ]
-default-members = [
-    "src/ic-websocket-gateway",
-]
+default-members = ["src/ic-websocket-gateway"]
+
+resolver = "2"
 
 [workspace.package]
 edition = "2021"

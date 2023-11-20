@@ -1,4 +1,5 @@
 type ClientPrincipal = principal;
+type GatewayPrincipal = principal;
 type ClientKey = record {
   client_principal : ClientPrincipal;
   client_nonce : nat64;
@@ -26,6 +27,7 @@ type CanisterOutputCertifiedMessages = record {
 
 type CanisterWsOpenArguments = record {
   client_nonce : nat64;
+  gateway_principal : GatewayPrincipal;
 };
 
 type CanisterWsOpenResult = variant {

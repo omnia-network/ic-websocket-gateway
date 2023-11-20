@@ -1,7 +1,7 @@
 use ic_cdk_macros::*;
 use std::{cell::RefCell, collections::HashSet};
 
-use canister::{on_close, on_message, on_open, GATEWAY_PRINCIPAL};
+use canister::{on_close, on_message, on_open, AppMessage, GATEWAY_PRINCIPAL};
 use ic_websocket_cdk::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
@@ -25,10 +25,10 @@ fn init(gateway_principal: Option<String>) {
 
     let params = WsInitParams {
         handlers,
-        gateway_principal: if let Some(gateway_principal) = gateway_principal {
-            gateway_principal
+        gateway_principals: if let Some(gateway_principal) = gateway_principal {
+            vec![gateway_principal]
         } else {
-            GATEWAY_PRINCIPAL.to_string()
+            vec![GATEWAY_PRINCIPAL.to_string()]
         },
         send_ack_interval_ms: 10_000,
         keep_alive_timeout_ms: 9_000,
@@ -60,8 +60,11 @@ fn ws_close(args: CanisterWsCloseArguments) -> CanisterWsCloseResult {
 
 // method called by the WS Gateway to send a message of type GatewayMessage to the canister
 #[update]
-fn ws_message(args: CanisterWsMessageArguments) -> CanisterWsMessageResult {
-    ic_websocket_cdk::ws_message(args)
+fn ws_message(
+    args: CanisterWsMessageArguments,
+    msg_type: Option<AppMessage>,
+) -> CanisterWsMessageResult {
+    ic_websocket_cdk::ws_message(args, msg_type)
 }
 
 // method called by the WS Gateway to get messages for all the clients it serves
@@ -71,12 +74,6 @@ fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessage
 }
 
 //// Debug/tests methods
-// wipe all websocket data in the canister
-#[update]
-fn ws_wipe() {
-    ic_websocket_cdk::wipe();
-}
-
 // send a message to the client, usually called by the canister itself
 #[update]
 fn ws_send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterWsSendResult {

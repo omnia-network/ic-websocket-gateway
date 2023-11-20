@@ -1,7 +1,7 @@
-import IcWebSocket, { generateRandomIdentity } from "ic-websocket-js";
+import IcWebSocket, { createWsConfig, generateRandomIdentity } from "ic-websocket-js";
 import environment from "./utils/environment";
-import { deserializeAppMessage, serializeAppMessage } from "./utils/idl";
-import type { _SERVICE } from "../../test_canister_rs/src/declarations/test_canister_rs/test_canister_rs.did";
+import { test_canister_rs } from "../declarations/test_canister_rs";
+import type { AppMessage, _SERVICE } from "../declarations/test_canister_rs/test_canister_rs.did";
 
 /// IcWebsocket parameters
 const gatewayAddress = environment.WS_GATEWAY_URL;
@@ -10,7 +10,7 @@ const canisterId = environment.TEST_CANISTER_ID;
 
 /// test constants & variables
 const pingPongCount = 20;
-let ws: IcWebSocket;
+let ws: IcWebSocket<_SERVICE, AppMessage>;
 
 /// jest configuration
 jest.setTimeout(180_000);
@@ -49,12 +49,15 @@ const reconstructWsMessage = (index: number) => {
 /// tests
 describe("WS client", () => {
   it("should open a connection", async () => {
-    ws = new IcWebSocket(gatewayAddress, undefined, {
+    const wsConfig = createWsConfig({
       canisterId,
+      canisterActor: test_canister_rs,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
       ackMessageTimeout: 19_000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
+
+    ws = new IcWebSocket(gatewayAddress, undefined, wsConfig);
 
     ws.onopen = () => {
       // No assertion needed, the test will pass as long as the onopen event fires
@@ -77,7 +80,7 @@ describe("WS client", () => {
       };
 
       ws.onmessage = async (event) => {
-        const message = deserializeAppMessage(event.data);
+        const message = event.data;
         if (!(message.text === reconstructWsMessage(messageCounter))) {
           return reject("Received message does not match expected message");
         }
@@ -90,10 +93,10 @@ describe("WS client", () => {
         }
         expect(indices.length).toBe(messageCounter);
 
-        const pongMessage = serializeAppMessage({
+        const pongMessage: AppMessage = {
           text: message.text + "-pong",
           timestamp: BigInt(Date.now()),
-        });
+        };
 
         ws.send(pongMessage);
       };

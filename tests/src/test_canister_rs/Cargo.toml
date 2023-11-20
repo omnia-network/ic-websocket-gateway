@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
 ic-cdk-macros = { workspace = true }
-ic-websocket-cdk = "0.1.3"
+ic-websocket-cdk = { git = "https://github.com/omnia-network/ic-websocket-cdk-rs", branch = "multiple-gw" }
 serde = { workspace = true }
