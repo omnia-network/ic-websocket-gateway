@@ -1,4 +1,4 @@
-use crate::canister_methods::ClientId;
+use crate::client_connection_handler::ClientId;
 use crate::metrics::canister_poller_metrics::{
     IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
 };

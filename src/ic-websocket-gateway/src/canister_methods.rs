@@ -6,8 +6,6 @@ use ic_agent::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub type ClientId = u64;
-
 pub type ClientPrincipal = Principal;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]

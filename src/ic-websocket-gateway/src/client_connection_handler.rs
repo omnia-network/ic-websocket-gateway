@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::{CanisterWsOpenArguments, ClientId, ClientKey},
+    canister_methods::{CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference, MessageReference},
     gateway_server::ClientSession,
@@ -29,6 +29,13 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
+
+pub type ClientId = u64;
+
+#[derive(Serialize, Deserialize)]
+struct GatewayHandshakeMessage {
+    gateway_principal: Principal,
+}
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -111,16 +118,25 @@ impl ClientConnectionHandler {
                 // needed because the client doesn't know the principal of the gateway it is connecting to but only it's IP
                 // however, the client has to tell the canister CDK which principal is authorized to poll its updates from the canister queue,
                 // the returned principal will be included by the client in the first envelope it sends via WS
-                let gateway_principal =
-                    self.agent.get_principal().expect("Principal should be set");
 
-                send_ws_message_to_client(
+                let handshake_message = GatewayHandshakeMessage {
+                    gateway_principal: self.agent.get_principal().expect("Principal should be set"),
+                };
+
+                let ic_websocket_setup_span =
+                    span!(parent: &Span::current(), Level::DEBUG, "ic_websocket_setup");
+                if let Err(e) = send_ws_message_to_client(
                     &mut ws_write,
                     Message::Binary(
-                        serialize(gateway_principal).expect("Principal should be serializable"),
+                        serialize(handshake_message).expect("Principal should be serializable"),
                     ),
                 )
-                .await;
+                .await
+                {
+                    ic_websocket_setup_span.in_scope(|| {
+                        error!("Error sending handshake message to client: {:?}", e);
+                    });
+                }
 
                 // [client connection handler task]        [poller task]
                 // message_for_client_rx            <----- message_for_client_tx
@@ -258,7 +274,6 @@ impl ClientConnectionHandler {
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        let ic_websocket_setup_span = span!(parent: &Span::current(), Level::DEBUG, "ic_websocket_setup");
                                         match self.inspect_ic_ws_open_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
@@ -297,7 +312,7 @@ impl ClientConnectionHandler {
                                                         error!("Could not relay request to IC. Error: {:?}", e);
                                                     }
                                                 };
-                                                setup_connection_async.instrument(ic_websocket_setup_span).await;
+                                                setup_connection_async.instrument(ic_websocket_setup_span.clone()).await;
 
                                                 request_connection_setup_events
                                                     .metrics
