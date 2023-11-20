@@ -28,7 +28,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
 
 /// Message sent by the client using the custom @dfinity/agent (via WS)
 #[derive(Serialize, Deserialize)]
@@ -48,7 +48,7 @@ pub enum IcWsConnectionState {
     /// client requested IC WebSocket connection
     Requested(ClientKey),
     /// WebSocket connection between client and WS Gateway closed
-    Closed((ClientKey, Principal)),
+    Closed((ClientKey, Principal, Span)),
 }
 
 /// possible errors that can occur during a IC WebSocket connection
@@ -102,7 +102,9 @@ impl ClientConnectionHandler {
                 request_connection_setup_events
                     .metrics
                     .set_accepted_ws_connection();
+
                 debug!("Accepted WebSocket connection");
+
                 let (mut ws_write, mut ws_read) = ws_stream.split();
 
                 // as soon as the WS connection with the client is established, send the gateway principal
@@ -140,6 +142,16 @@ impl ClientConnectionHandler {
                         biased;
                         // waits for the token to be cancelled
                         _ = &mut wait_for_cancellation => {
+                            let graceful_shutdown_span = span!(parent: &Span::current(), Level::DEBUG, "graceful_shutdown");
+                            // close the WebSocket connection
+                            if let Err(e) = ws_write.close().await {
+                                graceful_shutdown_span.in_scope(|| {
+                                    error!("Error closing the WS connection: {:?}", e);
+                                });
+                            }
+                            graceful_shutdown_span.in_scope(|| {
+                                debug!("Terminating client connection handler task due to graceful shutdown");
+                            });
                             self.send_connection_state_to_clients_manager(
                                 IcWsConnectionState::Closed(
                                     (
@@ -148,23 +160,20 @@ impl ClientConnectionHandler {
                                             .read()
                                             .await
                                             .expect("must be some by now")
-                                            .clone()
+                                            .clone(),
+                                        graceful_shutdown_span
                                     )
                                 )
                             )
                             .await;
-                            // close the WebSocket connection
-                            if let Err(e) = ws_write.close().await {
-                                error!("Error closing the WS connection: {:?}", e);
-                            }
-                            debug!("Terminating client connection handler task due to graceful shutdown");
                             break 'handler_loop;
                         },
                         // wait for canister message to send to client
                         Some(poller_message) = message_for_client_rx.recv() => {
                             match poller_message {
                                 // check if the poller task detected an error from the CDK
-                                IcWsConnectionUpdate::Message(canister_message) => {
+                                IcWsConnectionUpdate::Message((canister_message, parent_span)) => {
+                                    let message_for_client_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
                                     let message_key = MessageReference::new(
                                         self.canister_id
                                             .read()
@@ -178,22 +187,42 @@ impl ClientConnectionHandler {
                                     // relay canister message to client, cbor encoded
                                     match to_vec(&canister_message) {
                                         Ok(bytes) => {
-                                            send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await;
-                                            outgoing_canister_message_events.metrics.set_message_sent_to_client();
-                                            trace!("Message with key: {:?} sent to client", canister_message.key);
+                                            match send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await {
+                                                Ok(_) => {
+                                                    outgoing_canister_message_events.metrics.set_message_sent_to_client();
+                                                    message_for_client_span.in_scope(|| {
+                                                        trace!("Message sent to client");
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    message_for_client_span.in_scope(|| {
+                                                        outgoing_canister_message_events.metrics.set_message_sent_to_client();
+                                                        error!("Could not send message to client. Error: {:?}", e);
+                                                    });
+                                                }
+                                            }
                                         },
                                         Err(e) => {
                                             outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
-                                            error!("Could not serialize canister message. Error: {:?}", e);
+                                            message_for_client_span.in_scope(|| {
+                                                error!("Could not serialize canister message. Error: {:?}", e);
+                                            });
                                         }
                                     }
                                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
                                 },
                                 // the poller task terminates all the client connection tasks connected to that poller
                                 IcWsConnectionUpdate::Error(e) => {
+                                    let poller_error_span = span!(parent: &Span::current(), Level::DEBUG, "poller_error");
                                     // close the WebSocket connection
-                                    ws_write.close().await.unwrap();
-                                    error!("Terminating client connection handler task. Error: {}", e);
+                                    if let Err(e) = ws_write.close().await {
+                                        poller_error_span.in_scope(|| {
+                                            error!("Error closing the WS connection: {:?}", e);
+                                        });
+                                    }
+                                    poller_error_span.in_scope(|| {
+                                        error!("Terminating client connection handler task. Error: {}", e);
+                                    });
                                     break 'handler_loop;
                                 }
                             }
@@ -205,29 +234,40 @@ impl ClientConnectionHandler {
                                 Ok(Some(message)) => {
                                     // check if the WebSocket connection is closed
                                     if message.is_close() {
+                                        let client_disconnection_span = span!(parent: &Span::current(), Level::DEBUG, "client_disconnection");
+                                        client_disconnection_span.in_scope(|| {
+                                            debug!("Terminating client connection handler task due to client disconnection");
+                                        });
+
                                         // let the main task know that it should remove the client's session from the WS Gateway state
                                         self.send_connection_state_to_clients_manager(
                                             IcWsConnectionState::Closed(
-                                            (
-                                                self.key.clone().expect("must be some by now"),
-                                                self.canister_id
-                                                    .read()
-                                                    .await
-                                                    .expect("must be some by now")
-                                                    .clone()
+                                                (
+                                                    self.key.clone().expect("must be some by now"),
+                                                    self.canister_id
+                                                        .read()
+                                                        .await
+                                                        .expect("must be some by now")
+                                                        .clone(),
+                                                    client_disconnection_span
                                                 ),
                                             )
                                         )
                                         .await;
-                                        debug!("Terminating client connection handler task due to client disconnection");
                                         break 'handler_loop;
                                     }
                                     // check if the IC WebSocket connection hasn't been established yet
                                     if !ic_websocket_setup {
-                                        match self.inspect_ic_ws_setup_message(message.clone()).await {
+                                        let ic_websocket_setup_span = span!(parent: &Span::current(), Level::DEBUG, "ic_websocket_setup");
+                                        match self.inspect_ic_ws_open_message(message.clone()).await {
                                             // if the IC WS connection is setup, create a new client session and send it to the main task
                                             Ok(IcWsConnectionState::Requested(client_key)) => {
+                                                ic_websocket_setup_span.in_scope(|| {
+                                                    debug!("Validated WS open message");
+                                                });
+
                                                 ic_websocket_setup = true;
+
                                                 self.key = Some(client_key.clone());
                                                 let client_session = ClientSession::new(
                                                     self.id,    // used as reference for events metrics of connection establishment in gateway server
@@ -238,23 +278,27 @@ impl ClientConnectionHandler {
                                                         .expect("must be some by now")
                                                         .clone(),
                                                     message_for_client_tx.clone(),  // used to send canister updates from the demux to the client connection handler
+                                                    Span::current(),
                                                 );
-                                                self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
-                                                    client_session,
-                                                ))
-                                                .await;
-                                                // at this point we are NOT guaranteed that the gateway server received the client session
 
-                                                // if the poller is already running, it might receive the first canister message before it receives the channel from the gateway server.
-                                                // relaying the request to the IC after sending the client session to gateway server might give it enough time to send the client channel to the poller
-                                                // but this is not guaranteed
-                                                // TODO: evaluate whether it is necessary to wait until the poller receives the channel or if we can assume that
-                                                //       time_to_relay_request_to_ic + time_to_poll_first_message >> time_to_send_channel_to_poller
-                                                if let Err(e) = self.relay_call_request_to_ic(message).await {
-                                                    warn!("Could not relay request to IC. Error: {:?}", e);
-                                                }
+                                                let setup_connection_async = async {
+                                                    self.send_connection_state_to_clients_manager(IcWsConnectionState::Setup(
+                                                        client_session,
+                                                    ))
+                                                    .await;
+                                                    // at this point we are NOT guaranteed that the gateway server received the client session
 
-                                                debug!("Created new client session");
+                                                    // if the poller is already running, it might receive the first canister message before it receives the channel from the gateway server.
+                                                    // relaying the request to the IC after sending the client session to gateway server might give it enough time to send the client channel to the poller
+                                                    // but this is not guaranteed
+                                                    // TODO: evaluate whether it is necessary to wait until the poller receives the channel or if we can assume that
+                                                    //       time_to_relay_request_to_ic + time_to_poll_first_message >> time_to_send_channel_to_poller
+                                                    if let Err(e) = self.relay_call_request_to_ic(message).await {
+                                                        error!("Could not relay request to IC. Error: {:?}", e);
+                                                    }
+                                                };
+                                                setup_connection_async.instrument(ic_websocket_setup_span).await;
+
                                                 request_connection_setup_events
                                                     .metrics
                                                     .set_ws_connection_setup();
@@ -268,11 +312,12 @@ impl ClientConnectionHandler {
                                                 warn!("IC WS setup failed. Error: {:?}", e);
                                                 break 'handler_loop;
                                             }
-                                            Ok(variant) => error!("handle_ic_ws_setup should not return variant: {:?}", variant)
+                                            Ok(variant) => unreachable!("handle_ic_ws_setup should not return variant: {:?}", variant)
                                         }
                                     } else {
+                                        let client_message_span = span!(parent: &Span::current(), Level::TRACE, "client_message");
                                         // relay the envelope to the IC and the response back to the client
-                                        if let Err(e) = self.handle_ws_message(message).await {
+                                        if let Err(e) = self.handle_ws_message(message).instrument(client_message_span).await {
                                             warn!("Handling of WebSocket message failed. Error: {:?}", e);
                                             break 'handler_loop;
                                         }
@@ -283,6 +328,10 @@ impl ClientConnectionHandler {
                                 // just to be sure, send the cleanup message again
                                 // TODO: figure out if this is necessary or can be ignored
                                 Ok(None) => {
+                                    let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
+                                    websocket_error_span.in_scope(|| {
+                                        warn!("Client WebSocket connection already closed");
+                                    });
                                     self.send_connection_state_to_clients_manager(
                                         IcWsConnectionState::Closed(
                                             (
@@ -291,16 +340,20 @@ impl ClientConnectionHandler {
                                                     .read()
                                                     .await
                                                     .expect("must be some by now")
-                                                    .clone()
+                                                    .clone(),
+                                                websocket_error_span
                                             )
                                         )
                                     )
                                     .await;
-                                    warn!("Client WebSocket connection already closed");
                                     break 'handler_loop;
                                 },
                                 // the client's still needs to be cleaned up so it is necessary to return the client id
                                 Err(e) => {
+                                    let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
+                                    websocket_error_span.in_scope(|| {
+                                        warn!("Client WebSocket connection error: {:?}", e);
+                                    });
                                     // let the main task know that it should remove the client's session from the WS Gateway state
                                     self.send_connection_state_to_clients_manager(
                                         IcWsConnectionState::Closed(
@@ -310,12 +363,12 @@ impl ClientConnectionHandler {
                                                     .read()
                                                     .await
                                                     .expect("must be some by now")
-                                                    .clone()
+                                                    .clone(),
+                                                websocket_error_span
                                             )
                                         )
                                     )
                                     .await;
-                                    warn!("Client WebSocket connection error: {:?}", e);
                                     break 'handler_loop;
                                 }
                             };
@@ -328,9 +381,10 @@ impl ClientConnectionHandler {
                 info!("Refused WebSocket connection {:?}", e);
             },
         }
+        debug!("Terminated client connection handler task");
     }
 
-    async fn inspect_ic_ws_setup_message(
+    async fn inspect_ic_ws_open_message(
         &self,
         ws_message: Message,
     ) -> Result<IcWsConnectionState, IcWsError> {
@@ -393,14 +447,11 @@ impl ClientConnectionHandler {
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
-            trace!(
-                "Relayed serialized envelope of type Call to canister with principal: {:?}",
-                canister_id.to_string()
-            );
+            trace!("Relayed serialized envelope to canister");
             Ok(())
         } else {
             Err(IcWsError::Initialization(String::from(
-                "gateway can only relay envelopes with content of Call variant",
+                "Gateway can only relay envelopes with content of Call variant",
             )))
         }
     }
@@ -469,9 +520,9 @@ fn serialize<S: Serialize>(message: S) -> Result<Vec<u8>, IcWsError> {
 async fn send_ws_message_to_client<S: AsyncRead + AsyncWrite + Unpin>(
     ws_write: &mut SplitSink<WebSocketStream<S>, Message>,
     message: Message,
-) {
+) -> Result<(), IcWsError> {
     if let Err(e) = ws_write.send(message).await {
-        // TODO: graceful shutdown fo client task
-        error!("Could not send message to client: {:?}", e);
+        return Err(IcWsError::WebSocket(e.to_string()));
     }
+    Ok(())
 }
