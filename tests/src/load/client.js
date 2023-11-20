@@ -1,7 +1,7 @@
 require('./prepare-environment.js');
 
-const { default: IcWebsocket, generateRandomIdentity } = require('ic-websocket-js/lib/cjs/index.js');
-const { deserializeAppMessage, serializeAppMessage } = require('./idl.js');
+const { default: IcWebsocket, generateRandomIdentity, createWsConfig } = require('ic-websocket-js/lib/cjs/index.js');
+const { test_canister_rs } = require('../declarations/test_canister_rs/index.js');
 
 const {
   WS_GATEWAY_URL,
@@ -14,12 +14,15 @@ const messagesSentPerClient = 20;
 async function connectClient(userContext, events, next) {
   try {
     const startTimestamp = Date.now();
-    const customWs = new IcWebsocket(WS_GATEWAY_URL, undefined, {
+
+    const wsConfig = createWsConfig({
       canisterId: TEST_CANISTER_ID,
+      canisterActor: test_canister_rs,
       networkUrl: IC_URL,
       identity: generateRandomIdentity(),
       ackMessageTimeout: 19_000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
+    const customWs = new IcWebsocket(WS_GATEWAY_URL, undefined, wsConfig);
 
     await new Promise((resolve, reject) => {
       customWs.onopen = () => {
@@ -62,7 +65,7 @@ async function sendMessages(userContext, events, next) {
           return resolve();
         }
 
-        const message = deserializeAppMessage(event.data);
+        const message = event.data;
 
         events.emit(
           'histogram',
@@ -71,10 +74,10 @@ async function sendMessages(userContext, events, next) {
         );
 
         try {
-          const messageToSend = serializeAppMessage({
+          const messageToSend = {
             text: message.text + "-pong",
             timestamp: Date.now(),
-          });
+          };
           ws.send(messageToSend);
 
           events.emit('counter', 'send_message_success', 1);

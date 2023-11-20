@@ -1,6 +1,6 @@
 config:
   target: "IC WebSocket Gateway"
-  processor: "./dist/client.bundle.js"
+  processor: "./dist/load/client.bundle.js"
   phases:
     - duration: 5
       arrivalRate: 1

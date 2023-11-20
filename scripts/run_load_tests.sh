@@ -2,9 +2,11 @@
 
 set -e
 
+cd tests
+
 # Compile load test script
 echo "Compiling load test script..."
-npm run bundle
+npm run load:bundle
 
 # Create reports directory if it doesn't exist
 mkdir -p reports

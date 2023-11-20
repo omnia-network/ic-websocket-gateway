@@ -145,6 +145,16 @@ To make it easier to run both the unit and integration tests (using Rust test ca
 ./scripts/local_test.sh
 ```
 
+### Load tests
+
+Load tests are provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
+
+```
+./scripts/run_load_test.sh
+```
+
+This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/integration_test_rs.sh](./scripts/integration_test_rs.sh) is a good reference for how to do that.
+
 # How it works
 
 ## Overview
