@@ -9,7 +9,7 @@ actor class TestCanister() {
 
   Debug.print("TestCanister actor started");
 
-  let ws_state = IcWebSocketCdk.IcWebSocketState("sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae");
+  let ws_state = IcWebSocketCdk.IcWebSocketState(["sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae"]);
 
   type ClientPrincipal = IcWebSocketCdk.ClientPrincipal;
 
@@ -72,9 +72,9 @@ actor class TestCanister() {
 
   let params = IcWebSocketCdk.WsInitParams(
     handlers,
-    null,
-    null, // ?Nat64.fromNat(2_000),
-    null, // ?Nat64.fromNat(1_000),
+    ?30,
+    ?Nat64.fromNat(10_000),
+    ?Nat64.fromNat(9_000),
   );
 
   let ws = IcWebSocketCdk.IcWebSocket(ws_state, params);
@@ -90,8 +90,8 @@ actor class TestCanister() {
   };
 
   // method called by the WS Gateway to send a message of type GatewayMessage to the canister
-  public shared ({ caller }) func ws_message(args : IcWebSocketCdk.CanisterWsMessageArguments) : async IcWebSocketCdk.CanisterWsMessageResult {
-    await ws.ws_message(caller, args);
+  public shared ({ caller }) func ws_message(args : IcWebSocketCdk.CanisterWsMessageArguments, msg_type : ?AppMessage) : async IcWebSocketCdk.CanisterWsMessageResult {
+    await ws.ws_message(caller, args, msg_type);
   };
 
   // method called by the WS Gateway to get messages for all the clients it serves
