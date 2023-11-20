@@ -46,9 +46,9 @@ There are some command line arguments that you can set when running the gateway:
 
 A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](./docker-compose.yml) file to run the gateway. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
 
-A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway).
+A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway). This is the image used in the [docker-compose.yml](./docker-compose.yml) file.
 
-Steps to run the gateway with Docker:
+To run the gateway with Docker Compose, follow these steps:
 
 1. Set the environment variables:
 
@@ -63,10 +63,6 @@ Steps to run the gateway with Docker:
     docker compose up
     ```
 5. The Gateway will print its principal in the container logs, just as explained above.
-6. Whenever you want to rebuild the gateway image, run:
-    ```
-    docker compose up --build
-    ```
 
 ### Obtain a TLS certificate
 
@@ -106,6 +102,17 @@ The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [J
 - set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
 - optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
 
+If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run a Jaeger agent together with the gateway by simply running:
+
+```
+docker compose --profile jaeger up -d
+```
+
+making sure that you've set the `TELEMETRY_JAEGER_AGENT_ENDPOINT` variable in the `.env` file to:
+
+```
+TELEMETRY_JAEGER_AGENT_ENDPOINT=jaeger:16686
+```
 
 # Development
 
