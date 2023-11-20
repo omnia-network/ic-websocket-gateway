@@ -83,13 +83,13 @@ pub struct GatewayServer {
 impl GatewayServer {
     pub async fn new(
         gateway_address: String,
-        subnet_url: String,
+        ic_network_url: String,
         identity: BasicIdentity,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
-        let fetch_ic_root_key = subnet_url != "https://icp0.io";
+        let fetch_ic_root_key = ic_network_url != "https://icp0.io";
 
-        let agent = canister_methods::get_new_agent(&subnet_url, identity, fetch_ic_root_key)
+        let agent = canister_methods::get_new_agent(&ic_network_url, identity, fetch_ic_root_key)
             .await
             .expect("could not get new agent");
         let agent = Arc::new(agent);

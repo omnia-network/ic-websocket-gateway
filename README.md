@@ -34,8 +34,10 @@ There are some command line arguments that you can set when running the gateway:
 | Argument | Description | Default |
 | --- | --- | --- |
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
-| `--subnet-url` | The URL of the IC subnet to which the gateway will connect. | `http://127.0.0.1:4943` |
+| `--ic-network-url` | The URL of the IC network to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
+| `--min-incoming-interval` | The minimum interval (in **milliseconds**) between incoming messages. If below this threshold, the gateway starts rate limiting. | `100` |
+| `--compute-averages-threshold` | The threshold after which the metrics analyzer computes the averages of the intervals/latencies. | `10` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 
@@ -231,5 +233,5 @@ Feel free to open issues, pull requests, join our [Discord](https://discord.com/
 
 -   [Linkedin](https://www.linkedin.com/in/luca-bertelli-407041128/)
 -   [Twitter](https://twitter.com/ilbert_luca)
--   [Calendly](https://cal.com/lucabertelli/)
+-   [Calendly](https://cal.com/lucabertelli/ic-websocket)
 -   [Email](liuc@omnia-network.com)

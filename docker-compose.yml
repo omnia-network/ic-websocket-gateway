@@ -9,7 +9,7 @@ services:
       [
         "--gateway-address",
         "0.0.0.0:443",
-        "--subnet-url",
+        "--ic-network-url",
         "${IC_URL}",
         "--polling-interval",
         "${POLLING_INTERVAL}",

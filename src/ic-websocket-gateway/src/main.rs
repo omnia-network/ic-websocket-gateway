@@ -37,20 +37,20 @@ mod tests {
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
     #[structopt(long, default_value = "http://127.0.0.1:4943")]
-    /// can be set by running: 'cargo run -- --subnet-url=http://localhost:4943'
-    subnet_url: String,
+    /// the URL of the IC network
+    ic_network_url: String,
 
     #[structopt(long, default_value = "0.0.0.0:8080")]
     /// address at which the WebSocket Gateway is reachable
     gateway_address: String,
 
     #[structopt(long, default_value = "100")]
-    /// time interval at which the canister is polled
+    /// time interval (in milliseconds) at which the canister is polled
     polling_interval: u64,
 
     #[structopt(long, default_value = "100")]
-    /// minimum interval between incoming messages
-    /// if below this threshold, the gateway starts rate liimiting
+    /// minimum interval (in milliseconds) between incoming messages
+    /// if below this threshold, the gateway starts rate limiting
     min_incoming_interval: u64,
 
     #[structopt(long, default_value = "10")]
@@ -166,7 +166,7 @@ async fn main() -> Result<(), String> {
 
     let mut gateway_server = GatewayServer::new(
         deployment_info.gateway_address,
-        deployment_info.subnet_url,
+        deployment_info.ic_network_url,
         identity,
         events_channel_tx,
     )
