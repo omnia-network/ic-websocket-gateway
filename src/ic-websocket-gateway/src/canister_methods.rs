@@ -6,8 +6,6 @@ use ic_agent::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub type ClientId = u64;
-
 pub type ClientPrincipal = Principal;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]
@@ -41,6 +39,7 @@ pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, S
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenArguments {
     pub client_nonce: u64,
+    pub gateway_principal: Principal,
 }
 
 /// The arguments for [ws_close].
