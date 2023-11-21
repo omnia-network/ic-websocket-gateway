@@ -9,7 +9,7 @@
     "Canister"
   ],
   "scripts": {
-    "postinstall": "mops install",
+    "postinstall": "npx mops install",
     "load:bundle": "webpack",
     "integration:test": "LOG_LEVEL=debug jest",
     "generate:test_canister_rs": "dfx generate test_canister_rs",
