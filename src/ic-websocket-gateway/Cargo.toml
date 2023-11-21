@@ -1,6 +1,6 @@
 [package]
 name = "ic_websocket_gateway"
-version = "1.0.5"
+version = "1.1.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -23,7 +23,12 @@ tokio-tungstenite = "0.20.0"
 futures-util = "0.3.28"
 structopt = "0.3.21"
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.17", features = ["fmt", "std", "json", "env-filter"] }
+tracing-subscriber = { version = "0.3.17", features = [
+  "fmt",
+  "std",
+  "json",
+  "env-filter",
+] }
 tracing-appender = "0.2"
 ic-identity = { version = "0.1.0", path = "../ic-identity" }
 rand = "0.8"
