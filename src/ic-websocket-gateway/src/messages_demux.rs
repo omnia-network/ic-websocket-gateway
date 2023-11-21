@@ -1,20 +1,33 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
+use candid::Principal;
 use tokio::sync::{mpsc::Sender, RwLock};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, span, trace, warn, Id, Instrument, Level, Span};
 
 use crate::{
     canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
     canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{Events, EventsCollectionType, EventsImpl, EventsReference},
+    events_analyzer::{
+        Events, EventsCollectionType, EventsImpl, EventsReference, MessageReference,
+    },
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
     },
 };
 
+/// number of clients registered in the CDK
+pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
+
 pub struct MessagesDemux {
+    canister_id: Principal,
     /// channels used to communicate with the connection handler task of the client identified by the client key
-    client_channels: HashMap<ClientKey, Sender<IcWsConnectionUpdate>>,
+    client_channels: HashMap<ClientKey, (Sender<IcWsConnectionUpdate>, Span)>,
     clients_message_queues: HashMap<
         ClientKey,
         Vec<(
@@ -22,11 +35,15 @@ pub struct MessagesDemux {
             EventsImpl<IncomingCanisterMessageEventsMetrics>,
         )>,
     >,
+    recently_removed_clients: HashSet<ClientKey>,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
 }
 
 impl MessagesDemux {
-    pub fn new(analyzer_channel_tx: Sender<Box<dyn Events + Send>>) -> Self {
+    pub fn new(
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        canister_id: Principal,
+    ) -> Self {
         // queues where the poller temporarily stores messages received from the canister before a client is registered
         // this is needed because the poller might get a message for a client which is not yet regiatered in the poller
         let clients_message_queues: HashMap<
@@ -38,42 +55,49 @@ impl MessagesDemux {
         > = HashMap::new();
 
         Self {
+            canister_id,
             client_channels: HashMap::new(),
             clients_message_queues,
+            recently_removed_clients: HashSet::new(),
             analyzer_channel_tx,
         }
     }
 
-    pub fn remove_client_state(&mut self, client_key: &ClientKey) {
-        self.remove_client_channel(client_key);
-        self.remove_client_message_queue(client_key);
+    pub fn remove_client_state(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        self.remove_client_channel(client_key, Span::current());
+        self.remove_client_message_queue(client_key, Span::current());
+        // TODO: forget client keys after a while
+        self.recently_removed_clients.insert(client_key.to_owned());
     }
 
-    pub fn client_channels(&self) -> Vec<&Sender<IcWsConnectionUpdate>> {
-        self.client_channels.values().collect()
+    pub fn client_channels(&self) -> &HashMap<ClientKey, (Sender<IcWsConnectionUpdate>, Span)> {
+        &self.client_channels
     }
 
     pub fn add_client_channel(
         &mut self,
         client_key: ClientKey,
         client_channel: Sender<IcWsConnectionUpdate>,
+        client_connection_span: Span,
     ) {
-        debug!("Added new channel to poller for client: {:?}", client_key);
+        client_connection_span.in_scope(|| {
+            debug!("Added new channel to poller");
+        });
+        CLIENTS_REGISTERED_IN_CDK.fetch_add(1, Ordering::SeqCst);
         self.client_channels
-            .insert(client_key.clone(), client_channel);
+            .insert(client_key.clone(), (client_channel, client_connection_span));
     }
 
-    fn remove_client_channel(&mut self, client_key: &ClientKey) {
-        debug!(
-            "Removed client channel from poller for client {:?}",
-            client_key
-        );
+    fn remove_client_channel(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        debug!("Removed client channel from poller");
         self.client_channels.remove(client_key);
     }
 
-    pub fn count_client_channels(&self) -> usize {
-        let count = self.client_channels.len();
-        debug!("{} clients connected to poller", count);
+    pub fn count_registered_clients(&self) -> usize {
+        let count = CLIENTS_REGISTERED_IN_CDK.load(Ordering::SeqCst);
+        trace!("{} clients connected to poller", count);
         count
     }
 
@@ -85,10 +109,7 @@ impl MessagesDemux {
             EventsImpl<IncomingCanisterMessageEventsMetrics>,
         ),
     ) {
-        debug!(
-            "Added message queue from poller for client {:?}",
-            client_key
-        );
+        debug!("Added message queue from poller");
         if let Some(message_queue) = self.clients_message_queues.get_mut(&client_key) {
             message_queue.push(message);
         } else {
@@ -97,11 +118,9 @@ impl MessagesDemux {
         }
     }
 
-    fn remove_client_message_queue(&mut self, client_key: &ClientKey) {
-        debug!(
-            "Removed message queue from poller for client {:?}",
-            client_key
-        );
+    fn remove_client_message_queue(&mut self, client_key: &ClientKey, span: Span) {
+        let _guard = span.entered();
+        debug!("Removed message queue from poller");
         self.clients_message_queues.remove(client_key);
     }
 
@@ -110,34 +129,38 @@ impl MessagesDemux {
         self.clients_message_queues.len()
     }
 
-    pub async fn process_queues(&mut self) {
+    pub async fn process_queues(&mut self, polling_iteration_span_id: Option<Id>) {
         let mut to_be_relayed = Vec::new();
         self.clients_message_queues
             .retain(|client_key, message_queue| {
-                if let Some(client_channel_tx) = self.client_channels.get(&client_key) {
+                if let Some(message_for_client_tx) = self.client_channels.get(&client_key) {
                     // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
                     // thus the respective queue does not need to be retained
                     // relay all the messages previously received for the corresponding client
-                    to_be_relayed.push((client_channel_tx.to_owned(), message_queue.to_owned()));
+                    to_be_relayed
+                        .push((message_for_client_tx.to_owned(), message_queue.to_owned()));
                     return false;
                 }
                 // if the client channel has not been received yet, keep the messages in the queue
                 true
             });
         // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-        for (client_channel_tx, message_queue) in to_be_relayed {
+        for ((message_for_client_tx, parent_span), message_queue) in to_be_relayed {
             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
-                warn!(
-                    "Processing message with key: {:?} from queue",
-                    canister_to_client_message.key
-                );
+                let canister_message_span = span!(parent: &parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
+                canister_message_span.follows_from(polling_iteration_span_id.clone());
+                canister_message_span.in_scope(|| {
+                    warn!("Processing message from queue");
+                });
                 self.relay_message(
                     canister_to_client_message,
-                    &client_channel_tx,
+                    &message_for_client_tx,
                     incoming_canister_message_events,
                 )
+                .instrument(canister_message_span)
                 .await;
             }
+            drop(parent_span);
         }
     }
 
@@ -145,6 +168,7 @@ impl MessagesDemux {
         &mut self,
         msgs: CanisterOutputCertifiedMessages,
         message_nonce: Arc<RwLock<u64>>,
+        polled_messages_span_id: Option<Id>,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
             let canister_to_client_message = CanisterToClientMessage {
@@ -163,32 +187,39 @@ impl MessagesDemux {
                 .set_start_relaying_message();
 
             let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+            let message_key = MessageReference::new(self.canister_id, last_message_nonce.clone());
             incoming_canister_message_events.reference =
-                Some(EventsReference::MessageNonce(last_message_nonce));
+                Some(EventsReference::MessageReference(message_key));
             match self
                 .client_channels
                 .get(&canister_output_message.client_key)
             {
-                Some(client_channel_tx) => {
-                    trace!(
-                        "Received message with key: {:?} from canister",
-                        canister_to_client_message.key
-                    );
+                Some((message_for_client_tx, client_connection_span)) => {
+                    let canister_message_span = span!(parent: client_connection_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
+                    canister_message_span.follows_from(polled_messages_span_id.clone());
+                    canister_message_span.in_scope(|| trace!("Received message from canister",));
                     self.relay_message(
                         canister_to_client_message,
-                        client_channel_tx,
+                        message_for_client_tx,
                         incoming_canister_message_events,
                     )
+                    .instrument(canister_message_span)
                     .await;
                 },
                 None => {
-                    // TODO: we should distinguish the case in which there is no client channel because the client's state hasn't been registered (yet)
-                    //       from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
-                    warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_output_message.client_key, canister_to_client_message.key);
-                    self.add_message_to_client_queue(
-                        &canister_output_message.client_key,
-                        (canister_to_client_message, incoming_canister_message_events),
-                    )
+                    // distinguish the case in which there is no client channel because the client's session hasn't been registered (yet)
+                    // from the case in which the client has just disconnected (and its client channel removed before the polling returns new messages fot that client)
+                    if !self
+                        .recently_removed_clients
+                        .contains(&canister_output_message.client_key)
+                    {
+                        // if the client wasn't previously removed, it hasn't connected yet and therefore the message should be added to the queue
+                        warn!("Connection to client with principal: {:?} not opened yet. Adding message with key: {:?} to queue", canister_output_message.client_key, canister_to_client_message.key);
+                        self.add_message_to_client_queue(
+                            &canister_output_message.client_key,
+                            (canister_to_client_message, incoming_canister_message_events),
+                        )
+                    }
                 },
             }
             // TODO: check without panicking
@@ -202,11 +233,14 @@ impl MessagesDemux {
     pub async fn relay_message(
         &self,
         canister_to_client_message: CanisterToClientMessage,
-        client_channel_tx: &Sender<IcWsConnectionUpdate>,
+        message_for_client_tx: &Sender<IcWsConnectionUpdate>,
         mut incoming_canister_message_events: EventsImpl<IncomingCanisterMessageEventsMetrics>,
     ) {
-        if let Err(e) = client_channel_tx
-            .send(IcWsConnectionUpdate::Message(canister_to_client_message))
+        if let Err(e) = message_for_client_tx
+            .send(IcWsConnectionUpdate::Message((
+                canister_to_client_message,
+                Span::current(),
+            )))
             .await
         {
             error!("Client's thread terminated: {}", e);
@@ -217,6 +251,7 @@ impl MessagesDemux {
             incoming_canister_message_events
                 .metrics
                 .set_message_relayed();
+            trace!("Message relayed to connection handler");
         }
         self.analyzer_channel_tx
             .send(Box::new(incoming_canister_message_events))

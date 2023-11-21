@@ -1,0 +1,20 @@
+import "./ws_types.did";
+
+type AppMessage = record {
+  text : text;
+  timestamp : nat64;
+};
+
+type CanisterWsSendResult = variant {
+  Ok : null;
+  Err : text;
+};
+
+service : (text) -> {
+  "ws_open" : (CanisterWsOpenArguments) -> (CanisterWsOpenResult);
+  "ws_close" : (CanisterWsCloseArguments) -> (CanisterWsCloseResult);
+  "ws_message" : (CanisterWsMessageArguments, opt AppMessage) -> (CanisterWsMessageResult);
+  "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
+
+  "ws_send" : (ClientPrincipal, blob) -> (CanisterWsSendResult);
+};

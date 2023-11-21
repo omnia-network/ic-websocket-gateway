@@ -5,32 +5,30 @@ on:
   push:
     branches:
       - main
+      - dev
 
 jobs:
   unit-and-integration-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 16
+          node-version: 18
           cache: "npm"
-          cache-dependency-path: "tests/integration/package-lock.json"
+          cache-dependency-path: "tests/package-lock.json"
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.69.0
+          toolchain: "stable"
       - uses: aviate-labs/setup-dfx@v0.2.6
         with:
-          dfx-version: 0.15.0
+          dfx-version: 0.15.1
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: "true"
-          workspaces: |
-            .
-            tests/test_canister_rs
-      - name: Install tests dependencies
-        run: ./scripts/install_test_dependencies.sh
       - name: Run unit tests
         run: ./scripts/ci_cd_test_unit.sh
+      - name: Install integration tests dependencies
+        run: ./scripts/install_integration_test_deps.sh
       - name: Run integration tests
         run: ./scripts/ci_cd_test_integration.sh

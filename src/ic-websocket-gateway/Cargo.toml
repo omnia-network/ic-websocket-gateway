@@ -22,12 +22,16 @@ serde_bytes = "0.11.12"
 tokio-tungstenite = "0.20.0"
 futures-util = "0.3.28"
 structopt = "0.3.21"
-tracing = "0.1"
+tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["fmt", "std", "json", "env-filter"] }
 tracing-appender = "0.2"
 ic-identity = { version = "0.1.0", path = "../ic-identity" }
 rand = "0.8"
 reqwest = { workspace = true }
+opentelemetry = { version = "0.20" }
+tracing-opentelemetry = "0.20"
+opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
 
 [dev-dependencies]
 websocket = "0.26.5"

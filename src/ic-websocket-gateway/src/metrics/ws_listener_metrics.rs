@@ -102,10 +102,7 @@ impl ListenerDeltas {
 impl Deltas for ListenerDeltas {
     fn display(&self) {
         trace!(
-            "reference: {:?}
-            time_to_accept: {:?}
-            time_to_start_handling: {:?}
-            latency: {:?}",
+            "reference: {:?}, time_to_accept: {:?}, time_to_start_handling: {:?}, latency: {:?}",
             self.reference,
             self.time_to_accept,
             self.time_to_start_handling,

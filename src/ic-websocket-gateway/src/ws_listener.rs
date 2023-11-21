@@ -3,7 +3,6 @@ use crate::{
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
-
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;
@@ -37,7 +36,7 @@ pub struct WsListener {
     client_connection_handler_tx: Sender<IcWsConnectionState>,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
-    // needed to know which gateway_session to delete in case of error or WS closed
+    // needed to know which client_session to delete in case of error or WS closed
     next_client_id: u64,
 }
 
@@ -137,15 +136,11 @@ impl WsListener {
                         warn!("Ignoring incoming connection due to rate limiting policy");
                     }
                 },
-                Some(tls_acceptor_result) = tls_acceptor_rx.recv() => {
-                    match tls_acceptor_result {
-                        Ok((current_client_id , stream, mut listener_events, span)) => {
-                            self.start_connection_handler(stream, current_client_id, child_token.clone(), span);
-                            listener_events.metrics.set_started_handler();
-                            self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped")
-                        },
-                        Err(e) => error!("{:?}", e)
-                    }
+                Some(Ok((current_client_id , stream, mut listener_events, accept_client_connection_span))) = tls_acceptor_rx.recv() => {
+                    // the client connection has been accepted and therefore the connection handler has to be started
+                    self.start_connection_handler(current_client_id, stream, child_token.clone(), accept_client_connection_span);
+                    listener_events.metrics.set_started_handler();
+                    self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
             }
         }
@@ -153,25 +148,30 @@ impl WsListener {
 
     fn start_connection_handler(
         &self,
-        stream: CustomStream,
         client_id: u64,
+        stream: CustomStream,
         token: CancellationToken,
-        span: Span,
+        accept_client_connection_span: Span,
     ) {
+        accept_client_connection_span.in_scope(|| {
+            debug!("Spawning new connection handler");
+        });
+        let client_connection_span = span!(Level::DEBUG, "Client Connection", client_id);
+        client_connection_span.follows_from(accept_client_connection_span.id());
+
         let agent = Arc::clone(&self.agent);
         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
         let events_channel_tx = self.events_channel_tx.clone();
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
-                let client_connection_handler = ClientConnectionHandler::new(
+                let mut client_connection_handler = ClientConnectionHandler::new(
                     client_id,
                     agent,
                     client_connection_handler_tx,
                     events_channel_tx,
                     token,
                 );
-                debug!("Spawned new connection handler");
                 match stream {
                     CustomStream::Tcp(stream) => {
                         client_connection_handler.handle_stream(stream).await
@@ -180,9 +180,8 @@ impl WsListener {
                         client_connection_handler.handle_stream(stream).await
                     },
                 }
-                debug!("Terminated client connection handler task");
             }
-            .instrument(span),
+            .instrument(client_connection_span),
         );
     }
 }
@@ -203,59 +202,61 @@ fn is_in_rate_limit(limiting_rate: f64) -> bool {
     random_value < limiting_rate
 }
 
+/// the TLS handshake is performed in a separate task because it could take several seconds to complete and this would otherwise block other incoming connections
 pub fn accept_connection(
-    current_client_id: u64,
+    client_id: u64,
     client_addr: std::net::SocketAddr,
     stream: TcpStream,
     tls_acceptor: Option<TlsAcceptor>,
     tls_acceptor_tx: Sender<Result<(u64, CustomStream, ListenerEvents, Span), String>>,
 ) {
-    tokio::spawn(async move {
-        let mut listener_events = ListenerEvents::new(
-            Some(EventsReference::ClientId(current_client_id)),
-            EventsCollectionType::NewClientConnection,
-            ListenerEventsMetrics::default(),
-        );
-        listener_events.metrics.set_received_request();
+    let accept_client_connection_span =
+        span!(Level::DEBUG, "Accept Connection", ?client_addr, client_id);
 
-        let span = span!(
-            Level::INFO,
-            "handle_client_connection",
-            client_addr = ?client_addr,
-            client_id = current_client_id
-        );
-        let _guard = span.enter();
+    tokio::spawn(
+        async move {
+            let mut listener_events = ListenerEvents::new(
+                Some(EventsReference::ClientId(client_id)),
+                EventsCollectionType::NewClientConnection,
+                ListenerEventsMetrics::default(),
+            );
+            listener_events.metrics.set_received_request();
 
-        let res = match tls_acceptor {
-            Some(ref acceptor) => {
-                match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
-                    Ok(Ok(tls_stream)) => {
-                        debug!("TLS handshake successful");
-                        listener_events.metrics.set_accepted_with_tls();
-                        Ok((
-                            current_client_id,
-                            CustomStream::TcpWithTls(tls_stream),
+            let custom_stream = match tls_acceptor {
+                Some(ref acceptor) => {
+                    match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
+                        Ok(Ok(tls_stream)) => {
+                            debug!("Accepted TLS connection");
+                            listener_events.metrics.set_accepted_with_tls();
+                            Ok(CustomStream::TcpWithTls(tls_stream))
+                        },
+                        Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
+                        Err(e) => Err(format!("Accepting TLS connection timed out: {:?}", e)),
+                    }
+                },
+                None => {
+                    listener_events.metrics.set_accepted_without_tls();
+                    debug!("Accepted connection without TLS");
+                    Ok(CustomStream::Tcp(stream))
+                },
+            };
+            match custom_stream {
+                Ok(custom_stream) => {
+                    tls_acceptor_tx
+                        .send(Ok((
+                            client_id,
+                            custom_stream,
                             listener_events,
-                            span.clone(),
-                        ))
-                    },
-                    Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
-                    Err(e) => Err(format!("Accepting TLS connection timed out: {:?}", e)),
-                }
-            },
-            None => {
-                listener_events.metrics.set_accepted_without_tls();
-                Ok((
-                    current_client_id,
-                    CustomStream::Tcp(stream),
-                    listener_events,
-                    span.clone(),
-                ))
-            },
-        };
-        tls_acceptor_tx
-            .send(res)
-            .await
-            .expect("ws listener's side of the channel dropped");
-    });
+                            Span::current(),
+                        )))
+                        .await
+                        .expect("ws listener's side of the channel dropped");
+                },
+                Err(e) => {
+                    error!("Failed to accept connection: {:?}", e);
+                },
+            }
+        }
+        .instrument(accept_client_connection_span),
+    );
 }

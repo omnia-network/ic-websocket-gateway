@@ -2,13 +2,17 @@
 mod tests {
     use std::time::Duration;
 
+    use candid::Principal;
     use tokio::{
         sync::mpsc::{self, Receiver, Sender},
         time::sleep,
     };
 
     use crate::{
-        events_analyzer::{Events, EventsAnalyzer, EventsCollectionType, EventsReference},
+        events_analyzer::{
+            Events, EventsAnalyzer, EventsCollectionType, EventsReference, IterationReference,
+            MessageReference,
+        },
         metrics::{
             canister_poller_metrics::{
                 IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
@@ -87,7 +91,7 @@ mod tests {
         );
         connection_establishment_events
             .metrics
-            .set_added_client_to_state();
+            .set_received_client_session();
         connection_establishment_events
             .metrics
             .set_started_new_poller();
@@ -99,11 +103,13 @@ mod tests {
     }
 
     async fn get_outgoing_canister_message_events_with_latency(
+        canister_id: Principal,
         message_nonce: u64,
         latency_ms: u64,
     ) -> Box<dyn Events + Send> {
+        let message_key = MessageReference::new(canister_id, message_nonce);
         let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(
-            Some(EventsReference::MessageNonce(message_nonce)),
+            Some(EventsReference::MessageReference(message_key)),
             EventsCollectionType::CanisterMessage,
             OutgoingCanisterMessageEventsMetrics::default(),
         );
@@ -118,11 +124,13 @@ mod tests {
     }
 
     async fn get_incoming_canister_message_events_with_latency(
+        canister_id: Principal,
         message_nonce: u64,
         latency_ms: u64,
     ) -> Box<dyn Events + Send> {
+        let message_key = MessageReference::new(canister_id, message_nonce);
         let mut incoming_canister_message_events = IncomingCanisterMessageEvents::new(
-            Some(EventsReference::MessageNonce(message_nonce)),
+            Some(EventsReference::MessageReference(message_key)),
             EventsCollectionType::CanisterMessage,
             IncomingCanisterMessageEventsMetrics::default(),
         );
@@ -137,11 +145,13 @@ mod tests {
     }
 
     async fn get_poller_events_with_latency(
+        canister_id: Principal,
         polling_iteration: u64,
         latency_ms: u64,
     ) -> Box<dyn Events + Send> {
+        let iteration_key = IterationReference::new(canister_id, polling_iteration);
         let mut poller_events = PollerEvents::new(
-            Some(EventsReference::Iteration(polling_iteration)),
+            Some(EventsReference::IterationReference(iteration_key)),
             EventsCollectionType::PollerStatus,
             PollerEventsMetrics::default(),
         );
@@ -222,8 +232,8 @@ mod tests {
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(events_count * latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(events_count * latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(events_count * latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, 1);
@@ -241,13 +251,13 @@ mod tests {
         let events = get_listener_events_with_latency(1, 0).await;
         events_analyzer.add_interval_to_events(events);
 
-        let intervals = events_analyzer.compute_average_intervals().await;
+        let intervals = events_analyzer.compute_average_intervals();
         let interval_overhead = 10;
         assert_eq!(intervals.len(), 1);
         assert_eq!(intervals[0].avg_type, "ListenerEventsMetrics");
         assert!(
-            intervals[0].avg_value >= Duration::from_millis(interval_ms)
-                && intervals[0].avg_value <= Duration::from_millis(interval_ms + interval_overhead)
+            intervals[0].value >= Duration::from_millis(interval_ms)
+                && intervals[0].value <= Duration::from_millis(interval_ms + interval_overhead)
         );
         assert_eq!(intervals[0].count, 1);
     }
@@ -302,8 +312,8 @@ mod tests {
         assert_eq!(latencies.len(), 1);
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(events_in_collection * latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(events_in_collection * latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(events_in_collection * latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, compute_average_threshold as usize);
@@ -387,9 +397,8 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "NewClientConnection");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(3 * latency_ms)
-                && latencies[0].avg_value
-                    <= Duration::from_millis(3 * latency_ms + latency_overhead)
+            latencies[0].value >= Duration::from_millis(3 * latency_ms)
+                && latencies[0].value <= Duration::from_millis(3 * latency_ms + latency_overhead)
         );
         // even if the threshold for computing the average is set to 1, as we received more complete collections at the time when "compute_collections_latencies" is called,
         // we compute the average total latency over all the complete collections received
@@ -403,6 +412,8 @@ mod tests {
     async fn should_compute_multiple_average_latencies() {
         let compute_average_threshold = 1;
         let mut events_analyzer = init_events_analyzer(compute_average_threshold);
+
+        let canister_id = Principal::anonymous();
 
         let client_id = 0;
         let connection_latency_ms = 10;
@@ -425,10 +436,18 @@ mod tests {
         let message_nonce = 1;
         let message_latency_ms = 100;
         let canister_message_collection = vec![
-            get_incoming_canister_message_events_with_latency(message_nonce, message_latency_ms)
-                .await,
-            get_outgoing_canister_message_events_with_latency(message_nonce, message_latency_ms)
-                .await,
+            get_incoming_canister_message_events_with_latency(
+                canister_id,
+                message_nonce,
+                message_latency_ms,
+            )
+            .await,
+            get_outgoing_canister_message_events_with_latency(
+                canister_id,
+                message_nonce,
+                message_latency_ms,
+            )
+            .await,
         ];
         let events_in_canister_message_collection = canister_message_collection.len() as u64;
         for events in canister_message_collection {
@@ -440,8 +459,10 @@ mod tests {
 
         let polling_iteration = 2;
         let polling_latency_ms = 500;
-        let poller_status_collection =
-            vec![get_poller_events_with_latency(polling_iteration, polling_latency_ms).await];
+        let poller_status_collection = vec![
+            get_poller_events_with_latency(canister_id, polling_iteration, polling_latency_ms)
+                .await,
+        ];
         let events_in_poller_status_collection = poller_status_collection.len() as u64;
         for events in poller_status_collection {
             let reference = events.get_reference();
@@ -460,11 +481,11 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "CanisterMessage");
         assert!(
-            latencies[0].avg_value
+            latencies[0].value
                 >= Duration::from_millis(
                     events_in_canister_message_collection * message_latency_ms
                 )
-                && latencies[0].avg_value
+                && latencies[0].value
                     <= Duration::from_millis(
                         events_in_canister_message_collection * message_latency_ms
                             + latency_overhead
@@ -474,11 +495,11 @@ mod tests {
 
         assert_eq!(latencies[1].avg_type, "NewClientConnection");
         assert!(
-            latencies[1].avg_value
+            latencies[1].value
                 >= Duration::from_millis(
                     events_in_new_client_connection_collection * connection_latency_ms
                 )
-                && latencies[1].avg_value
+                && latencies[1].value
                     <= Duration::from_millis(
                         events_in_new_client_connection_collection * connection_latency_ms
                             + latency_overhead
@@ -488,9 +509,9 @@ mod tests {
 
         assert_eq!(latencies[2].avg_type, "PollerStatus");
         assert!(
-            latencies[2].avg_value
+            latencies[2].value
                 >= Duration::from_millis(events_in_poller_status_collection * polling_latency_ms)
-                && latencies[2].avg_value
+                && latencies[2].value
                     <= Duration::from_millis(
                         events_in_poller_status_collection * polling_latency_ms + latency_overhead
                     )
@@ -502,6 +523,8 @@ mod tests {
     async fn should_compute_average_latencies_only_for_complete_collections() {
         let compute_average_threshold = 1;
         let mut events_analyzer = init_events_analyzer(compute_average_threshold);
+
+        let canister_id = Principal::anonymous();
 
         let client_id = 0;
         let connection_latency_ms = 10;
@@ -516,13 +539,22 @@ mod tests {
             // complete CanisterMessage and PollerStatus collections
             // incomplete NewClientConnection collection
             get_listener_events_with_latency(client_id, connection_latency_ms).await,
-            get_incoming_canister_message_events_with_latency(message_nonce, message_latency_ms)
-                .await,
+            get_incoming_canister_message_events_with_latency(
+                canister_id,
+                message_nonce,
+                message_latency_ms,
+            )
+            .await,
             get_request_connection_setup_events_with_latency(client_id, connection_latency_ms)
                 .await,
-            get_poller_events_with_latency(polling_iteration, polling_latency_ms).await,
-            get_outgoing_canister_message_events_with_latency(message_nonce, message_latency_ms)
+            get_poller_events_with_latency(canister_id, polling_iteration, polling_latency_ms)
                 .await,
+            get_outgoing_canister_message_events_with_latency(
+                canister_id,
+                message_nonce,
+                message_latency_ms,
+            )
+            .await,
         ] {
             let reference = events.get_reference();
             if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
@@ -540,16 +572,16 @@ mod tests {
 
         assert_eq!(latencies[0].avg_type, "CanisterMessage");
         assert!(
-            latencies[0].avg_value >= Duration::from_millis(2 * message_latency_ms)
-                && latencies[0].avg_value
+            latencies[0].value >= Duration::from_millis(2 * message_latency_ms)
+                && latencies[0].value
                     <= Duration::from_millis(2 * message_latency_ms + latency_overhead)
         );
         assert_eq!(latencies[0].count, compute_average_threshold as usize);
 
         assert_eq!(latencies[1].avg_type, "PollerStatus");
         assert!(
-            latencies[1].avg_value >= Duration::from_millis(polling_latency_ms)
-                && latencies[1].avg_value
+            latencies[1].value >= Duration::from_millis(polling_latency_ms)
+                && latencies[1].value
                     <= Duration::from_millis(polling_latency_ms + latency_overhead)
         );
         assert_eq!(latencies[1].count, compute_average_threshold as usize);

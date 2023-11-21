@@ -34,18 +34,21 @@ There are some command line arguments that you can set when running the gateway:
 | Argument | Description | Default |
 | --- | --- | --- |
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
-| `--subnet-url` | The URL of the IC subnet to which the gateway will connect. | `http://127.0.0.1:4943` |
+| `--ic-network-url` | The URL of the IC network to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
+| `--min-incoming-interval` | The minimum interval (in **milliseconds**) between incoming messages. If below this threshold, the gateway starts rate limiting. | `100` |
+| `--compute-averages-threshold` | The threshold after which the metrics analyzer computes the averages of the intervals/latencies. | `10` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
+| `--telemetry-jaeger-agent-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
 
 ## Docker
 
 A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](./docker-compose.yml) file to run the gateway. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
 
-A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway).
+A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway). This is the image used in the [docker-compose.yml](./docker-compose.yml) file.
 
-Steps to run the gateway with Docker:
+To run the gateway with Docker Compose, follow these steps:
 
 1. Set the environment variables:
 
@@ -60,10 +63,6 @@ Steps to run the gateway with Docker:
     docker compose up
     ```
 5. The Gateway will print its principal in the container logs, just as explained above.
-6. Whenever you want to rebuild the gateway image, run:
-    ```
-    docker compose up --build
-    ```
 
 ### Obtain a TLS certificate
 
@@ -96,6 +95,25 @@ For example, to set the tracing level to `debug`, you can run:
 RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run
 ```
 
+## Tracing telemetry
+
+The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [Jaeger](https://www.jaegertracing.io/) for tracing telemetry. To enable tracing telemetry, you have to:
+
+- set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
+- optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
+
+If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run a Jaeger agent together with the gateway by simply running:
+
+```
+docker compose --profile jaeger up -d
+```
+
+making sure that you've set the `TELEMETRY_JAEGER_AGENT_ENDPOINT` variable in the `.env` file to:
+
+```
+TELEMETRY_JAEGER_AGENT_ENDPOINT=jaeger:16686
+```
+
 # Development
 
 ## Testing
@@ -105,12 +123,12 @@ RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=de
 Some unit tests are provided in the [tests](./src/ic-websocket-gateway/src/tests) folder. You can run them with:
 
 ```
-cargo test
+./scripts/unit_test.sh
 ```
 
-### Integration tests (Rust test canister)
+### Integration tests
 
-Integration tests require:
+Integration tests use the IC WebSocket SDKs and are written in both Rust and Motoko. They require:
 
 -   [Node.js](https://nodejs.org/en/download/) (version 16 or higher)
 -   [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install), with which to run an [IC local replica](https://internetcomputer.org/docs/current/references/cli-reference/dfx-start/)
@@ -118,41 +136,42 @@ Integration tests require:
 
 After installing Node.js and dfx, you can run the integration tests as follows:
 
-1. Run a local replica:
+1. Install test dependencies:
+    ```
+    ./scripts/install_integration_test_deps.sh
+    ```
+2. To run integration tests using the Rust test canister:
+    ```
+    ./scripts/integration_test_rs.sh
+    ```
+3. To run integration tests using the Motoko test canister:
+    ```
+    ./scripts/integration_test_mo.sh
+    ```
 
-    ```
-    dfx start --clean --background
-    ```
+These scripts will take care of running the local replica and deploying the desired test canister.
 
-2. Run the gateway:
-    ```
-    cargo run
-    ```
-3. Copy the principal printed on the terminal (as explained above)
-4. Open a new terminal and install test dependencies:
-    ```
-    ./scripts/install_test_dependencies.sh
-    ```
-5. Move to the directory `tests/test_canister_rs` and deploy a test canister using the IC WebSocket CDK:
-    ```
-    dfx deploy test_canister_rs --argument '(opt "<gateway-principal-obtained-in-step-3>")'
-    ```
-6. Move to the directory `tests/integration` and set the environment variables:
-    ```
-    cp .env.example .env
-    ```
-7. Run the test:
-    ```
-    npm test
-    ```
+Integration tests can be found in the [tests/src/integration](./tests/src/integration/) folder.
+
+Tests canisters used in the integration tests can be found in the [tests/src/test_canister_rs](./tests/src/test_canister_rs/) and [tests/src/test_canister_mo](./tests/src/test_canister_mo/) folders.
 
 ### Local test script
 
-To make it easier to run both the unit and integration tests, a script is provided that runs the local replica, the gateway and the tests in sequence. You can run it with:
+To make it easier to run both the unit and integration tests (using Rust test canister), the [scripts/local_test.sh](./scripts/local_test.sh) script is provided. You can run it with:
 
 ```
 ./scripts/local_test.sh
 ```
+
+### Load tests
+
+Load tests are provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
+
+```
+./scripts/run_load_test.sh
+```
+
+This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/integration_test_rs.sh](./scripts/integration_test_rs.sh) is a good reference for how to do that.
 
 # How it works
 
@@ -230,5 +249,5 @@ Feel free to open issues, pull requests, join our [Discord](https://discord.com/
 
 -   [Linkedin](https://www.linkedin.com/in/luca-bertelli-407041128/)
 -   [Twitter](https://twitter.com/ilbert_luca)
--   [Calendly](https://cal.com/lucabertelli/)
+-   [Calendly](https://cal.com/lucabertelli/ic-websocket)
 -   [Email](liuc@omnia-network.com)

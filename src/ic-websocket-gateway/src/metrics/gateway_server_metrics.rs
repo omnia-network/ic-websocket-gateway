@@ -6,7 +6,7 @@ pub type ConnectionEstablishmentEvents = EventsImpl<ConnectionEstablishmentEvent
 
 #[derive(Debug, Clone)]
 pub struct ConnectionEstablishmentEventsMetrics {
-    added_client_to_state: TimeableEvent,
+    received_client_session: TimeableEvent,
     started_new_poller: TimeableEvent,
     sent_client_channel_to_poller: TimeableEvent,
 }
@@ -14,14 +14,14 @@ pub struct ConnectionEstablishmentEventsMetrics {
 impl ConnectionEstablishmentEventsMetrics {
     pub fn default() -> Self {
         Self {
-            added_client_to_state: TimeableEvent::default(),
+            received_client_session: TimeableEvent::default(),
             started_new_poller: TimeableEvent::default(),
             sent_client_channel_to_poller: TimeableEvent::default(),
         }
     }
 
-    pub fn set_added_client_to_state(&mut self) {
-        self.added_client_to_state.set_now();
+    pub fn set_received_client_session(&mut self) {
+        self.received_client_session.set_now();
     }
 
     pub fn set_started_new_poller(&mut self) {
@@ -45,7 +45,7 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
         if let Some(reference) = reference {
             let time_to_start_poller = self
                 .started_new_poller
-                .duration_since(&self.added_client_to_state)
+                .duration_since(&self.received_client_session)
                 // if the poller has already been started, we consider this latency as zero
                 .unwrap_or(Duration::from_millis(0));
             let time_to_send_client_channel = self
@@ -54,7 +54,7 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
                 // if the poller has already been started, we consider the latency since the client was added to the gateway state
                 .unwrap_or(
                     self.sent_client_channel_to_poller
-                        .duration_since(&self.added_client_to_state)?,
+                        .duration_since(&self.received_client_session)?,
                 );
             let latency = self.compute_latency()?;
 
@@ -70,7 +70,7 @@ impl EventsMetrics for ConnectionEstablishmentEventsMetrics {
 
     fn compute_latency(&self) -> Option<Duration> {
         self.sent_client_channel_to_poller
-            .duration_since(&self.added_client_to_state)
+            .duration_since(&self.received_client_session)
     }
 }
 
@@ -101,10 +101,7 @@ impl ConnectionEstablishmentDeltas {
 impl Deltas for ConnectionEstablishmentDeltas {
     fn display(&self) {
         trace!(
-            "reference: {:?}
-            time_to_start_poller: {:?}
-            time_to_send_client_channel: {:?}
-            latency: {:?}",
+            "reference: {:?}, time_to_start_poller: {:?}, time_to_send_client_channel: {:?}, latency: {:?}",
             self.reference,
             self.time_to_start_poller,
             self.time_to_send_client_channel,
