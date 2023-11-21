@@ -1,6 +1,3 @@
 [dependencies]
-ic-websocket-cdk = "https://github.com/omnia-network/ic-websocket-cdk-mo#7c8b7a0bbb4605be628e51e3f5341a40144ffa9f"
-ic-certification = "0.1.3"
-cbor = "0.1.3"
 base = "0.10.0"
-sha2 = "0.0.4"
+ic-websocket-cdk = "0.3.0"
