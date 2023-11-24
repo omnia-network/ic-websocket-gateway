@@ -15,7 +15,7 @@ use crate::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
     },
-    client_session_handler::IcWsConnectionState,
+    client_session_handler::IcWsSessionState,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::manager_metrics::{
         ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
@@ -152,7 +152,7 @@ impl Manager {
     //     info!("Starting graceful shutdown");
     //     self.cancellation_token.cancel();
     //     loop {
-    //         if let Ok(IcWsConnectionState::Closed((client_key, canister_id, span))) =
+    //         if let Ok(IcWsSessionState::Closed((client_key, canister_id, span))) =
     //             self.client_connection_handler_rx.try_recv()
     //         {
     //             // remove client's channel from poller, if it exists and is not finished
@@ -185,7 +185,7 @@ impl Manager {
     //     }
     // }
 
-    // pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsConnectionState> {
+    // pub async fn recv_from_client_connection_handler(&mut self) -> Option<IcWsSessionState> {
     //     self.client_connection_handler_rx.recv().await
     // }
 }
@@ -203,14 +203,14 @@ impl Manager {
 
 // async fn manage_clients_connections(
 //     &mut self,
-//     connection_state: IcWsConnectionState,
+//     connection_state: IcWsSessionState,
 //     poller_channel_for_completion_tx: Sender<TerminationInfo>,
 //     events_channel_tx: Sender<Box<dyn Events + Send>>,
 //     polling_interval: u64,
 //     agent: Arc<Agent>,
 // ) {
 //     match connection_state {
-//         IcWsConnectionState::Setup(client_session) => {
+//         IcWsSessionState::Setup(client_session) => {
 //             let new_client_connection_span = span!(parent: &client_session.client_connection_span, Level::DEBUG, "new_client_connection", client_key = %client_session.client_key, canister_id = %client_session.canister_id);
 //             let mut connection_establishment_events = ConnectionEstablishmentEvents::new(
 //                 Some(EventsReference::ClientId(client_session.client_id)),
@@ -310,7 +310,7 @@ impl Manager {
 //                 .await
 //                 .expect("analyzer's side of the channel dropped");
 //         },
-//         IcWsConnectionState::Closed((client_key, canister_id, span)) => {
+//         IcWsSessionState::Closed((client_key, canister_id, span)) => {
 //             // remove client's channel from poller, if it exists and is not finished
 //             if let Some(poller_channel_for_client_channel_sender_tx) =
 //                 self.connected_canisters.get_mut(&canister_id)
