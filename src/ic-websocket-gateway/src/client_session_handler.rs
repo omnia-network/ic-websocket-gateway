@@ -322,45 +322,32 @@ impl ClientSessionHandler {
                     trace!("Client session setup");
 
                     // TODO: figure out if this is actually atomic
-                    let start_poller = match self.gateway_state.entry(canister_id) {
+                    if let Some(poller_state) = match self.gateway_state.entry(canister_id) {
                         Entry::Occupied(mut entry) => {
                             // the poller has already been started
                             // add client key and sender end of the channel to the poller state
                             let poller_state = entry.get_mut();
                             poller_state.insert(client_key, message_for_client_tx);
-                            false
+                            None
                         },
                         Entry::Vacant(entry) => {
                             // the poller has not been started yet
                             // initialize the poller state and add client key and sender end of the channel
-                            let poller_state: PollerState =
-                                DashMap::with_capacity_and_shard_amount(1024, 1024);
+                            let poller_state =
+                                Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
                             poller_state.insert(client_key, message_for_client_tx);
-                            entry.insert(poller_state);
-                            true
+                            entry.insert(Arc::clone(&poller_state));
+                            Some(Arc::clone(&poller_state))
                         },
-                    };
-
-                    if start_poller {
+                    } {
                         info!("Starting poller");
 
-                        // let agent = Arc::clone(&self.agent);
-                        // // spawn new canister poller task
-                        // tokio::spawn(async move {
-                        //     let mut poller = CanisterPoller::new(canister_id, agent);
-                        //     // the channel used to send updates to the first client is passed as an argument to the poller
-                        //     // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
-                        //     poller
-                        //         .run_polling(
-                        //             poller_channels_poller_ends,
-                        //             client_key,
-                        //             client_session.message_for_client_tx.clone(),
-                        //             client_session.client_connection_span,
-                        //         )
-                        //         .await;
-                        //     // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
-                        //     canister_id
-                        // });
+                        let agent = Arc::clone(&self.agent);
+                        // spawn new canister poller task
+                        tokio::spawn(async move {
+                            let mut poller = CanisterPoller::new(canister_id, poller_state, agent);
+                            poller.run_polling().await;
+                        });
                     }
                 },
                 Err(e) => {
