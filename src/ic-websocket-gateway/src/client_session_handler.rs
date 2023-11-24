@@ -1,15 +1,16 @@
 use crate::{
     canister_methods::{CanisterWsOpenArguments, ClientKey},
-    canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{Events, EventsCollectionType, EventsReference, MessageReference},
-    manager::GatewayState,
+    canister_poller::{CanisterPoller, IcWsConnectionUpdate},
+    events_analyzer::{self, Events, EventsCollectionType, EventsReference, MessageReference},
+    manager::{GatewayState, PollerState},
     messages_demux::get_nonce_from_message,
     metrics::client_session_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
     },
 };
-use candid::{decode_args, Principal};
+use candid::{decode_args, CandidType, Principal};
+use dashmap::{mapref::entry::Entry, DashMap};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt, TryStreamExt,
@@ -20,7 +21,7 @@ use ic_agent::{
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
@@ -52,11 +53,27 @@ struct ClientRequest<'a> {
 }
 
 /// possible states of an IC WebSocket session
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum IcWsSessionState {
     Init,
-    Setup(ClientKey, Principal),
+    Setup(ClientKey, Principal, Sender<IcWsConnectionUpdate>),
     Closed,
+}
+
+impl Eq for IcWsSessionState {}
+
+impl PartialEq for IcWsSessionState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (IcWsSessionState::Init, IcWsSessionState::Init) => true,
+            (
+                IcWsSessionState::Setup(client_key1, canister_id1, _),
+                IcWsSessionState::Setup(client_key2, canister_id2, _),
+            ) => client_key1 == client_key2 && canister_id1 == canister_id2,
+            (IcWsSessionState::Closed, IcWsSessionState::Closed) => true,
+            _ => false,
+        }
+    }
 }
 
 /// possible errors that can occur during an IC WebSocket session
@@ -73,6 +90,7 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     client_id: u64,
     client_key: Option<ClientKey>,
     canister_id: Option<Principal>,
+    message_for_client_tx: Option<Sender<IcWsConnectionUpdate>>,
     message_for_client_rx: Receiver<IcWsConnectionUpdate>,
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     ws_read: SplitStream<WebSocketStream<S>>,
@@ -84,6 +102,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn init(
         client_id: u64,
         gateway_principal: Principal,
+        message_for_client_tx: Sender<IcWsConnectionUpdate>,
         message_for_client_rx: Receiver<IcWsConnectionUpdate>,
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
@@ -93,6 +112,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             client_id,
             client_key: None,
             canister_id: None,
+            message_for_client_tx: Some(message_for_client_tx),
             message_for_client_rx,
             ws_write,
             ws_read,
@@ -148,7 +168,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                 self.state = IcWsSessionState::Setup(
                                     // TODO: figure out if it's possible to return them as references
                                     self.client_key.clone().expect("must be set"),
-                                    self.canister_id.expect("must be set")
+                                    self.canister_id.expect("must be set"),
+                                    self.message_for_client_tx.take().expect("must be set"),
                                 );
                             }
                             // in case of other errors, we report them and terminate the connection handler task
@@ -261,6 +282,7 @@ impl ClientSessionHandler {
                 let client_session = ClientSession::init(
                     self.id,
                     self.agent.get_principal().expect("Principal should be set"),
+                    message_for_client_tx,
                     message_for_client_rx,
                     ws_write,
                     ws_read,
@@ -292,9 +314,54 @@ impl ClientSessionHandler {
     ) {
         loop {
             match client_session.update_state().await {
-                Ok(Some(IcWsSessionState::Setup(client_key, canister_id))) => {
+                Ok(Some(IcWsSessionState::Setup(
+                    client_key,
+                    canister_id,
+                    message_for_client_tx,
+                ))) => {
                     trace!("Client session setup");
-                    // TODO: update state, start poller, ...
+
+                    // TODO: figure out if this is actually atomic
+                    let start_poller = match self.gateway_state.entry(canister_id) {
+                        Entry::Occupied(mut entry) => {
+                            // the poller has already been started
+                            // add client key and sender end of the channel to the poller state
+                            let poller_state = entry.get_mut();
+                            poller_state.insert(client_key, message_for_client_tx);
+                            false
+                        },
+                        Entry::Vacant(entry) => {
+                            // the poller has not been started yet
+                            // initialize the poller state and add client key and sender end of the channel
+                            let poller_state: PollerState =
+                                DashMap::with_capacity_and_shard_amount(1024, 1024);
+                            poller_state.insert(client_key, message_for_client_tx);
+                            entry.insert(poller_state);
+                            true
+                        },
+                    };
+
+                    if start_poller {
+                        info!("Starting poller");
+
+                        // let agent = Arc::clone(&self.agent);
+                        // // spawn new canister poller task
+                        // tokio::spawn(async move {
+                        //     let mut poller = CanisterPoller::new(canister_id, agent);
+                        //     // the channel used to send updates to the first client is passed as an argument to the poller
+                        //     // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
+                        //     poller
+                        //         .run_polling(
+                        //             poller_channels_poller_ends,
+                        //             client_key,
+                        //             client_session.message_for_client_tx.clone(),
+                        //             client_session.client_connection_span,
+                        //         )
+                        //         .await;
+                        //     // once the poller terminates, return the canister id so that the poller data can be removed from the WS gateway state
+                        //     canister_id
+                        // });
+                    }
                 },
                 Err(e) => {
                     error!("Client session error: {:?}", e);

@@ -23,7 +23,9 @@ use crate::{
     ws_listener::{TlsConfig, WsListener},
 };
 
-pub type GatewayState = Arc<DashMap<Principal, Sender<PollerToClientChannelData>>>;
+pub type GatewayState = Arc<DashMap<Principal, PollerState>>;
+
+pub type PollerState = DashMap<ClientKey, Sender<IcWsConnectionUpdate>>;
 
 /// WS Gateway
 pub struct Manager {
