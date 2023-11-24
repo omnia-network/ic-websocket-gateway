@@ -1,4 +1,5 @@
 use candid::{CandidType, Decode, Principal};
+use ic_agent::agent::{PollResult, UpdateCall};
 use ic_agent::AgentError;
 use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
@@ -30,8 +31,12 @@ impl fmt::Display for ClientKey {
     }
 }
 
-/// The result of [ws_close].
-pub type CanisterWsCloseResult = Result<(), String>;
+/// The result of [call_ws_close].
+pub type CanisterCallWsCloseResult<'agent> = Result<UpdateCall<'agent>, String>;
+
+/// The result of [wait_ws_close].
+pub type CanisterWaitWsCloseResult = Result<(), String>;
+
 /// The result of [ws_get_messages].
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
@@ -137,22 +142,33 @@ pub async fn get_new_agent(
     Ok(agent)
 }
 
-pub async fn ws_close(
-    agent: &Agent,
+pub fn call_ws_close<'agent>(
+    agent: &'agent Agent,
     canister_id: &Principal,
     args: CanisterWsCloseArguments,
-) -> CanisterWsCloseResult {
+) -> CanisterCallWsCloseResult<'agent> {
     let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
-    let res = agent
-        .update(canister_id, "ws_close")
-        .with_arg(args)
-        .call_and_wait()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Decode!(&res, CanisterWsCloseResult).map_err(|e| e.to_string())?
+    Ok(agent.update(canister_id, "ws_close").with_arg(args).call())
 }
+
+// TODO: make fields of UpdateCall<'agent> public
+
+// pub async fn wait_ws_close<'agent>(
+//     agent: &'agent Agent,
+//     update_call: UpdateCall<'agent>,
+// ) -> CanisterWaitWsCloseResult {
+//     match agent
+//         .poll(update_call.request_id, update_call.effective_canister_id)
+//         .await
+//         .map_err(|e| e.to_string())?
+//     {
+//         PollResult::Completed(res) => {
+//             Decode!(&res, CanisterWaitWsCloseResult).map_err(|e| e.to_string())?
+//         },
+//         _ => Err(format!("Request should have been completed")),
+//     }
+// }
 
 pub async fn ws_get_messages(
     agent: &Agent,

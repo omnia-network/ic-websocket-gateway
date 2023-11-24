@@ -434,16 +434,28 @@ fn call_ws_close_in_background(
         async move {
             debug!("Calling ws_close for client");
             // TODO: figure out why it takes 10-30 seconds for the canister to close the connection
-            if let Err(e) = canister_methods::ws_close(
+            match canister_methods::call_ws_close(
                 &agent,
                 &canister_id,
                 CanisterWsCloseArguments { client_key },
-            )
-            .await
-            {
-                error!("Calling ws_close on canister failed: {}", e);
-            } else {
-                debug!("Canister closed connection with client");
+            ) {
+                Ok(_update_call) => {
+                    // instead of polling for the update call result, as we do not care about receiving it as soon as possible,
+                    // we wait 5 seconds and check if the update call succeeded
+                    // TODO: decide what to do if it doesn't: ignore it, retry once, a few times, ...
+                    // tokio::time::sleep(Duration::from_secs(5)).await;
+                    // match canister_methods::wait_ws_close(&agent, update_call).await {
+                    //     Ok(()) => {
+                    //         debug!("Canister closed connection with client");
+                    //     },
+                    //     Err(e) => {
+                    //         error!("Canister failed to close connection with client: {}", e);
+                    //     },
+                    // }
+                },
+                Err(e) => {
+                    error!("Calling ws_close on canister failed: {}", e);
+                },
             }
             CLIENTS_REGISTERED_IN_CDK.fetch_sub(1, Ordering::SeqCst);
         }
