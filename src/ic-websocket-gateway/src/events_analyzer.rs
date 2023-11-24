@@ -5,7 +5,7 @@ use crate::metrics::canister_poller_metrics::{
 use crate::metrics::client_connection_handler_metrics::{
     OutgoingCanisterMessageEventsMetrics, RequestConnectionSetupEventsMetrics,
 };
-use crate::metrics::gateway_server_metrics::ConnectionEstablishmentEventsMetrics;
+use crate::metrics::manager_metrics::ConnectionEstablishmentEventsMetrics;
 use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
 use candid::Principal;
 use std::any::{type_name, Any};

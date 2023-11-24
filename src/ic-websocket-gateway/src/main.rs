@@ -1,6 +1,6 @@
 use crate::gateway_tracing::{init_tracing, InitTracingResult};
 use crate::ws_listener::TlsConfig;
-use crate::{events_analyzer::EventsAnalyzer, gateway_server::GatewayServer};
+use crate::{events_analyzer::EventsAnalyzer, manager::Manager};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{
     fs::{self},
@@ -14,14 +14,14 @@ mod canister_methods;
 mod canister_poller;
 mod client_connection_handler;
 mod events_analyzer;
-mod gateway_server;
 mod gateway_tracing;
+mod manager;
 mod messages_demux;
 mod ws_listener;
 mod metrics {
     pub mod canister_poller_metrics;
     pub mod client_connection_handler_metrics;
-    pub mod gateway_server_metrics;
+    pub mod manager_metrics;
     pub mod ws_listener_metrics;
 }
 mod tests {
@@ -108,7 +108,7 @@ async fn main() -> Result<(), String> {
         Receiver<Option<f64>>,
     ) = mpsc::channel(10);
 
-    let mut gateway_server = GatewayServer::new(
+    let mut manager = Manager::new(
         deployment_info.gateway_address,
         deployment_info.ic_network_url,
         identity,
@@ -138,12 +138,10 @@ async fn main() -> Result<(), String> {
     });
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    gateway_server.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
+    manager.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
-    gateway_server
-        .manage_state(deployment_info.polling_interval)
-        .await;
+    manager.manage_state(deployment_info.polling_interval).await;
     info!("Terminated state manager");
 
     if is_telemetry_enabled {

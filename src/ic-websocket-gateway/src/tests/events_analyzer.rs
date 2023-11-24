@@ -22,7 +22,7 @@ mod tests {
                 OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
                 RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
             },
-            gateway_server_metrics::{
+            manager_metrics::{
                 ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
             },
             ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},

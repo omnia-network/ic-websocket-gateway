@@ -220,7 +220,8 @@ impl CanisterPoller {
         first_client_key: ClientKey,
         messages_demux: Arc<RwLock<MessagesDemux>>,
     ) -> Result<PollerEvents, String> {
-        let polling_iteration_span = span!(Level::TRACE, "Polling Iteration");
+        let polling_iteration_span =
+            span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id);
         polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
         let iteration_key =
             IterationReference::new(self.canister_id, *self.polling_iteration.read().await);

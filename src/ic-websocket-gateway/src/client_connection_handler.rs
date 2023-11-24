@@ -2,7 +2,7 @@ use crate::{
     canister_methods::{CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsConnectionUpdate,
     events_analyzer::{Events, EventsCollectionType, EventsReference, MessageReference},
-    gateway_server::ClientSession,
+    manager::ClientSession,
     messages_demux::get_nonce_from_message,
     metrics::client_connection_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,

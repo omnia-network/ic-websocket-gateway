@@ -15,7 +15,7 @@ use crate::{
     },
     client_connection_handler::IcWsConnectionState,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
-    metrics::gateway_server_metrics::{
+    metrics::manager_metrics::{
         ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
     },
     ws_listener::{TlsConfig, WsListener},
@@ -63,7 +63,7 @@ impl ClientSession {
 }
 
 /// WS Gateway
-pub struct GatewayServer {
+pub struct Manager {
     /// agent used to interact with the canisters
     agent: Arc<Agent>,
     /// gateway address
@@ -80,7 +80,7 @@ pub struct GatewayServer {
     token: CancellationToken,
 }
 
-impl GatewayServer {
+impl Manager {
     pub async fn new(
         gateway_address: String,
         ic_network_url: String,

@@ -21,7 +21,7 @@ Make sure you have the **Rust toolchain** installed. You can find instructions [
 2. After the gateway starts, it prints something like:
 
     ```
-    2023-08-01T07:55:58.315793Z INFO ic_websocket_gateway::gateway_server: Gateway Agent principal: sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae
+    2023-08-01T07:55:58.315793Z INFO ic_websocket_gateway::manager: Gateway Agent principal: sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae
     ```
 
     This is the principal that the gateway uses to interact with the canister IC WebSocket CDK.
@@ -99,8 +99,8 @@ RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=de
 
 The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [Jaeger](https://www.jaegertracing.io/) for tracing telemetry. To enable tracing telemetry, you have to:
 
-- set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
-- optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
+-   set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
+-   optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
 
 If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run a Jaeger agent together with the gateway by simply running:
 
