@@ -51,21 +51,18 @@ struct ClientRequest<'a> {
     envelope: Envelope<'a>,
 }
 
-/// possible states of the IC WebSocket connection:
-/// - setup
-/// - requested
-/// - closed
+/// possible states of an IC WebSocket session
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IcWsSessionState {
     Init,
-    Setup(ClientKey),
+    Setup(ClientKey, Principal),
     Closed,
 }
 
-/// possible errors that can occur during a IC WebSocket connection
+/// possible errors that can occur during an IC WebSocket session
 #[derive(Debug, Clone)]
 pub enum IcWsError {
-    /// error due to the client not following the IC WS initialization protocol
+    /// error due to the client not following the IC WS protocol
     IcWsProtocol(String),
     /// WebSocket error
     WebSocket(String),
@@ -136,16 +133,28 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     IcWsSessionState::Init => {
                         match self.inspect_ic_ws_open_message(ws_message.clone()).await {
                             // if the IC WS connection is setup, create a new client session and send it to the main task
-                            Ok(IcWsSessionState::Setup(client_key)) => {
+                            Ok((client_key, canister_id)) => {
+                                // replace the field with the canister_id received in the first envelope
+                                // this shall not be updated anymore
+                                // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
+                                if !self.canister_id.replace(canister_id).is_none() || !self.client_key.replace(client_key).is_none() {
+                                    return Err(IcWsError::IcWsProtocol(String::from(
+                                        "canister_id or client_key field was set twice",
+                                    )));
+                                }
                                 debug!("Validated WS open message");
-                                self.client_key = Some(client_key.clone());
-                                self.state = IcWsSessionState::Setup(client_key);
+
+                                // client session is now Setup
+                                self.state = IcWsSessionState::Setup(
+                                    // TODO: figure out if it's possible to return them as references
+                                    self.client_key.clone().expect("must be set"),
+                                    self.canister_id.expect("must be set")
+                                );
                             }
                             // in case of other errors, we report them and terminate the connection handler task
                             Err(e) => {
                                 return Err(IcWsError::IcWsProtocol(format!("IC WS setup failed. Error: {:?}", e)));
                             }
-                            Ok(variant) => unreachable!("handle_ic_ws_setup should not return variant: {:?}", variant)
                         }
                     },
                     _ => unimplemented!("TODO")
@@ -170,28 +179,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     async fn inspect_ic_ws_open_message(
         &mut self,
         ws_message: Message,
-    ) -> Result<IcWsSessionState, IcWsError> {
+    ) -> Result<(ClientKey, Principal), IcWsError> {
         let client_request = get_client_request(ws_message)?;
         // the first envelope shall have content of variant Call, which contains canister_id
-        if let EnvelopeContent::Call { canister_id, .. } = *client_request.envelope.content {
-            // replace the field with the canister_id received in the first envelope
-            // this shall not be updated anymore
-            // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message should only be called once
-            if !self.canister_id.replace(canister_id).is_none() {
-                return Err(IcWsError::IcWsProtocol(String::from(
-                    "canister id field was set twice",
-                )));
-            }
-        } else {
-            return Err(IcWsError::IcWsProtocol(String::from(
-                    "first message from client should contain canister_id in envelope's content and should be of Call variant",
-                )));
-        }
-
-        // from here on, self.canister_id shall not be None
-        let client_principal = client_request.envelope.content.sender().to_owned();
-
-        if let EnvelopeContent::Call { arg, .. } = &*client_request.envelope.content {
+        if let EnvelopeContent::Call {
+            canister_id, arg, ..
+        } = &*client_request.envelope.content
+        {
             let (ws_open_arguments,): (CanisterWsOpenArguments,) =
                 decode_args(arg).map_err(|e| {
                     IcWsError::IcWsProtocol(format!(
@@ -199,15 +193,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         e.to_string()
                     ))
                 })?;
+
+            let client_principal = client_request.envelope.content.sender().to_owned();
             let client_key = ClientKey::new(client_principal, ws_open_arguments.client_nonce);
 
-            // IC WS connection is now Setup
-            Ok(IcWsSessionState::Setup(client_key))
-        } else {
-            Err(IcWsError::IcWsProtocol(String::from(
-                "first message from client should contain arg in envelope's content",
-            )))
+            return Ok((client_key, canister_id.to_owned()));
         }
+        Err(IcWsError::IcWsProtocol(String::from(
+            "first message from client should contain canister_id and arg in envelope's content and should be of Call variant",
+        )))
     }
 }
 
@@ -298,7 +292,7 @@ impl ClientSessionHandler {
     ) {
         loop {
             match client_session.update_state().await {
-                Ok(Some(IcWsSessionState::Setup(client_key))) => {
+                Ok(Some(IcWsSessionState::Setup(client_key, canister_id))) => {
                     trace!("Client session setup");
                     // TODO: update state, start poller, ...
                 },
