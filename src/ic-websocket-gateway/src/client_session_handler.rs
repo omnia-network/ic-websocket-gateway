@@ -56,7 +56,7 @@ struct ClientRequest<'a> {
 #[derive(Debug, Clone)]
 pub enum IcWsSessionState {
     Init,
-    Setup(ClientKey, Principal, Sender<IcWsConnectionUpdate>),
+    Setup(Option<PollerState>, Principal),
     Closed,
 }
 
@@ -67,9 +67,9 @@ impl PartialEq for IcWsSessionState {
         match (self, other) {
             (IcWsSessionState::Init, IcWsSessionState::Init) => true,
             (
-                IcWsSessionState::Setup(client_key1, canister_id1, _),
-                IcWsSessionState::Setup(client_key2, canister_id2, _),
-            ) => client_key1 == client_key2 && canister_id1 == canister_id2,
+                IcWsSessionState::Setup(_, canister_id1),
+                IcWsSessionState::Setup(_, canister_id2),
+            ) => canister_id1 == canister_id2,
             (IcWsSessionState::Closed, IcWsSessionState::Closed) => true,
             _ => false,
         }
@@ -94,7 +94,8 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     message_for_client_rx: Receiver<IcWsConnectionUpdate>,
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     ws_read: SplitStream<WebSocketStream<S>>,
-    state: IcWsSessionState,
+    session_state: IcWsSessionState,
+    gateway_state: GatewayState,
     client_connection_span: Span,
 }
 
@@ -106,6 +107,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         message_for_client_rx: Receiver<IcWsConnectionUpdate>,
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
+        gateway_state: GatewayState,
         client_connection_span: Span,
     ) -> Result<Self, IcWsError> {
         let mut client_session = Self {
@@ -116,7 +118,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             message_for_client_rx,
             ws_write,
             ws_read,
-            state: IcWsSessionState::Init,
+            session_state: IcWsSessionState::Init,
+            gateway_state,
             client_connection_span,
         };
 
@@ -145,11 +148,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
 impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn update_state(&mut self) -> Result<Option<IcWsSessionState>, IcWsError> {
-        let old_state = self.state.clone();
+        let old_session_state = self.session_state.clone();
         select! {
             // wait for incoming message from client
             Some(Ok(ws_message)) = self.ws_read.next() => {
-                match self.state {
+                match old_session_state {
                     IcWsSessionState::Init => {
                         match self.inspect_ic_ws_open_message(ws_message.clone()).await {
                             // if the IC WS connection is setup, create a new client session and send it to the main task
@@ -157,19 +160,37 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                 // replace the field with the canister_id received in the first envelope
                                 // this shall not be updated anymore
                                 // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
-                                if !self.canister_id.replace(canister_id).is_none() || !self.client_key.replace(client_key).is_none() {
+                                if !self.canister_id.replace(canister_id.clone()).is_none() || !self.client_key.replace(client_key.clone()).is_none() {
                                     return Err(IcWsError::IcWsProtocol(String::from(
                                         "canister_id or client_key field was set twice",
                                     )));
                                 }
                                 debug!("Validated WS open message");
 
+                                // TODO: figure out if this is actually atomic
+                                let poller_state = match self.gateway_state.entry(canister_id) {
+                                    Entry::Occupied(mut entry) => {
+                                        // the poller has already been started
+                                        // add client key and sender end of the channel to the poller state
+                                        let poller_state = entry.get_mut();
+                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set"));
+                                        None
+                                    },
+                                    Entry::Vacant(entry) => {
+                                        // the poller has not been started yet
+                                        // initialize the poller state and add client key and sender end of the channel
+                                        let poller_state =
+                                            Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
+                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set"));
+                                        entry.insert(Arc::clone(&poller_state));
+                                        Some(Arc::clone(&poller_state))
+                                    },
+                                };
+
                                 // client session is now Setup
-                                self.state = IcWsSessionState::Setup(
-                                    // TODO: figure out if it's possible to return them as references
-                                    self.client_key.clone().expect("must be set"),
-                                    self.canister_id.expect("must be set"),
-                                    self.message_for_client_tx.take().expect("must be set"),
+                                self.session_state = IcWsSessionState::Setup(
+                                    poller_state,
+                                    canister_id,
                                 );
                             }
                             // in case of other errors, we report them and terminate the connection handler task
@@ -183,8 +204,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             },
             _ = self.message_for_client_rx.recv() => unimplemented!("TODO")
         }
-        if self.state != old_state {
-            Ok(Some(self.state.clone()))
+        if self.session_state != old_session_state {
+            Ok(Some(self.session_state.clone()))
         } else {
             Ok(None)
         }
@@ -286,6 +307,7 @@ impl ClientSessionHandler {
                     message_for_client_rx,
                     ws_write,
                     ws_read,
+                    Arc::clone(&self.gateway_state),
                     Span::current(),
                 )
                 .await;
@@ -314,32 +336,9 @@ impl ClientSessionHandler {
     ) {
         loop {
             match client_session.update_state().await {
-                Ok(Some(IcWsSessionState::Setup(
-                    client_key,
-                    canister_id,
-                    message_for_client_tx,
-                ))) => {
+                Ok(Some(IcWsSessionState::Setup(poller_state, canister_id))) => {
                     trace!("Client session setup");
-
-                    // TODO: figure out if this is actually atomic
-                    if let Some(poller_state) = match self.gateway_state.entry(canister_id) {
-                        Entry::Occupied(mut entry) => {
-                            // the poller has already been started
-                            // add client key and sender end of the channel to the poller state
-                            let poller_state = entry.get_mut();
-                            poller_state.insert(client_key, message_for_client_tx);
-                            None
-                        },
-                        Entry::Vacant(entry) => {
-                            // the poller has not been started yet
-                            // initialize the poller state and add client key and sender end of the channel
-                            let poller_state =
-                                Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
-                            poller_state.insert(client_key, message_for_client_tx);
-                            entry.insert(Arc::clone(&poller_state));
-                            Some(Arc::clone(&poller_state))
-                        },
-                    } {
+                    if let Some(poller_state) = poller_state {
                         info!("Starting poller");
 
                         let agent = Arc::clone(&self.agent);
