@@ -18,7 +18,7 @@ mod tests {
                 IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
                 PollerEventsMetrics,
             },
-            client_connection_handler_metrics::{
+            client_session_handler_metrics::{
                 OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
                 RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
             },

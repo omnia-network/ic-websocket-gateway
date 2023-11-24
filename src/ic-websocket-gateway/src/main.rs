@@ -12,7 +12,7 @@ use tracing::info;
 
 mod canister_methods;
 mod canister_poller;
-mod client_connection_handler;
+mod client_session_handler;
 mod events_analyzer;
 mod gateway_tracing;
 mod manager;
@@ -20,7 +20,7 @@ mod messages_demux;
 mod ws_listener;
 mod metrics {
     pub mod canister_poller_metrics;
-    pub mod client_connection_handler_metrics;
+    pub mod client_session_handler_metrics;
     pub mod manager_metrics;
     pub mod ws_listener_metrics;
 }
@@ -138,7 +138,12 @@ async fn main() -> Result<(), String> {
     };
 
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    manager.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
+    let accept_connections_handle =
+        manager.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
+
+    tokio::join!(accept_connections_handle)
+        .0
+        .expect("could not join accept connections task");
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
     // manager.manage_state(deployment_info.polling_interval).await;

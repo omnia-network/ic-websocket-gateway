@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::{
     select, signal,
     sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, span, warn, Level, Span};
@@ -14,54 +15,13 @@ use crate::{
         CanisterPoller, IcWsConnectionUpdate, PollerChannelsPollerEnds, PollerToClientChannelData,
         TerminationInfo,
     },
-    client_connection_handler::IcWsConnectionState,
+    client_session_handler::IcWsConnectionState,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
     metrics::manager_metrics::{
         ConnectionEstablishmentEvents, ConnectionEstablishmentEventsMetrics,
     },
     ws_listener::{TlsConfig, WsListener},
 };
-
-/// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
-#[cfg(not(test))] // only compile and run the following block when not running tests
-#[derive(Debug, Clone)]
-pub struct ClientSession {
-    client_id: u64,
-    client_key: ClientKey,
-    canister_id: Principal,
-    message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    client_connection_span: Span,
-}
-
-/// contains the information needed by the WS Gateway to maintain the state of the WebSocket connection
-// set properties as public only for tests
-#[cfg(test)] // only compile and run the following block when running tests
-#[derive(Debug, Clone)]
-pub struct ClientSession {
-    pub client_id: u64,
-    pub client_key: ClientKey,
-    pub canister_id: Principal,
-    pub message_for_client_tx: Sender<IcWsConnectionUpdate>,
-    client_connection_span: Span,
-}
-
-impl ClientSession {
-    pub fn new(
-        client_id: u64,
-        client_key: ClientKey,
-        canister_id: Principal,
-        message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        client_connection_span: Span,
-    ) -> Self {
-        Self {
-            client_id,
-            client_key,
-            canister_id,
-            message_for_client_tx,
-            client_connection_span,
-        }
-    }
-}
 
 pub type GatewayState = Arc<DashMap<Principal, Sender<PollerToClientChannelData>>>;
 
@@ -115,7 +75,7 @@ impl Manager {
         &self,
         tls_config: Option<TlsConfig>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
-    ) {
+    ) -> JoinHandle<()> {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
@@ -138,7 +98,7 @@ impl Manager {
                 .listen_for_incoming_requests(cancellation_token)
                 .await;
             info!("Stopped accepting incoming connections");
-        });
+        })
     }
 
     // pub async fn manage_state(&mut self, polling_interval: u64) {

@@ -1,8 +1,8 @@
-use crate::client_connection_handler::ClientId;
+use crate::client_session_handler::ClientId;
 use crate::metrics::canister_poller_metrics::{
     IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
 };
-use crate::metrics::client_connection_handler_metrics::{
+use crate::metrics::client_session_handler_metrics::{
     OutgoingCanisterMessageEventsMetrics, RequestConnectionSetupEventsMetrics,
 };
 use crate::metrics::manager_metrics::ConnectionEstablishmentEventsMetrics;
