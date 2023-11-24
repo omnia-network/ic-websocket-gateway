@@ -108,7 +108,17 @@ async fn main() -> Result<(), String> {
         Receiver<Option<f64>>,
     ) = mpsc::channel(10);
 
-    let mut manager = Manager::new(
+    tokio::spawn(async move {
+        let mut events_analyzer = EventsAnalyzer::new(
+            events_channel_rx,
+            rate_limiting_channel_tx,
+            deployment_info.min_incoming_interval,
+            deployment_info.compute_averages_threshold,
+        );
+        events_analyzer.start_processing().await;
+    });
+
+    let manager = Manager::new(
         deployment_info.gateway_address,
         deployment_info.ic_network_url,
         identity,
@@ -127,21 +137,11 @@ async fn main() -> Result<(), String> {
         None
     };
 
-    tokio::spawn(async move {
-        let mut events_analyzer = EventsAnalyzer::new(
-            events_channel_rx,
-            rate_limiting_channel_tx,
-            deployment_info.min_incoming_interval,
-            deployment_info.compute_averages_threshold,
-        );
-        events_analyzer.start_processing().await;
-    });
-
     // spawn a task which keeps accepting incoming connection requests from WebSocket clients
     manager.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
 
     // maintains the WS Gateway state of the main task in sync with the spawned tasks
-    manager.manage_state(deployment_info.polling_interval).await;
+    // manager.manage_state(deployment_info.polling_interval).await;
     info!("Terminated state manager");
 
     if is_telemetry_enabled {

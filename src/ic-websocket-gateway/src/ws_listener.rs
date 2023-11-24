@@ -1,6 +1,7 @@
 use crate::{
-    client_connection_handler::{ClientConnectionHandler, IcWsConnectionState},
+    client_connection_handler::ClientConnectionHandler,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
+    manager::GatewayState,
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
 use ic_agent::Agent;
@@ -33,7 +34,7 @@ pub struct WsListener {
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
-    client_connection_handler_tx: Sender<IcWsConnectionState>,
+    state: GatewayState,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
     // needed to know which client_session to delete in case of error or WS closed
@@ -44,7 +45,7 @@ impl WsListener {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        client_connection_handler_tx: Sender<IcWsConnectionState>,
+        state: GatewayState,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
         tls_config: Option<TlsConfig>,
@@ -76,7 +77,7 @@ impl WsListener {
             listener,
             tls_acceptor,
             agent,
-            client_connection_handler_tx,
+            state,
             events_channel_tx,
             rate_limiting_channel_rx,
             next_client_id: 0,
@@ -138,7 +139,7 @@ impl WsListener {
                 },
                 Some(Ok((current_client_id , stream, mut listener_events, accept_client_connection_span))) = tls_acceptor_rx.recv() => {
                     // the client connection has been accepted and therefore the connection handler has to be started
-                    self.start_connection_handler(current_client_id, stream, child_token.clone(), accept_client_connection_span);
+                    // self.start_connection_handler(current_client_id, stream, child_token.clone(), accept_client_connection_span);
                     listener_events.metrics.set_started_handler();
                     self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
@@ -146,44 +147,44 @@ impl WsListener {
         }
     }
 
-    fn start_connection_handler(
-        &self,
-        client_id: u64,
-        stream: CustomStream,
-        token: CancellationToken,
-        accept_client_connection_span: Span,
-    ) {
-        accept_client_connection_span.in_scope(|| {
-            debug!("Spawning new connection handler");
-        });
-        let client_connection_span = span!(Level::DEBUG, "Client Connection", client_id);
-        client_connection_span.follows_from(accept_client_connection_span.id());
+    //     fn start_connection_handler(
+    //         &self,
+    //         client_id: u64,
+    //         stream: CustomStream,
+    //         token: CancellationToken,
+    //         accept_client_connection_span: Span,
+    //     ) {
+    //         accept_client_connection_span.in_scope(|| {
+    //             debug!("Spawning new connection handler");
+    //         });
+    //         let client_connection_span = span!(Level::DEBUG, "Client Connection", client_id);
+    //         client_connection_span.follows_from(accept_client_connection_span.id());
 
-        let agent = Arc::clone(&self.agent);
-        let client_connection_handler_tx = self.client_connection_handler_tx.clone();
-        let events_channel_tx = self.events_channel_tx.clone();
-        // spawn a connection handler task for each incoming client connection
-        tokio::spawn(
-            async move {
-                let mut client_connection_handler = ClientConnectionHandler::new(
-                    client_id,
-                    agent,
-                    client_connection_handler_tx,
-                    events_channel_tx,
-                    token,
-                );
-                match stream {
-                    CustomStream::Tcp(stream) => {
-                        client_connection_handler.handle_stream(stream).await
-                    },
-                    CustomStream::TcpWithTls(stream) => {
-                        client_connection_handler.handle_stream(stream).await
-                    },
-                }
-            }
-            .instrument(client_connection_span),
-        );
-    }
+    //         let agent = Arc::clone(&self.agent);
+    //         let client_connection_handler_tx = self.client_connection_handler_tx.clone();
+    //         let events_channel_tx = self.events_channel_tx.clone();
+    //         // spawn a connection handler task for each incoming client connection
+    //         tokio::spawn(
+    //             async move {
+    //                 let mut client_connection_handler = ClientConnectionHandler::new(
+    //                     client_id,
+    //                     agent,
+    //                     client_connection_handler_tx,
+    //                     events_channel_tx,
+    //                     token,
+    //                 );
+    //                 match stream {
+    //                     CustomStream::Tcp(stream) => {
+    //                         client_connection_handler.handle_stream(stream).await
+    //                     },
+    //                     CustomStream::TcpWithTls(stream) => {
+    //                         client_connection_handler.handle_stream(stream).await
+    //                     },
+    //                 }
+    //             }
+    //             .instrument(client_connection_span),
+    //         );
+    //     }
 }
 
 fn is_in_rate_limit(limiting_rate: f64) -> bool {

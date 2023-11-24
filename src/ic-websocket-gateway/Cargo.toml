@@ -37,6 +37,7 @@ opentelemetry = { version = "0.20" }
 tracing-opentelemetry = "0.20"
 opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
+dashmap = "5.5.3"
 
 [dev-dependencies]
 websocket = "0.26.5"
