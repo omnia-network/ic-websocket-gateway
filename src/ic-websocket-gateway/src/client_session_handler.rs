@@ -96,6 +96,7 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     ws_read: SplitStream<WebSocketStream<S>>,
     session_state: IcWsSessionState,
     gateway_state: GatewayState,
+    agent: Arc<Agent>,
     client_connection_span: Span,
 }
 
@@ -108,6 +109,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
         gateway_state: GatewayState,
+        agent: Arc<Agent>,
         client_connection_span: Span,
     ) -> Result<Self, IcWsError> {
         let mut client_session = Self {
@@ -120,6 +122,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             ws_read,
             session_state: IcWsSessionState::Init,
             gateway_state,
+            agent,
             client_connection_span,
         };
 
@@ -167,6 +170,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                 }
                                 debug!("Validated WS open message");
 
+                                // SAFETY:
+                                // first, update the gateway state
+                                // only then, relay the message to the IC
+                                // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
+                                // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
+                                // the message cannot be relayed before doing so because if a poller is already running,
+                                // it might poll a response for the connecting client before it gets the sending side of the channel
+
                                 // TODO: figure out if this is actually atomic
                                 let poller_state = match self.gateway_state.entry(canister_id) {
                                     Entry::Occupied(mut entry) => {
@@ -181,11 +192,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                         // initialize the poller state and add client key and sender end of the channel
                                         let poller_state =
                                             Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
-                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set"));
+                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set once"));
                                         entry.insert(Arc::clone(&poller_state));
                                         Some(Arc::clone(&poller_state))
                                     },
                                 };
+
+                                // TODO: figure out if it is guaranteed that all threads see the state of the updated state of the gateway
+                                //       before relaying the message to the IC
+                                self.relay_call_request_to_ic(ws_message).await?;
 
                                 // client session is now Setup
                                 self.session_state = IcWsSessionState::Setup(
@@ -209,6 +224,42 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         } else {
             Ok(None)
         }
+    }
+
+    /// relays the client's request to the IC only if the content of the envelope is of the Call variant
+    async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+        let client_request = get_client_request(message)?;
+        if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
+            let serialized_envelope = serialize(client_request.envelope)?;
+
+            let canister_id = self.canister_id.expect("must be set");
+
+            // relay the envelope to the IC
+            self.relay_envelope_to_canister(serialized_envelope, canister_id.clone())
+                .await
+                .map_err(|e| IcWsError::IcWsProtocol(e.to_string()))?;
+
+            // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
+            // and therefore could be manufactured by the gateway
+
+            trace!("Relayed serialized envelope to canister");
+            Ok(())
+        } else {
+            Err(IcWsError::IcWsProtocol(String::from(
+                "Gateway can only relay envelopes with content of Call variant",
+            )))
+        }
+    }
+
+    async fn relay_envelope_to_canister(
+        &self,
+        serialized_envelope: Vec<u8>,
+        canister_id: Principal,
+    ) -> Result<(), AgentError> {
+        self.agent
+            .update_signed(canister_id, serialized_envelope)
+            .await?;
+        return Ok(());
     }
 
     async fn send_ws_message_to_client(&mut self, message: Message) -> Result<(), IcWsError> {
@@ -308,6 +359,7 @@ impl ClientSessionHandler {
                     ws_write,
                     ws_read,
                     Arc::clone(&self.gateway_state),
+                    Arc::clone(&self.agent),
                     Span::current(),
                 )
                 .await;
@@ -610,42 +662,6 @@ impl ClientSessionHandler {
     //     self.relay_call_request_to_ic(message).await?;
     //     Ok(())
     // }
-
-    // /// relays the client's request to the IC only if the content of the envelope is of the Call variant
-    // async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
-    //     let client_request = get_client_request(message)?;
-    //     if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
-    //         let serialized_envelope = serialize(client_request.envelope)?;
-
-    //         let canister_id = self.canister_id.read().await.expect("must be some by now");
-
-    //         // relay the envelope to the IC
-    //         self.relay_envelope_to_canister(serialized_envelope, canister_id.clone())
-    //             .await
-    //             .map_err(|e| IcWsError::Initialization(e.to_string()))?;
-
-    //         // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
-    //         // and therefore could be manufactured by the gateway
-
-    //         trace!("Relayed serialized envelope to canister");
-    //         Ok(())
-    //     } else {
-    //         Err(IcWsError::Initialization(String::from(
-    //             "Gateway can only relay envelopes with content of Call variant",
-    //         )))
-    //     }
-    // }
-
-    async fn relay_envelope_to_canister(
-        &self,
-        serialized_envelope: Vec<u8>,
-        canister_id: Principal,
-    ) -> Result<(), AgentError> {
-        self.agent
-            .update_signed(canister_id, serialized_envelope)
-            .await?;
-        return Ok(());
-    }
 
     // async fn send_connection_state_to_clients_manager(
     //     &self,

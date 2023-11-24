@@ -89,9 +89,9 @@ pub struct CanisterPoller {
     canister_id: Principal,
     poller_state: PollerState,
     /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
-    // message_nonce: Rc<RefCell<u64>>,
-    // /// reference of the PollerEvents
-    // polling_iteration: Rc<RefCell<u64>>,
+    message_nonce: u64,
+    /// reference of the PollerEvents
+    polling_iteration: u64,
     agent: Arc<Agent>,
     polling_interval_ms: u64,
 }
@@ -104,8 +104,8 @@ impl CanisterPoller {
             // once the poller starts running, it requests messages from nonce 0.
             // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
-            // message_nonce: Rc::new(RefCell::new(0)),
-            // polling_iteration: Rc::new(RefCell::new(0)),
+            message_nonce: 0,
+            polling_iteration: 0,
             agent,
             // TODO: let the canister be able to configure the polling interval
             polling_interval_ms: 100,
@@ -115,199 +115,188 @@ impl CanisterPoller {
     pub async fn run_polling(&mut self) {
         loop {
             info!("Polling canister");
+            self.poll_canister().await.unwrap();
+
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-
-        // let start_new_poller_span = span!(parent: &client_connection_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id);
-
-        // let messages_demux = Rc::new(RefCell::new(MessagesDemux::new(
-        //     poller_channels.poller_to_analyzer.clone(),
-        //     self.canister_id,
-        // )));
-        // // the channel used to send updates to the first client is passed as an argument to the poller
-        // // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
-        // // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
-        // // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
-        // messages_demux.borrow_mut().add_client_channel(
-        //     first_client_key.clone(),
-        //     message_for_client_tx,
-        //     client_connection_span,
-        // );
-
-        // let get_canister_updates =
-        //     self.get_canister_updates(first_client_key.clone(), Rc::clone(&messages_demux));
-        // // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_canister_updates is continued
-        // // instead of issuing a new call to get_canister_updates
-        // tokio::pin!(get_canister_updates);
-
-        // start_new_poller_span.in_scope(|| {
-        //     info!("Started runnning canister poller");
-        // });
-        // drop(start_new_poller_span);
-
-        // 'poller_loop: loop {
-        //     select! {
-        //         // receive channel used to send canister updates to new client's task
-        //         Some(channel_data) = poller_channels.main_to_poller.recv() => {
-        //             match channel_data {
-        //                 PollerToClientChannelData::NewClientChannel(client_key, client_channel, client_connection_span) => {
-        //                     messages_demux
-        //                         .borrow_mut()
-        //                         .add_client_channel(client_key, client_channel, client_connection_span);
-        //                 },
-        //                 PollerToClientChannelData::ClientDisconnected(client_key, span) => {
-
-        //                     messages_demux
-        //                         .borrow_mut()
-        //                         .remove_client_state(&client_key, span.clone());
-        //                     call_ws_close_in_background(
-        //                         self.agent.clone(),
-        //                         self.canister_id,
-        //                         client_key,
-        //                         span
-        //                     );
-        //             }
-        //             }
-        //         }
-        //         // poll canister for updates across multiple select! iterations
-        //         res = &mut get_canister_updates => {
-        //             match res {
-        //                 Ok(poller_events) => {
-        //                     poller_channels
-        //                         .poller_to_analyzer
-        //                         .send(Box::new(poller_events))
-        //                         .await
-        //                         .expect("analyzer's side of the channel dropped");
-        //                 }
-
-        //                 Err(e) => {
-        //                     let poller_error_span = span!(Level::DEBUG, "poller_error");
-        //                     error!("Terminating poller task due to CDK error: {}", e);
-        //                     signal_termination_and_cleanup(
-        //                         &self.agent,
-        //                         &mut poller_channels.poller_to_main,
-        //                         self.canister_id,
-        //                         messages_demux,
-        //                         e,
-        //                     ).instrument(poller_error_span)
-        //                     .await;
-        //                     break 'poller_loop;
-        //                 }
-        //             }
-
-        //             // counting all polling iterations (instead of only the ones that return at least one canister message)
-        //             // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
-        //             // this can help us in the future understanding whether the poller is polling too frequently or not
-        //             *self.polling_iteration.borrow_mut() += 1;
-
-        //             // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
-        //             get_canister_updates.set(self.get_canister_updates(first_client_key.clone(), Arc::clone(&messages_demux)));
-        //         },
-        //     }
-        //     // exit task if last client disconnected
-        //     if messages_demux.borrow().count_registered_clients() == 0 {
-        //         info!("Terminating poller task as no clients are connected");
-        //         signal_poller_task_termination(
-        //             &mut poller_channels.poller_to_main,
-        //             TerminationInfo::LastClientDisconnected(self.canister_id),
-        //         )
-        //         .await;
-        //         break;
-        //     }
-        //     // prevents the poller from blocking the thread
-        //     // TODO: figure out if it is necessary
-        //     tokio::task::yield_now().await;
-        // }
     }
 
-    // async fn get_canister_updates(
-    //     &self,
-    //     first_client_key: ClientKey,
-    //     messages_demux: Arc<RwLock<MessagesDemux>>,
-    // ) -> Result<PollerEvents, String> {
-    //     let polling_iteration_span =
-    //         span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id);
-    //     polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
-    //     let iteration_key =
-    //         IterationReference::new(self.canister_id, *self.polling_iteration.borrow());
-    //     let mut poller_events = PollerEvents::new(
-    //         Some(EventsReference::IterationReference(iteration_key.clone())),
-    //         EventsCollectionType::PollerStatus,
-    //         PollerEventsMetrics::default(),
-    //     );
-    //     poller_events.metrics.set_start_polling();
+    async fn poll_canister(&self) -> Result<PollerEvents, String> {
+        let polling_iteration_span =
+            span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id);
 
-    //     // get messages to be relayed to clients from canister (starting from 'message_nonce')
-    //     let mut certified_canister_output = canister_methods::ws_get_messages(
-    //         &self.agent,
-    //         &self.canister_id,
-    //         CanisterWsGetMessagesArguments {
-    //             nonce: *self.message_nonce.borrow(),
-    //         },
-    //     )
-    //     .await?;
-    //     polling_iteration_span.in_scope(|| trace!("Polled canister for messages"));
+        polling_iteration_span.in_scope(|| trace!("Started polling iteration"));
 
-    //     poller_events.metrics.set_received_messages();
+        let iteration_key = IterationReference::new(self.canister_id, self.polling_iteration);
+        let mut poller_events = PollerEvents::new(
+            Some(EventsReference::IterationReference(iteration_key.clone())),
+            EventsCollectionType::PollerStatus,
+            PollerEventsMetrics::default(),
+        );
+        poller_events.metrics.set_start_polling();
 
-    //     let relay_messages_async = async {
-    //         // process messages in queues before the ones just polled from the canister (if any) so that the clients receive messages in the expected order
-    //         // this is done even if no messages are returned from the current polling iteration as there might be messages in the queue waiting to be processed
-    //         messages_demux
-    //             .write()
-    //             .await
-    //             .process_queues(polling_iteration_span.id())
-    //             .await;
+        // get messages to be relayed to clients from canister (starting from 'message_nonce')
+        let mut certified_canister_output = canister_methods::ws_get_messages(
+            &self.agent,
+            &self.canister_id,
+            CanisterWsGetMessagesArguments {
+                nonce: self.message_nonce,
+            },
+        )
+        .await?;
+        polling_iteration_span.in_scope(|| trace!("Polled canister for messages"));
 
-    //         filter_canister_messages(
-    //             &mut certified_canister_output.messages,
-    //             *self.message_nonce.borrow(),
-    //             first_client_key,
-    //         );
+        poller_events.metrics.set_received_messages();
 
-    //         let number_of_returned_messages = certified_canister_output.messages.len();
-    //         if number_of_returned_messages > 0 {
-    //             let polled_messages_span = span!(parent: &polling_iteration_span, Level::TRACE, "polled_messages", iteration_key = %iteration_key);
-    //             polled_messages_span.in_scope(|| {
-    //                 trace!(
-    //                     "Polled {} messages from canister",
-    //                     number_of_returned_messages
-    //                 )
-    //             });
-    //             if number_of_returned_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
-    //                 polled_messages_span.in_scope(|| {
-    //                     warn!("Consider increasing the polling frequency or the maximum number of returned messages by the CDK");
-    //                 });
-    //             };
+        let number_of_returned_messages = certified_canister_output.messages.len();
+        if number_of_returned_messages > 0 {
+            let polled_messages_span = span!(parent: &polling_iteration_span, Level::TRACE, "polled_messages", iteration_key = %iteration_key);
 
-    //             poller_events.metrics.set_start_relaying_messages();
-    //             if let Err(e) = messages_demux
-    //                 .write()
-    //                 .await
-    //                 .relay_messages(
-    //                     certified_canister_output,
-    //                     self.message_nonce.borrow().to_owned(),
-    //                     polled_messages_span.id(),
-    //                 )
-    //                 .await
-    //             {
-    //                 return Err(e);
-    //             }
-    //             polled_messages_span.in_scope(|| trace!("Relayed messages to connection handlers"));
-    //             drop(polled_messages_span);
-    //         } else {
-    //             polling_iteration_span.in_scope(|| trace!("No messages polled"));
-    //         }
-    //         poller_events.metrics.set_finished_relaying_messages();
-    //         Ok(poller_events)
-    //     };
+            let relay_messages_async = async {
+                polled_messages_span.in_scope(|| {
+                    trace!(
+                        "Polled {} messages from canister",
+                        number_of_returned_messages
+                    )
+                });
 
-    //     let (relay_result, _) = tokio::join!(relay_messages_async, sleep(self.polling_interval_ms));
-    //     polling_iteration_span.in_scope(|| trace!("Finished polling iteration"));
-    //     drop(polling_iteration_span);
-    //     relay_result
-    // }
+                poller_events.metrics.set_start_relaying_messages();
+                if false {
+                    return Err("Relaying messages failed".to_string());
+                }
+                // if let Err(e) = messages_demux
+                //     .write()
+                //     .await
+                //     .relay_messages(
+                //         certified_canister_output,
+                //         self.message_nonce,
+                //         polled_messages_span.id(),
+                //     )
+                //     .await
+                // {
+                //     return Err(e);
+                // }
+                polled_messages_span.in_scope(|| trace!("Relayed messages to connection handlers"));
+                Ok(())
+            };
+
+            if number_of_returned_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
+                polled_messages_span.in_scope(|| {
+                    warn!("Polled the maximum number of messages. Relayng messages and polling again with no delay");
+                });
+                relay_messages_async.await?;
+                polling_iteration_span.in_scope(|| trace!("Finished polling iteration"));
+            } else {
+                tokio::join!(relay_messages_async, sleep(self.polling_interval_ms)).0?;
+            }
+        } else {
+            polling_iteration_span.in_scope(|| trace!("No messages polled"));
+        }
+        poller_events.metrics.set_finished_relaying_messages();
+        Ok(poller_events)
+    }
 }
+
+// let start_new_poller_span = span!(parent: &client_connection_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id);
+
+// let messages_demux = Rc::new(RefCell::new(MessagesDemux::new(
+//     poller_channels.poller_to_analyzer.clone(),
+//     self.canister_id,
+// )));
+// // the channel used to send updates to the first client is passed as an argument to the poller
+// // this way we can be sure that once the poller gets the first messages from the canister, there is already a client to send them to
+// // this also ensures that we can detect which messages in the first polling iteration are "old" and which ones are not
+// // this is necessary as the poller once it starts it does not know the nonce of the last message delivered by the canister
+// messages_demux.borrow_mut().add_client_channel(
+//     first_client_key.clone(),
+//     message_for_client_tx,
+//     client_connection_span,
+// );
+
+// let get_canister_updates =
+//     self.get_canister_updates(first_client_key.clone(), Rc::clone(&messages_demux));
+// // pin the tracking of the in-flight asynchronous operation so that in each select! iteration get_canister_updates is continued
+// // instead of issuing a new call to get_canister_updates
+// tokio::pin!(get_canister_updates);
+
+// start_new_poller_span.in_scope(|| {
+//     info!("Started runnning canister poller");
+// });
+// drop(start_new_poller_span);
+
+// 'poller_loop: loop {
+//     select! {
+//         // receive channel used to send canister updates to new client's task
+//         Some(channel_data) = poller_channels.main_to_poller.recv() => {
+//             match channel_data {
+//                 PollerToClientChannelData::NewClientChannel(client_key, client_channel, client_connection_span) => {
+//                     messages_demux
+//                         .borrow_mut()
+//                         .add_client_channel(client_key, client_channel, client_connection_span);
+//                 },
+//                 PollerToClientChannelData::ClientDisconnected(client_key, span) => {
+
+//                     messages_demux
+//                         .borrow_mut()
+//                         .remove_client_state(&client_key, span.clone());
+//                     call_ws_close_in_background(
+//                         self.agent.clone(),
+//                         self.canister_id,
+//                         client_key,
+//                         span
+//                     );
+//             }
+//             }
+//         }
+//         // poll canister for updates across multiple select! iterations
+//         res = &mut get_canister_updates => {
+//             match res {
+//                 Ok(poller_events) => {
+//                     poller_channels
+//                         .poller_to_analyzer
+//                         .send(Box::new(poller_events))
+//                         .await
+//                         .expect("analyzer's side of the channel dropped");
+//                 }
+
+//                 Err(e) => {
+//                     let poller_error_span = span!(Level::DEBUG, "poller_error");
+//                     error!("Terminating poller task due to CDK error: {}", e);
+//                     signal_termination_and_cleanup(
+//                         &self.agent,
+//                         &mut poller_channels.poller_to_main,
+//                         self.canister_id,
+//                         messages_demux,
+//                         e,
+//                     ).instrument(poller_error_span)
+//                     .await;
+//                     break 'poller_loop;
+//                 }
+//             }
+
+//             // counting all polling iterations (instead of only the ones that return at least one canister message)
+//             // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
+//             // this can help us in the future understanding whether the poller is polling too frequently or not
+//             *self.polling_iteration.borrow_mut() += 1;
+
+//             // pin a new asynchronous operation so that it can be restarted in the next select! iteration and continued in the following ones
+//             get_canister_updates.set(self.get_canister_updates(first_client_key.clone(), Arc::clone(&messages_demux)));
+//         },
+//     }
+//     // exit task if last client disconnected
+//     if messages_demux.borrow().count_registered_clients() == 0 {
+//         info!("Terminating poller task as no clients are connected");
+//         signal_poller_task_termination(
+//             &mut poller_channels.poller_to_main,
+//             TerminationInfo::LastClientDisconnected(self.canister_id),
+//         )
+//         .await;
+//         break;
+//     }
+//     // prevents the poller from blocking the thread
+//     // TODO: figure out if it is necessary
+//     tokio::task::yield_now().await;
+// }
 
 pub fn filter_canister_messages<'a>(
     messages: &'a mut Vec<CanisterOutputMessage>,
