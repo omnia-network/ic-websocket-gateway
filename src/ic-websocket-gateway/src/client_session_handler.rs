@@ -226,7 +226,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         "canister_id or client_key field was set twice",
                     )));
                 }
-                debug!("Validated WS open message");
+                trace!("Validated WS open message");
 
                 // SAFETY:
                 // first, update the gateway state
@@ -490,7 +490,9 @@ impl ClientSessionHandler {
                                 agent,
                                 analyzer_channel_tx,
                             );
-                            poller.run_polling().await;
+                            if let Err(_e) = poller.run_polling().await {
+                                unimplemented!("TODO");
+                            };
                         });
                     }
                 },
