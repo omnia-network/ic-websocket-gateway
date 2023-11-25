@@ -25,7 +25,7 @@ use crate::{
 
 pub type GatewayState = Arc<DashMap<Principal, PollerState>>;
 
-pub type PollerState = Arc<DashMap<ClientKey, Sender<IcWsConnectionUpdate>>>;
+pub type PollerState = Arc<DashMap<ClientKey, (Sender<IcWsConnectionUpdate>, Span)>>;
 
 /// WS Gateway
 pub struct Manager {

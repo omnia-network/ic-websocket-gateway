@@ -3,7 +3,6 @@ use crate::{
     canister_poller::{CanisterPoller, IcWsConnectionUpdate},
     events_analyzer::{self, Events, EventsCollectionType, EventsReference, MessageReference},
     manager::{GatewayState, PollerState},
-    messages_demux::get_nonce_from_message,
     metrics::client_session_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
@@ -184,7 +183,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                         // the poller has already been started
                                         // add client key and sender end of the channel to the poller state
                                         let poller_state = entry.get_mut();
-                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set"));
+                                        poller_state.insert(client_key, (self.message_for_client_tx.take().expect("must be set once"), Span::current()));
                                         None
                                     },
                                     Entry::Vacant(entry) => {
@@ -192,7 +191,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                                         // initialize the poller state and add client key and sender end of the channel
                                         let poller_state =
                                             Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
-                                        poller_state.insert(client_key, self.message_for_client_tx.take().expect("must be set once"));
+                                        poller_state.insert(client_key, (self.message_for_client_tx.take().expect("must be set once"), Span::current()));
                                         entry.insert(Arc::clone(&poller_state));
                                         Some(Arc::clone(&poller_state))
                                     },
@@ -302,7 +301,7 @@ pub struct ClientSessionHandler {
     id: ClientId,
     agent: Arc<Agent>,
     gateway_state: GatewayState,
-    events_channel_tx: Sender<Box<dyn Events + Send>>,
+    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     token: CancellationToken,
     // the client tells which canister it wants to connect to in the first envelope it sends via WS
 }
@@ -312,14 +311,14 @@ impl ClientSessionHandler {
         id: ClientId,
         agent: Arc<Agent>,
         gateway_state: GatewayState,
-        events_channel_tx: Sender<Box<dyn Events + Send>>,
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         token: CancellationToken,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_state,
-            events_channel_tx,
+            analyzer_channel_tx,
             token,
         }
     }
@@ -394,9 +393,15 @@ impl ClientSessionHandler {
                         info!("Starting poller");
 
                         let agent = Arc::clone(&self.agent);
+                        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
                         // spawn new canister poller task
                         tokio::spawn(async move {
-                            let mut poller = CanisterPoller::new(canister_id, poller_state, agent);
+                            let mut poller = CanisterPoller::new(
+                                canister_id,
+                                poller_state,
+                                agent,
+                                analyzer_channel_tx,
+                            );
                             poller.run_polling().await;
                         });
                     }
@@ -490,7 +495,7 @@ impl ClientSessionHandler {
     //                             });
     //                         }
     //                     }
-    //                     self.events_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
+    //                     self.analyzer_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
     //                 },
     //                 // the poller task terminates all the client connection tasks connected to that poller
     //                 IcWsConnectionUpdate::Error(e) => {
@@ -582,7 +587,7 @@ impl ClientSessionHandler {
     //                                 request_connection_setup_events
     //                                     .metrics
     //                                     .set_ws_connection_setup();
-    //                                 self.events_channel_tx
+    //                                 self.analyzer_channel_tx
     //                                     .send(Box::new(request_connection_setup_events.clone()))
     //                                     .await
     //                                     .expect("analyzer's side of the channel dropped");
