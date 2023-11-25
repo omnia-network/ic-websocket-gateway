@@ -57,7 +57,7 @@ pub enum IcWsSessionState {
     Init,
     Setup(Option<PollerState>, Principal),
     Open,
-    Closed,
+    Closed((ClientKey, Principal)),
 }
 
 impl Eq for IcWsSessionState {}
@@ -71,7 +71,9 @@ impl PartialEq for IcWsSessionState {
                 IcWsSessionState::Setup(_, canister_id2),
             ) => canister_id1 == canister_id2,
             (IcWsSessionState::Open, IcWsSessionState::Open) => true,
-            (IcWsSessionState::Closed, IcWsSessionState::Closed) => true,
+            (IcWsSessionState::Closed(canister_id1), IcWsSessionState::Closed(canister_id2)) => {
+                canister_id1 == canister_id2
+            },
             _ => false,
         }
     }
@@ -159,23 +161,64 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     Some(Ok(ws_message)) => {
                         match old_session_state {
                             IcWsSessionState::Init => {
-                                let setup_state = self.check_setup_transition(ws_message).await?;
-                                self.session_state = setup_state;
+                                if ws_message.is_close() {
+                                    trace!("Client closed connection while in Init state");
+                                    self.session_state = IcWsSessionState::Closed((
+                                        self.client_key.clone().expect("must be set"), self.canister_id.expect("must be set")
+                                    ));
+                                } else {
+                                    // upon receiving a message while the session is Init, check if the message is valid
+                                    // if not return an error, otherwise set the session state to Setup
+                                    // if multiple messages are received while in Init state, 'check_setup_transition' will
+                                    // return an error as the client shall not send more than one message while in Init state
+                                    let setup_state = self.check_setup_transition(ws_message).await?;
+                                    self.session_state = setup_state;
+                                }
                             },
                             IcWsSessionState::Setup(_, _) => {
+                                // upon receiving a message while the session is Setup, discard the message
+                                // and return an error as the client shall not send a message while in Setup state
+                                // this implies a bug in the client SDK
+                                error!("Received client message while in Setup state");
                                 return Err(IcWsError::IcWsProtocol(String::from(
                                     "Client shall not send messages while in Setup state",
                                 )))
                             },
                             IcWsSessionState::Open => {
-                                // once the connection is open, immediately relay the client messages to the IC
-                                self.relay_call_request_to_ic(ws_message).await?;
+                                if ws_message.is_close() {
+                                    trace!("Client closed session while in Open state");
+                                    self.session_state = IcWsSessionState::Closed((
+                                        self.client_key.clone().expect("must be set"), self.canister_id.expect("must be set")
+                                    ));
+                                } else {
+                                    // upon receiving a message while the session is Open, immediately relay the client messages to the IC
+                                    // this does not result in a state transition
+                                    self.relay_call_request_to_ic(ws_message).await?;
+                                }
                             }
-                            _ => unimplemented!("TODO")
+                            IcWsSessionState::Closed(_) => {
+                                // upon receiving a message while the session is Closed, discard the message
+                                // and return an error as this shall not be possible
+                                // this implies a bug in the WS Gateway
+                                error!("Received client message while in Closed state");
+                                return Err(IcWsError::IcWsProtocol(String::from(
+                                    "Client shall not send messages while in Closed state",
+                                )))
+                            }
                         }
                     },
-                    Some(Err(_e)) => unimplemented!("TODO"),
-                    None => unimplemented!("TODO"),
+                    Some(Err(e)) => {
+                        self.session_state = IcWsSessionState::Closed((
+                            self.client_key.clone().expect("must be set"), self.canister_id.expect("must be set")
+                        ));
+                        return Err(IcWsError::WebSocket(format!("Error receiving message from client: {:?}", e)));
+                    },
+                    None => {
+                        self.session_state = IcWsSessionState::Closed((
+                            self.client_key.clone().expect("must be set"), self.canister_id.expect("must be set")
+                        ));
+                        return Err(IcWsError::WebSocket(String::from("Client connection already closed")));
+                    },
                 }
             },
             canister_update = self.message_for_client_rx.recv() => {
@@ -222,6 +265,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 if !self.canister_id.replace(canister_id.clone()).is_none()
                     || !self.client_key.replace(client_key.clone()).is_none()
                 {
+                    // if the canister_id or client_key field was already set,
+                    // it means that the client sent the WS open message twice,
+                    // which it shall not do
+                    // therefore, return an error
                     return Err(IcWsError::IcWsProtocol(String::from(
                         "canister_id or client_key field was set twice",
                     )));
@@ -466,7 +513,7 @@ impl ClientSessionHandler {
                 info!("Refused WebSocket connection {:?}", e);
             },
         }
-        debug!("Terminated client connection handler task");
+        debug!("Terminated client session handler task");
     }
 
     async fn handle_client_session<S: AsyncRead + AsyncWrite + Unpin>(
@@ -475,6 +522,10 @@ impl ClientSessionHandler {
     ) {
         loop {
             match client_session.update_state().await {
+                Ok(Some(IcWsSessionState::Init)) => {
+                    error!("Updating the client session state cannot result in Init");
+                    break;
+                },
                 Ok(Some(IcWsSessionState::Setup(poller_state, canister_id))) => {
                     debug!("Client session setup");
                     if let Some(poller_state) = poller_state {
@@ -482,22 +533,53 @@ impl ClientSessionHandler {
 
                         let agent = Arc::clone(&self.agent);
                         let analyzer_channel_tx = self.analyzer_channel_tx.clone();
+                        let gateway_state = Arc::clone(&self.gateway_state);
                         // spawn new canister poller task
                         tokio::spawn(async move {
+                            // we pass both the whole gateway state and the poller state for the specific canister
+                            // the poller can access the poller state to determine which clients are connected
+                            // without having to lock the whole gateway state
+                            // the poller periodically checks whether there are clients connected in the poller state and, if not,
+                            // removes the corresponding entry from the gateway state and terminates
+                            // TODO: figure out if this having the poller state actually helps
                             let mut poller = CanisterPoller::new(
                                 canister_id,
                                 poller_state,
+                                gateway_state,
                                 agent,
                                 analyzer_channel_tx,
                             );
-                            if let Err(_e) = poller.run_polling().await {
-                                unimplemented!("TODO");
+                            match poller.run_polling().await {
+                                Ok(()) => {
+                                    info!("Canister poller terminated");
+                                },
+                                Err(_e) => {
+                                    unimplemented!("TODO");
+                                },
                             };
                         });
                     }
                 },
                 Ok(Some(IcWsSessionState::Open)) => {
                     debug!("Client session opened");
+                },
+                Ok(Some(IcWsSessionState::Closed((client_key, canister_id)))) => {
+                    debug!("Client session closed");
+
+                    // TODO: figure out if this is actually atomic
+                    if let Entry::Occupied(mut entry) = self.gateway_state.entry(canister_id) {
+                        let poller_state = entry.get_mut();
+                        if poller_state.remove(&client_key).is_none() {
+                            // as the client was connected, the poller state must contain an entry for 'client_key'
+                            unreachable!("Client key not found in poller state");
+                        }
+                        // even if this is the last client session for the canister, do not remove the canister from the gateway state
+                        // this will be done by the poller task
+                    } else {
+                        // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
+                        unreachable!("Canister not found in gateway state");
+                    }
+                    break;
                 },
                 Err(e) => {
                     error!("Client session error: {:?}", e);
@@ -507,7 +589,6 @@ impl ClientSessionHandler {
                     // no state change
                     continue;
                 },
-                _ => unimplemented!("TODO"),
             }
         }
     }
