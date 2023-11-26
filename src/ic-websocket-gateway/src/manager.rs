@@ -73,10 +73,12 @@ impl Manager {
         };
     }
 
+    /// Keeps accepting incoming connections
     pub fn start_accepting_incoming_connections(
         &self,
         tls_config: Option<TlsConfig>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
+        polling_interval: u64,
     ) -> JoinHandle<()> {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
@@ -91,6 +93,7 @@ impl Manager {
                 state,
                 events_channel_tx,
                 rate_limiting_channel_rx,
+                polling_interval,
                 tls_config,
             )
             .await;

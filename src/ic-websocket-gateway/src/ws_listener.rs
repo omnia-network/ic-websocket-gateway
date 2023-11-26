@@ -37,6 +37,7 @@ pub struct WsListener {
     state: GatewayState,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
+    polling_interval: u64,
     // needed to know which client_session to delete in case of error or WS closed
     next_client_id: u64,
 }
@@ -48,6 +49,7 @@ impl WsListener {
         state: GatewayState,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
+        polling_interval: u64,
         tls_config: Option<TlsConfig>,
     ) -> Self {
         let listener = TcpListener::bind(&gateway_address)
@@ -80,6 +82,7 @@ impl WsListener {
             state,
             events_channel_tx,
             rate_limiting_channel_rx,
+            polling_interval,
             next_client_id: 0,
         }
     }

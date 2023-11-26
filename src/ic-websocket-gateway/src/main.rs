@@ -2,10 +2,7 @@ use crate::gateway_tracing::{init_tracing, InitTracingResult};
 use crate::ws_listener::TlsConfig;
 use crate::{events_analyzer::EventsAnalyzer, manager::Manager};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
-use std::{
-    fs::{self},
-    path::Path,
-};
+use std::{fs, path::Path};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
@@ -80,14 +77,15 @@ fn create_data_dir() -> Result<(), String> {
 #[tokio::main]
 async fn main() -> Result<(), String> {
     create_data_dir()?;
+
     let deployment_info = DeploymentInfo::from_args();
+    info!("Deployment info: {:?}", deployment_info);
+
     let InitTracingResult {
         guards: _guards,
         is_telemetry_enabled,
     } = init_tracing(deployment_info.telemetry_jaeger_agent_endpoint.to_owned())
         .expect("could not init tracing");
-
-    info!("Deployment info: {:?}", deployment_info);
 
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
@@ -96,13 +94,13 @@ async fn main() -> Result<(), String> {
     // events_channel_tx -----> events_channel_rx
 
     // channel used to send events to the events analyzer which groups and processes them
-    let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
+    let (events_channel_tx, events_channel_rx) = mpsc::channel(1000);
 
     // [events analyzer task]          [ws_listener]
     // rate_limiting_channel_tx -----> rate_limiting_channel_rx
 
-    // channel used by the events analyzer to send the percentage of connections that should be ignored by the WS listener
-    // due to the rate limiting policy
+    // channel used by the events analyzer to send the percentage of connections that should be rejected
+    // by the WS listener due to the rate limiting policy
     let (rate_limiting_channel_tx, rate_limiting_channel_rx): (
         Sender<Option<f64>>,
         Receiver<Option<f64>>,
@@ -137,17 +135,18 @@ async fn main() -> Result<(), String> {
         None
     };
 
-    // spawn a task which keeps accepting incoming connection requests from WebSocket clients
-    let accept_connections_handle =
-        manager.start_accepting_incoming_connections(tls_config, rate_limiting_channel_rx);
+    // keep accept incoming client connections
+    let accept_connections_handle = manager.start_accepting_incoming_connections(
+        tls_config,
+        rate_limiting_channel_rx,
+        deployment_info.polling_interval,
+    );
 
     tokio::join!(accept_connections_handle)
         .0
         .expect("could not join accept connections task");
 
-    // maintains the WS Gateway state of the main task in sync with the spawned tasks
-    // manager.manage_state(deployment_info.polling_interval).await;
-    info!("Terminated state manager");
+    info!("Terminated gateway manager");
 
     if is_telemetry_enabled {
         opentelemetry::global::shutdown_tracer_provider();
