@@ -145,78 +145,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn update_state(&mut self) -> Result<Option<IcWsSessionState>, IcWsError> {
         let previous_session_state = self.session_state.clone();
         select! {
-            client_update = self.ws_read.next() => {
-                match previous_session_state {
-                    IcWsSessionState::Init => {
-                        let ws_message = self.check_errors(client_update)?;
-                        if !self.is_close(&ws_message) {
-                            // upon receiving a message while the session is Init, check if the message is valid
-                            // if not return an error, otherwise set the session state to Setup
-                            // if multiple messages are received while in Init state, 'check_setup_transition' will
-                            // return an error as the client shall not send more than one message while in Init state
-                            let setup_state = self.check_setup_transition(ws_message).await?;
-                            self.session_state = setup_state;
-                        }
-                    },
-                    IcWsSessionState::Setup(_, _) => {
-                        // upon receiving a message while the session is Setup, discard the message
-                        // and return an error as the client shall not send a message while in Setup state
-                        // this implies a bug in the client SDK
-                        error!("Received client message while in Setup state");
-                        return Err(IcWsError::IcWsProtocol(String::from(
-                            "Client shall not send messages while in Setup state",
-                        )))
-                    },
-                    IcWsSessionState::Open => {
-                        let ws_message = self.check_errors(client_update)?;
-                        if !self.is_close(&ws_message) {
-                            // upon receiving a message while the session is Open, immediately relay the client messages to the IC
-                            // this does not result in a state transition
-                            self.relay_call_request_to_ic(ws_message).await?;
-                        }
-                    }
-                    IcWsSessionState::Closed(_) => {
-                        // upon receiving a message while the session is Closed, discard the message
-                        // and return an error as this shall not be possible
-                        // this implies a bug in the WS Gateway
-                        error!("Received client message while in Closed state");
-                        return Err(IcWsError::IcWsProtocol(String::from(
-                            "Client shall not send messages while in Closed state",
-                        )))
-                    }
-                }
-            },
-            canister_update = self.client_channel_rx.recv() => {
-                match canister_update {
-                    Some(IcWsCanisterUpdate::Message((canister_message, _parent_span))) => {
-                        match previous_session_state {
-                            IcWsSessionState::Init => {
-                                return Err(IcWsError::IcWsProtocol(String::from(
-                                    "Canister shall not send messages while in Init state",
-                                )))
-                            },
-                            IcWsSessionState::Setup(_, _) => {
-                                let open_state = self.check_open_transition(canister_message).await?;
-                                self.session_state = open_state;
-                            },
-                            IcWsSessionState::Open => {
-                                // once the connection is open, immediately relay the canister messages to the client via the WS
-                                self.relay_canister_message(canister_message).await?
-                            },
-                            IcWsSessionState::Closed(_) => {
-                                // upon receiving a message while the session is Closed, discard the message
-                                // and return an error as this shall not be possible
-                                // this implies a bug in the WS Gateway
-                                error!("Received canister message while in Closed state");
-                                return Err(IcWsError::IcWsProtocol(String::from(
-                                    "Poller shall not be able tosend messages while the session is in Closed state",
-                                )))
-                            }
-                        }
-                    }
-                    _ => unimplemented!("TODO"),
-                }
-            }
+            client_update = self.ws_read.next() => self.handle_client_update(client_update).await?,
+            canister_update = self.client_channel_rx.recv() => self.handle_canister_update(canister_update).await?,
         }
         if self.session_state != previous_session_state {
             return Ok(Some(self.session_state.clone()));
@@ -224,7 +154,104 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         Ok(None)
     }
 
-    fn check_errors(
+    async fn handle_client_update(
+        &mut self,
+        client_update: Option<Result<Message, Error>>,
+    ) -> Result<(), IcWsError> {
+        match self.session_state {
+            IcWsSessionState::Init => {
+                let ws_message = self.handle_ws_errors(client_update)?;
+                if !ws_message.is_close() {
+                    // upon receiving a message while the session is Init, check if the message is valid
+                    // if not return an error, otherwise set the session state to Setup
+                    // if multiple messages are received while in Init state, 'check_setup_transition' will
+                    // return an error as the client shall not send more than one message while in Init state
+                    let setup_state = self.check_setup_transition(ws_message).await?;
+                    self.session_state = setup_state;
+                    Ok(())
+                } else {
+                    trace!("Client closed connection while in Init state");
+                    self.session_state = IcWsSessionState::Closed((
+                        self.client_key.clone().expect("must be set"),
+                        self.canister_id.expect("must be set"),
+                    ));
+                    Ok(())
+                }
+            },
+            IcWsSessionState::Setup(_, _) => {
+                // upon receiving a message while the session is Setup, discard the message
+                // and return an error as the client shall not send a message while in Setup state
+                // this implies a bug in the client SDK
+                error!("Received client message while in Setup state");
+                Err(IcWsError::IcWsProtocol(String::from(
+                    "Client shall not send messages while in Setup state",
+                )))
+            },
+            IcWsSessionState::Open => {
+                let ws_message = self.handle_ws_errors(client_update)?;
+                if !ws_message.is_close() {
+                    // upon receiving a message while the session is Open, immediately relay the client messages to the IC
+                    // this does not result in a state transition, which shall remain in Open state
+                    self.relay_call_request_to_ic(ws_message).await?;
+                    Ok(())
+                } else {
+                    trace!("Client closed connection while in Open state");
+                    self.session_state = IcWsSessionState::Closed((
+                        self.client_key.clone().expect("must be set"),
+                        self.canister_id.expect("must be set"),
+                    ));
+                    Ok(())
+                }
+            },
+            IcWsSessionState::Closed(_) => {
+                // upon receiving a message while the session is Closed, discard the message
+                // and return an error as this shall not be possible
+                // this implies a bug in the WS Gateway
+                error!("Received client message while in Closed state");
+                Err(IcWsError::IcWsProtocol(String::from(
+                    "Client shall not send messages while in Closed state",
+                )))
+            },
+        }
+    }
+
+    async fn handle_canister_update(
+        &mut self,
+        canister_update: Option<IcWsCanisterUpdate>,
+    ) -> Result<(), IcWsError> {
+        match canister_update {
+            Some(IcWsCanisterUpdate::Message((canister_message, _parent_span))) => {
+                match self.session_state {
+                    IcWsSessionState::Init => Err(IcWsError::IcWsProtocol(String::from(
+                        "Canister shall not send messages while in Init state",
+                    ))),
+                    IcWsSessionState::Setup(_, _) => {
+                        let open_state = self.check_open_transition(canister_message).await?;
+                        self.session_state = open_state;
+                        Ok(())
+                    },
+                    IcWsSessionState::Open => {
+                        // once the connection is open, immediately relay the canister messages to the client via the WS
+                        // this does not result in a state transition, which shall remain in Open state
+                        self.relay_canister_message(canister_message).await?;
+                        Ok(())
+                    },
+                    IcWsSessionState::Closed(_) => {
+                        // upon receiving a message while the session is Closed, discard the message
+                        // and return an error as this shall not be possible
+                        // this implies a bug in the WS Gateway
+                        error!("Received canister message while in Closed state");
+                        Err(IcWsError::IcWsProtocol(String::from(
+                            "Poller shall not be able tosend messages while the session is in Closed state",
+                        )))
+                    },
+                }
+            },
+            _ => unimplemented!("TODO"),
+        }
+    }
+
+    fn handle_ws_errors(
         &mut self,
         canister_update: Option<Result<Message, Error>>,
     ) -> Result<Message, IcWsError> {
@@ -250,18 +277,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 )))
             },
         }
-    }
-
-    fn is_close(&mut self, ws_message: &Message) -> bool {
-        if ws_message.is_close() {
-            trace!("Client closed connection while in Init state");
-            self.session_state = IcWsSessionState::Closed((
-                self.client_key.clone().expect("must be set"),
-                self.canister_id.expect("must be set"),
-            ));
-            return true;
-        }
-        false
     }
 
     async fn check_setup_transition(
