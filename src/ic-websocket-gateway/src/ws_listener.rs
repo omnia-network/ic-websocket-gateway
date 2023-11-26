@@ -4,6 +4,7 @@ use crate::{
     manager::GatewayState,
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
+use futures_util::select_biased;
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;
@@ -34,7 +35,7 @@ pub struct WsListener {
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
     agent: Arc<Agent>,
-    state: GatewayState,
+    gateway_state: GatewayState,
     events_channel_tx: Sender<Box<dyn Events + Send>>,
     rate_limiting_channel_rx: Receiver<Option<f64>>,
     polling_interval: u64,
@@ -46,7 +47,7 @@ impl WsListener {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        state: GatewayState,
+        gateway_state: GatewayState,
         events_channel_tx: Sender<Box<dyn Events + Send>>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
         polling_interval: u64,
@@ -79,7 +80,7 @@ impl WsListener {
             listener,
             tls_acceptor,
             agent,
-            state,
+            gateway_state,
             events_channel_tx,
             rate_limiting_channel_rx,
             polling_interval,
@@ -87,13 +88,7 @@ impl WsListener {
         }
     }
 
-    pub async fn listen_for_incoming_requests(&mut self, parent_token: CancellationToken) {
-        // needed to ensure that we stop listening for incoming requests before we start shutting down the connections
-        let child_token = CancellationToken::new();
-
-        let wait_for_cancellation = parent_token.cancelled();
-        tokio::pin!(wait_for_cancellation);
-
+    pub async fn listen_for_incoming_requests(&mut self) {
         // [ws listener task]        [tls acceptor task]
         // tls_acceptor_rx    <----- tls_acceptor_tx
 
@@ -106,14 +101,6 @@ impl WsListener {
         let mut limiting_rate: f64 = 0.0;
         loop {
             select! {
-                // bias select! to check token cancellation first
-                // with 'biased', async functions are polled in the order in which they appear
-                biased;
-                _ = &mut wait_for_cancellation => {
-                    child_token.cancel();
-                    info!("Stopped listening for incoming requests");
-                    break;
-                },
                 Some(rate) = self.rate_limiting_channel_rx.recv() => {
                     match rate {
                         Some(rate) => {
@@ -142,7 +129,7 @@ impl WsListener {
                 },
                 Some(Ok((current_client_id , stream, mut listener_events, accept_client_connection_span))) = tls_acceptor_rx.recv() => {
                     // the client connection has been accepted and therefore the connection handler has to be started
-                    self.start_session_handler(current_client_id, stream, child_token.clone(), accept_client_connection_span);
+                    self.start_session_handler(current_client_id, stream, accept_client_connection_span);
                     listener_events.metrics.set_started_handler();
                     self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
@@ -154,7 +141,6 @@ impl WsListener {
         &self,
         client_id: u64,
         stream: CustomStream,
-        token: CancellationToken,
         accept_client_connection_span: Span,
     ) {
         accept_client_connection_span.in_scope(|| {
@@ -164,13 +150,13 @@ impl WsListener {
         client_connection_span.follows_from(accept_client_connection_span.id());
 
         let agent = Arc::clone(&self.agent);
-        let state = Arc::clone(&self.state);
+        let gateway_state = Arc::clone(&self.gateway_state);
         let events_channel_tx = self.events_channel_tx.clone();
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
             async move {
                 let mut client_session_handler =
-                    ClientSessionHandler::new(client_id, agent, state, events_channel_tx, token);
+                    ClientSessionHandler::new(client_id, agent, gateway_state, events_channel_tx);
                 match stream {
                     CustomStream::Tcp(stream) => client_session_handler.start_session(stream).await,
                     CustomStream::TcpWithTls(stream) => {

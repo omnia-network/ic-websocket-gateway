@@ -8,7 +8,7 @@ use crate::{
         Events, EventsCollectionType, EventsImpl, EventsReference, IterationReference,
         MessageReference,
     },
-    manager::{GatewayState, PollerState},
+    manager::{ClientSender, GatewayState, PollerState},
     messages_demux::CLIENTS_REGISTERED_IN_CDK,
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
@@ -77,7 +77,7 @@ enum PollerStatus {
 }
 
 /// updates the client connection handler on the IC WS connection state
-pub enum IcWsConnectionUpdate {
+pub enum IcWsCanisterUpdate {
     /// contains a new message to be realyed to the client
     Message((CanisterToClientMessage, Span)),
     /// lets the client connection hanlder know that an error occurred and the connection should be closed
@@ -88,7 +88,7 @@ pub enum IcWsConnectionUpdate {
 #[derive(Debug, Clone)]
 pub enum PollerToClientChannelData {
     /// contains the sending side of the channel use by the poller to send messages to the client
-    NewClientChannel(ClientKey, Sender<IcWsConnectionUpdate>, Span),
+    NewClientChannel(ClientKey, Sender<IcWsCanisterUpdate>, Span),
     /// signals the poller which cllient disconnected
     ClientDisconnected(ClientKey, Span),
 }
@@ -248,7 +248,10 @@ impl CanisterPoller {
             let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
 
             // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
-            if let Some((client_channel_tx, client_connection_span)) = self
+            if let Some(ClientSender {
+                sender: client_channel_tx,
+                span: client_connection_span,
+            }) = self
                 .poller_state
                 .get(&canister_output_message.client_key)
                 .as_deref()
@@ -275,10 +278,10 @@ impl CanisterPoller {
     pub async fn relay_message(
         &self,
         canister_to_client_message: CanisterToClientMessage,
-        client_channel_tx: &Sender<IcWsConnectionUpdate>,
+        client_channel_tx: &Sender<IcWsCanisterUpdate>,
     ) {
         if let Err(e) = client_channel_tx
-            .send(IcWsConnectionUpdate::Message((
+            .send(IcWsCanisterUpdate::Message((
                 canister_to_client_message,
                 Span::current(),
             )))
@@ -456,7 +459,7 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
 //             Span::current(),
 //         );
 //         if let Err(channel_err) = client_channel_tx
-//             .send(IcWsConnectionUpdate::Error(format!(
+//             .send(IcWsCanisterUpdate::Error(format!(
 //                 "Terminating poller task due to error: {}",
 //                 e
 //             )))

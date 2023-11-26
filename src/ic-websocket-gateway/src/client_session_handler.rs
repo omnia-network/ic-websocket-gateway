@@ -1,8 +1,8 @@
 use crate::{
     canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
-    canister_poller::{get_nonce_from_message, CanisterPoller, IcWsConnectionUpdate},
+    canister_poller::{get_nonce_from_message, CanisterPoller, IcWsCanisterUpdate},
     events_analyzer::{self, Events, EventsCollectionType, EventsReference, MessageReference},
-    manager::{GatewayState, PollerState},
+    manager::{ClientSender, GatewayState, PollerState},
     metrics::client_session_handler_metrics::{
         OutgoingCanisterMessageEvents, OutgoingCanisterMessageEventsMetrics,
         RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
@@ -93,8 +93,8 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     client_id: u64,
     client_key: Option<ClientKey>,
     canister_id: Option<Principal>,
-    message_for_client_tx: Option<Sender<IcWsConnectionUpdate>>,
-    message_for_client_rx: Receiver<IcWsConnectionUpdate>,
+    message_for_client_tx: Option<Sender<IcWsCanisterUpdate>>,
+    message_for_client_rx: Receiver<IcWsCanisterUpdate>,
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     ws_read: SplitStream<WebSocketStream<S>>,
     session_state: IcWsSessionState,
@@ -107,8 +107,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn init(
         client_id: u64,
         gateway_principal: Principal,
-        message_for_client_tx: Sender<IcWsConnectionUpdate>,
-        message_for_client_rx: Receiver<IcWsConnectionUpdate>,
+        message_for_client_tx: Sender<IcWsCanisterUpdate>,
+        message_for_client_rx: Receiver<IcWsCanisterUpdate>,
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
         gateway_state: GatewayState,
@@ -223,7 +223,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             },
             canister_update = self.message_for_client_rx.recv() => {
                 match canister_update {
-                    Some(IcWsConnectionUpdate::Message((canister_message, _parent_span))) => {
+                    Some(IcWsCanisterUpdate::Message((canister_message, _parent_span))) => {
                         match old_session_state {
                             IcWsSessionState::Init => {
                                 return Err(IcWsError::IcWsProtocol(String::from(
@@ -291,10 +291,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         let poller_state = entry.get_mut();
                         poller_state.insert(
                             client_key,
-                            (
-                                self.message_for_client_tx.take().expect("must be set once"),
-                                Span::current(),
-                            ),
+                            ClientSender {
+                                sender: self
+                                    .message_for_client_tx
+                                    .take()
+                                    .expect("must be set once"),
+                                span: Span::current(),
+                            },
                         );
                         None
                     },
@@ -305,10 +308,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                             Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
                         poller_state.insert(
                             client_key,
-                            (
-                                self.message_for_client_tx.take().expect("must be set once"),
-                                Span::current(),
-                            ),
+                            ClientSender {
+                                sender: self
+                                    .message_for_client_tx
+                                    .take()
+                                    .expect("must be set once"),
+                                span: Span::current(),
+                            },
                         );
                         entry.insert(Arc::clone(&poller_state));
                         Some(Arc::clone(&poller_state))
@@ -437,8 +443,6 @@ pub struct ClientSessionHandler {
     agent: Arc<Agent>,
     gateway_state: GatewayState,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
-    token: CancellationToken,
-    // the client tells which canister it wants to connect to in the first envelope it sends via WS
 }
 
 impl ClientSessionHandler {
@@ -447,14 +451,12 @@ impl ClientSessionHandler {
         agent: Arc<Agent>,
         gateway_state: GatewayState,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
-        token: CancellationToken,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_state,
             analyzer_channel_tx,
-            token,
         }
     }
 
@@ -481,8 +483,8 @@ impl ClientSessionHandler {
                 // channel used by the poller task to send canister messages from the directly to this client connection handler task
                 // which will then forward it to the client via the WebSocket connection
                 let (message_for_client_tx, message_for_client_rx): (
-                    Sender<IcWsConnectionUpdate>,
-                    Receiver<IcWsConnectionUpdate>,
+                    Sender<IcWsCanisterUpdate>,
+                    Receiver<IcWsCanisterUpdate>,
                 ) = mpsc::channel(100);
 
                 let client_session = ClientSession::init(
@@ -635,7 +637,7 @@ impl ClientSessionHandler {
     //         Some(poller_message) = message_for_client_rx.recv() => {
     //             match poller_message {
     //                 // check if the poller task detected an error from the CDK
-    //                 IcWsConnectionUpdate::Message((canister_message, parent_span)) => {
+    //                 IcWsCanisterUpdate::Message((canister_message, parent_span)) => {
     //                     let message_for_client_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
     //                     let message_key = MessageReference::new(
     //                         self.canister_id
@@ -675,7 +677,7 @@ impl ClientSessionHandler {
     //                     self.analyzer_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
     //                 },
     //                 // the poller task terminates all the client connection tasks connected to that poller
-    //                 IcWsConnectionUpdate::Error(e) => {
+    //                 IcWsCanisterUpdate::Error(e) => {
     //                     let poller_error_span = span!(parent: &Span::current(), Level::DEBUG, "poller_error");
     //                     // close the WebSocket connection
     //                     if let Err(e) = ws_write.close().await {
