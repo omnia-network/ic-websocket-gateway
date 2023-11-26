@@ -30,7 +30,7 @@ mod tests {
     };
 
     fn init_events_analyzer(compute_average_threshold: u64) -> EventsAnalyzer {
-        let (_events_channel_tx, events_channel_rx) = mpsc::channel(100);
+        let (_analyzer_channel_tx, analyzer_channel_rx) = mpsc::channel(100);
 
         let (rate_limiting_channel_tx, _rate_limiting_channel_rx): (
             Sender<Option<f64>>,
@@ -38,7 +38,7 @@ mod tests {
         ) = mpsc::channel(10);
 
         EventsAnalyzer::new(
-            events_channel_rx,
+            analyzer_channel_rx,
             rate_limiting_channel_tx,
             100,
             compute_average_threshold,

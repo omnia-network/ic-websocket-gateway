@@ -93,10 +93,10 @@ async fn main() -> Result<(), String> {
     let identity = get_identity_from_key_pair(key_pair);
 
     // [any task]               [events analyzer task]
-    // events_channel_tx -----> events_channel_rx
+    // analyzer_channel_tx -----> analyzer_channel_rx
 
     // channel used to send events to the events analyzer which groups and processes them
-    let (events_channel_tx, events_channel_rx) = mpsc::channel(1000);
+    let (analyzer_channel_tx, analyzer_channel_rx) = mpsc::channel(1000);
 
     // [events analyzer task]          [ws_listener]
     // rate_limiting_channel_tx -----> rate_limiting_channel_rx
@@ -110,7 +110,7 @@ async fn main() -> Result<(), String> {
 
     tokio::spawn(async move {
         let mut events_analyzer = EventsAnalyzer::new(
-            events_channel_rx,
+            analyzer_channel_rx,
             rate_limiting_channel_tx,
             deployment_info.min_incoming_interval,
             deployment_info.compute_averages_threshold,
@@ -122,7 +122,7 @@ async fn main() -> Result<(), String> {
         deployment_info.gateway_address,
         deployment_info.ic_network_url,
         identity,
-        events_channel_tx,
+        analyzer_channel_tx,
     )
     .await;
 

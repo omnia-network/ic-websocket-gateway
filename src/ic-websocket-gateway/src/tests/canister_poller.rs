@@ -33,13 +33,13 @@ mod tests {
             Receiver<IcWsConnectionUpdate>,
         ) = mpsc::channel(100);
 
-        let (events_channel_tx, events_channel_rx) = mpsc::channel(100);
+        let (analyzer_channel_tx, analyzer_channel_rx) = mpsc::channel(100);
 
         (
             message_for_client_tx,
             message_for_client_rx,
-            events_channel_tx,
-            events_channel_rx,
+            analyzer_channel_tx,
+            analyzer_channel_rx,
         )
     }
 
@@ -307,12 +307,12 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            events_channel_tx,
+            analyzer_channel_tx,
             // the following have to be returned in order not to drop them
-            _events_channel_rx,
+            _analyzer_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let reconnecting_client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -389,10 +389,14 @@ mod tests {
     /// Simulates the case in which the gateway polls a message for a client that is not yet registered in the poller.
     /// Stores the message in the queue so that it can be processed later.
     async fn should_push_message_to_queue() {
-        let (_message_for_client_tx, _message_for_client_rx, events_channel_tx, _events_channel_rx) =
-            init_poller();
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            analyzer_channel_tx,
+            _analyzer_channel_rx,
+        ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -425,12 +429,12 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            events_channel_tx,
+            analyzer_channel_tx,
             // the following have to be returned in order not to drop them
-            _events_channel_rx,
+            _analyzer_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -465,10 +469,14 @@ mod tests {
     /// Simulates the case in which there is a message in the queue for a client that is not yet connected.
     /// Keeps the message in the queue.
     async fn should_keep_message_in_queue() {
-        let (_message_for_client_tx, _message_for_client_rx, events_channel_tx, _events_channel_rx) =
-            init_poller();
+        let (
+            _message_for_client_tx,
+            _message_for_client_rx,
+            analyzer_channel_tx,
+            _analyzer_channel_rx,
+        ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -499,12 +507,12 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            events_channel_tx,
+            analyzer_channel_tx,
             // the following have to be returned in order not to drop them
-            _events_channel_rx,
+            _analyzer_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let mut messages = Vec::new();
         let client_key = ClientKey::new(
@@ -558,12 +566,12 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            events_channel_tx,
+            analyzer_channel_tx,
             // the following have to be returned in order not to drop them
-            _events_channel_rx,
+            _analyzer_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
@@ -613,12 +621,12 @@ mod tests {
         let (
             message_for_client_tx,
             mut message_for_client_rx,
-            events_channel_tx,
+            analyzer_channel_tx,
             // the following have to be returned in order not to drop them
-            _events_channel_rx,
+            _analyzer_channel_rx,
         ) = init_poller();
 
-        let mut messages_demux = init_messages_demux(events_channel_tx);
+        let mut messages_demux = init_messages_demux(analyzer_channel_tx);
 
         let client_key = ClientKey::new(
             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),

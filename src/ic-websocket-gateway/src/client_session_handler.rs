@@ -438,11 +438,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     }
 }
 
+/// Handler of a client IC WS session
 pub struct ClientSessionHandler {
+    /// Identifier of the client connection
     id: ClientId,
+    /// Agent used to interact with the IC
     agent: Arc<Agent>,
+    /// State of the gateway
     gateway_state: GatewayState,
+    /// Sender side of the channel used to send events from different components to the events analyzer
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+    /// Polling interval in milliseconds
     polling_interval_ms: u64,
 }
 
@@ -463,6 +469,7 @@ impl ClientSessionHandler {
         }
     }
 
+    /// Upgrades to a WebSocket connection and handles the client session
     pub async fn start_session<S: AsyncRead + AsyncWrite + Unpin>(&mut self, stream: S) {
         match accept_async(stream).await {
             Ok(ws_stream) => {
@@ -513,8 +520,8 @@ impl ClientSessionHandler {
                     },
                 }
             },
-            // no cleanup needed on the WS Gateway has the client's session has never been created
             Err(e) => {
+                // no cleanup needed on the WS Gateway state as the client's session has never been created
                 info!("Refused WebSocket connection {:?}", e);
             },
         }

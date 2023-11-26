@@ -29,25 +29,34 @@ pub struct TlsConfig {
     pub certificate_key_pem_path: String,
 }
 
+type TlsAcceptorTimeout = Duration;
+
 /// Status of the rate limiting
 #[derive(Clone)]
 pub enum LimitingRateStatus {
-    On(f64),
-    Off,
+    /// Rate limiting is enabled and the only a percentage of incoming connections are accepted
+    Enabled(f64),
+    /// Rate limiting is disabled
+    Disabled,
 }
 
 /// Contains the information of an accepted connection needed to start a client session handler
 pub struct AcceptedConnection {
+    /// Identifier of the client connection
     pub client_id: u64,
+    /// TCP stream
     pub stream: CustomStream,
+    /// Events related to the connection
     pub listener_events: ListenerEvents,
+    /// Tracing span of the connection
     pub span: AcceptedConnectionSpan,
 }
 
 pub type AcceptedConnectionSpan = Span;
 
+/// Listener of incoming TCP connections
 pub struct WsListener {
-    // Listener of incoming TCP connections
+    // Listener of incoming TCP connectionsx
     listener: TcpListener,
     // TLS acceptor (if enabled)
     tls_acceptor: Option<TlsAcceptor>,
@@ -56,10 +65,10 @@ pub struct WsListener {
     /// State of the gateway
     gateway_state: GatewayState,
     /// Sender side of the channel used to send events from different components to the events analyzer
-    events_channel_tx: Sender<Box<dyn Events + Send>>,
+    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     // Receiver side of the channel used to send the current limiting rate to be applied to incoming connections
     rate_limiting_channel_rx: Receiver<Option<f64>>,
-    // Polling nterval in milliseconds
+    // Polling interval in milliseconds
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
     next_client_id: u64,
@@ -70,7 +79,7 @@ impl WsListener {
         gateway_address: &str,
         agent: Arc<Agent>,
         gateway_state: GatewayState,
-        events_channel_tx: Sender<Box<dyn Events + Send>>,
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
         polling_interval_ms: u64,
         tls_config: Option<TlsConfig>,
@@ -103,13 +112,14 @@ impl WsListener {
             tls_acceptor,
             agent,
             gateway_state,
-            events_channel_tx,
+            analyzer_channel_tx,
             rate_limiting_channel_rx,
             polling_interval_ms,
             next_client_id: 0,
         }
     }
 
+    /// Accepts incoming connections
     pub async fn listen_for_incoming_requests(&mut self) {
         // [ws listener task]        [tls acceptor task]
         // tls_acceptor_channel_rx    <----- tls_acceptor_channel_tx
@@ -120,18 +130,18 @@ impl WsListener {
             Receiver<AcceptedConnection>,
         ) = mpsc::channel(100);
 
-        let mut limiting_rate_status = LimitingRateStatus::Off;
+        let mut limiting_rate_status = LimitingRateStatus::Disabled;
         loop {
             select! {
                 Some(rate) = self.rate_limiting_channel_rx.recv() => {
                     match rate {
                         Some(rate) => {
                             warn!("Rate limiting {}% of incoming connections", rate*100.0);
-                            limiting_rate_status = LimitingRateStatus::On(rate);
+                            limiting_rate_status = LimitingRateStatus::Enabled(rate);
                         },
                         None => {
                             warn!("No rate limiting applied");
-                            limiting_rate_status = LimitingRateStatus::Off;
+                            limiting_rate_status = LimitingRateStatus::Disabled;
                         }
                     }
                 }
@@ -158,7 +168,7 @@ impl WsListener {
                     // the client connection has been accepted and therefore the connection handler has to be started
                     self.start_session_handler(client_id, stream, accept_client_connection_span);
                     listener_events.metrics.set_started_handler();
-                    self.events_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
+                    self.analyzer_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
             }
         }
@@ -178,7 +188,7 @@ impl WsListener {
 
         let agent = Arc::clone(&self.agent);
         let gateway_state = Arc::clone(&self.gateway_state);
-        let events_channel_tx = self.events_channel_tx.clone();
+        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a connection handler task for each incoming client connection
         tokio::spawn(
@@ -187,7 +197,7 @@ impl WsListener {
                     client_id,
                     agent,
                     gateway_state,
-                    events_channel_tx,
+                    analyzer_channel_tx,
                     polling_interval_ms,
                 );
                 match stream {
@@ -203,7 +213,7 @@ impl WsListener {
 }
 
 fn must_rate_limit(limiting_rate_status: LimitingRateStatus) -> bool {
-    if let LimitingRateStatus::On(limiting_rate) = limiting_rate_status {
+    if let LimitingRateStatus::Enabled(limiting_rate) = limiting_rate_status {
         if limiting_rate < 0.0 || limiting_rate > 1.0 {
             error!(
                 "Received invalid limiting rate: {:?}. Ignoring incoming connection...",
@@ -245,7 +255,8 @@ pub fn accept_connection(
 
             let custom_stream = match tls_acceptor {
                 Some(ref acceptor) => {
-                    match timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
+                    match timeout(TlsAcceptorTimeout::from_secs(10), acceptor.accept(stream)).await
+                    {
                         Ok(Ok(tls_stream)) => {
                             debug!("Accepted TLS connection");
                             listener_events.metrics.set_accepted_with_tls();

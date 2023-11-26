@@ -41,7 +41,7 @@ pub struct Manager {
     /// Gateway  address
     address: String,
     /// Sender side of the channel used to send events from different components to the events analyzer
-    events_channel_tx: Sender<Box<dyn Events + Send>>,
+    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     /// State of the WS Gateway
     state: GatewayState,
 }
@@ -51,7 +51,7 @@ impl Manager {
         gateway_address: String,
         ic_network_url: String,
         identity: BasicIdentity,
-        events_channel_tx: Sender<Box<dyn Events + Send>>,
+        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         let fetch_ic_root_key = ic_network_url != "https://icp0.io";
 
@@ -70,7 +70,7 @@ impl Manager {
         return Self {
             agent,
             address: gateway_address,
-            events_channel_tx,
+            analyzer_channel_tx,
             state,
         };
     }
@@ -86,13 +86,13 @@ impl Manager {
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let gateway_state = Arc::clone(&self.state);
-        let events_channel_tx = self.events_channel_tx.clone();
+        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 gateway_state,
-                events_channel_tx,
+                analyzer_channel_tx,
                 rate_limiting_channel_rx,
                 polling_interval,
                 tls_config,

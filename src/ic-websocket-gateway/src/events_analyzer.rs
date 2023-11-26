@@ -330,7 +330,7 @@ pub struct AverageData {
 /// events analyzer receives metrics from different components of the WS Gateway
 pub struct EventsAnalyzer {
     /// receiver side of the channel used to send metrics to the analyzer
-    events_channel_rx: Receiver<Box<dyn Events + Send>>,
+    analyzer_channel_rx: Receiver<Box<dyn Events + Send>>,
     /// sender side of the channel used to send the limiting rate to the WS listener
     rate_limiting_channel_tx: Sender<Option<f64>>,
     /// minimum interval between consecutive incoming connections
@@ -348,13 +348,13 @@ pub struct EventsAnalyzer {
 
 impl EventsAnalyzer {
     pub fn new(
-        events_channel_rx: Receiver<Box<dyn Events + Send>>,
+        analyzer_channel_rx: Receiver<Box<dyn Events + Send>>,
         rate_limiting_channel_tx: Sender<Option<f64>>,
         min_incoming_interval: u64,
         compute_averages_threshold: u64,
     ) -> Self {
         Self {
-            events_channel_rx,
+            analyzer_channel_rx,
             rate_limiting_channel_tx,
             min_incoming_interval,
             compute_averages_threshold,
@@ -371,7 +371,7 @@ impl EventsAnalyzer {
         loop {
             select! {
                 // register each event received on the channel for periodic processing
-                Some(events) = self.events_channel_rx.recv() => {
+                Some(events) = self.analyzer_channel_rx.recv() => {
                     let reference = events.get_reference();
                     if let Some(deltas) = events.get_metrics().compute_deltas(reference) {
                         deltas.display();
