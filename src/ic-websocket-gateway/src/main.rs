@@ -79,13 +79,15 @@ async fn main() -> Result<(), String> {
     create_data_dir()?;
 
     let deployment_info = DeploymentInfo::from_args();
-    info!("Deployment info: {:?}", deployment_info);
 
     let InitTracingResult {
         guards: _guards,
         is_telemetry_enabled,
     } = init_tracing(deployment_info.telemetry_jaeger_agent_endpoint.to_owned())
         .expect("could not init tracing");
+
+    // must be printed after initializing tracing
+    info!("Deployment info: {:?}", deployment_info);
 
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);

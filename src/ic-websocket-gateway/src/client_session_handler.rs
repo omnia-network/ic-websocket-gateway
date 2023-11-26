@@ -443,6 +443,7 @@ pub struct ClientSessionHandler {
     agent: Arc<Agent>,
     gateway_state: GatewayState,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+    polling_interval_ms: u64,
 }
 
 impl ClientSessionHandler {
@@ -451,12 +452,14 @@ impl ClientSessionHandler {
         agent: Arc<Agent>,
         gateway_state: GatewayState,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        polling_interval_ms: u64,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_state,
             analyzer_channel_tx,
+            polling_interval_ms,
         }
     }
 
@@ -536,6 +539,7 @@ impl ClientSessionHandler {
                         let agent = Arc::clone(&self.agent);
                         let analyzer_channel_tx = self.analyzer_channel_tx.clone();
                         let gateway_state = Arc::clone(&self.gateway_state);
+                        let polling_interval_ms = self.polling_interval_ms;
                         // spawn new canister poller task
                         tokio::spawn(async move {
                             // we pass both the whole gateway state and the poller state for the specific canister
@@ -550,6 +554,7 @@ impl ClientSessionHandler {
                                 gateway_state,
                                 agent,
                                 analyzer_channel_tx,
+                                polling_interval_ms,
                             );
                             match poller.run_polling().await {
                                 Ok(()) => {

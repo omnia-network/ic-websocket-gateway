@@ -36,7 +36,7 @@ pub type ClientSessionSpan = Span;
 
 /// Manager of the WS Gateway maintaining its state
 pub struct Manager {
-    /// Agent used to interact with the canisters
+    /// Agent used to interact with the IC
     agent: Arc<Agent>,
     /// Gateway  address
     address: String,

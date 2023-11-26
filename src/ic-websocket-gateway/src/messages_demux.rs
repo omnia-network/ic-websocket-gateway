@@ -1,28 +1,28 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
+// use std::{
+//     collections::{HashMap, HashSet},
+//     sync::{
+//         atomic::{AtomicUsize, Ordering},
+//         Arc,
+//     },
+// };
 
-use candid::Principal;
-use tokio::sync::{mpsc::Sender, RwLock};
-use tracing::{debug, error, span, trace, warn, Id, Instrument, Level, Span};
+// use candid::Principal;
+// use tokio::sync::{mpsc::Sender, RwLock};
+// use tracing::{debug, error, span, trace, warn, Id, Instrument, Level, Span};
 
-use crate::{
-    canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
-    canister_poller::IcWsConnectionUpdate,
-    events_analyzer::{
-        Events, EventsCollectionType, EventsImpl, EventsReference, MessageReference,
-    },
-    metrics::canister_poller_metrics::{
-        IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
-    },
-};
+// use crate::{
+//     canister_methods::{CanisterOutputCertifiedMessages, CanisterToClientMessage, ClientKey},
+//     canister_poller::IcWsConnectionUpdate,
+//     events_analyzer::{
+//         Events, EventsCollectionType, EventsImpl, EventsReference, MessageReference,
+//     },
+//     metrics::canister_poller_metrics::{
+//         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics,
+//     },
+// };
 
-/// number of clients registered in the CDK
-pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
+// /// number of clients registered in the CDK
+// pub static CLIENTS_REGISTERED_IN_CDK: AtomicUsize = AtomicUsize::new(0);
 
 // pub struct MessagesDemux {
 //     canister_id: Principal,

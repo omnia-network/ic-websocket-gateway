@@ -9,7 +9,6 @@ use crate::{
         MessageReference,
     },
     manager::{ClientSender, GatewayState, PollerState},
-    messages_demux::CLIENTS_REGISTERED_IN_CDK,
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
         PollerEventsMetrics,
@@ -122,6 +121,7 @@ impl CanisterPoller {
         gateway_state: GatewayState,
         agent: Arc<Agent>,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+        polling_interval_ms: u64,
     ) -> Self {
         Self {
             canister_id,
@@ -133,8 +133,7 @@ impl CanisterPoller {
             message_nonce: 0,
             polling_iteration: 0,
             agent,
-            // TODO: let the canister be able to configure the polling interval
-            polling_interval_ms: 100,
+            polling_interval_ms,
             analyzer_channel_tx,
         }
     }
