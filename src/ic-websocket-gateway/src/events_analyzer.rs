@@ -1,4 +1,3 @@
-use crate::client_session_handler::ClientId;
 use crate::metrics::canister_poller_metrics::{
     IncomingCanisterMessageEventsMetrics, PollerEventsMetrics,
 };
@@ -7,6 +6,7 @@ use crate::metrics::client_session_handler_metrics::{
 };
 use crate::metrics::manager_metrics::ConnectionEstablishmentEventsMetrics;
 use crate::metrics::ws_listener_metrics::ListenerEventsMetrics;
+use crate::ws_listener::ClientId;
 use candid::Principal;
 use std::any::{type_name, Any};
 use std::cmp::Ordering;

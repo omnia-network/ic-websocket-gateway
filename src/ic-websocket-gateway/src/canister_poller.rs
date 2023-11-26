@@ -30,6 +30,7 @@ use tokio::{
         mpsc::{Receiver, Sender},
         RwLock,
     },
+    time::Instant,
 };
 use tracing::{debug, error, info, span, trace, warn, Id, Instrument, Level, Span};
 
@@ -161,18 +162,14 @@ impl CanisterPoller {
                     self.relay_messages(certified_canister_output, Span::current().id())
                         .instrument(polled_messages_span)
                         .await?;
-                    let finished_relaying_instant = tokio::time::Instant::now();
-                    // SAFETY:
-                    // 'start_polling_instant' was set before 'finished_relaying_instant'
-                    // therefore, 'elapsed' is >= 0
-                    let elapsed = finished_relaying_instant - start_polling_instant;
+                    let elapsed = get_elapsed(start_polling_instant);
                     let polling_interval = Duration::from_millis(self.polling_interval_ms);
                     if elapsed > polling_interval {
+                        // restart polling immediately
                         warn!(
                             "Polling and relaying of messages took too long: {:?}. Polling immediately",
                             elapsed
                         );
-                        // restart polling immediately
                     } else {
                         // SAFETY:
                         // 'elapsed' is smaller than 'polling_interval'
@@ -187,8 +184,15 @@ impl CanisterPoller {
                     self.relay_messages(certified_canister_output, Span::current().id())
                         .instrument(polled_messages_span)
                         .await?;
+                    let elapsed = get_elapsed(start_polling_instant);
+                    if elapsed > Duration::from_millis(self.polling_interval_ms) {
+                        warn!(
+                            "Polling and relaying of messages took too long: {:?}",
+                            elapsed
+                        );
+                    }
                     // restart polling immediately
-                    warn!("Polling immediately");
+                    warn!("Polled the maximum number of messages. Polling immediately");
                 },
                 Err(e) => return Err(e),
             }
@@ -331,6 +335,11 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
     Err(String::from(
         "Key in canister message is not formatted correctly",
     ))
+}
+
+fn get_elapsed(start: Instant) -> Duration {
+    let now = Instant::now();
+    now - start
 }
 
 // let start_new_poller_span = span!(parent: &client_connection_span, Level::DEBUG, "start_new_poller_span", canister_id = %self.canister_id);
