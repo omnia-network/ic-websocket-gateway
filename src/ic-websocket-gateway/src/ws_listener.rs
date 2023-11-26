@@ -203,12 +203,19 @@ impl WsListener {
                     analyzer_channel_tx,
                     polling_interval_ms,
                 );
-                match stream {
-                    CustomStream::Tcp(stream) => client_session_handler.start_session(stream).await,
-                    CustomStream::TcpWithTls(stream) => {
-                        client_session_handler.start_session(stream).await
-                    },
+                if let Err(e) = {
+                    match stream {
+                        CustomStream::Tcp(stream) => {
+                            client_session_handler.start_session(stream).await
+                        },
+                        CustomStream::TcpWithTls(stream) => {
+                            client_session_handler.start_session(stream).await
+                        },
+                    }
+                } {
+                    warn!("Error in client session handler: {:?}", e);
                 }
+                debug!("Terminated client session handler task");
             }
             .instrument(client_connection_span),
         );

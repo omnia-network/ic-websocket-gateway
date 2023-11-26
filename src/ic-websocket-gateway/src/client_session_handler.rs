@@ -51,7 +51,10 @@ impl ClientSessionHandler {
     }
 
     /// Upgrades to a WebSocket connection and handles the client session
-    pub async fn start_session<S: AsyncRead + AsyncWrite + Unpin>(&mut self, stream: S) {
+    pub async fn start_session<S: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        stream: S,
+    ) -> Result<(), String> {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let mut request_connection_setup_events = RequestConnectionSetupEvents::new(
@@ -69,11 +72,11 @@ impl ClientSessionHandler {
                 let (ws_write, ws_read) = ws_stream.split();
 
                 // [client connection handler task]        [poller task]
-                // message_for_client_rx            <----- message_for_client_tx
+                // client_channel_rx                <----- client_channel_tx
 
                 // channel used by the poller task to send canister messages from the directly to this client connection handler task
                 // which will then forward it to the client via the WebSocket connection
-                let (message_for_client_tx, message_for_client_rx): (
+                let (client_channel_tx, client_channel_rx): (
                     Sender<IcWsCanisterUpdate>,
                     Receiver<IcWsCanisterUpdate>,
                 ) = mpsc::channel(100);
@@ -81,8 +84,8 @@ impl ClientSessionHandler {
                 let client_session = ClientSession::init(
                     self.id,
                     self.agent.get_principal().expect("Principal should be set"),
-                    message_for_client_tx,
-                    message_for_client_rx,
+                    client_channel_tx,
+                    client_channel_rx,
                     ws_write,
                     ws_read,
                     Arc::clone(&self.gateway_state),
@@ -95,18 +98,16 @@ impl ClientSessionHandler {
                     Ok(client_session) => {
                         debug!("Client session initialized");
                         self.handle_client_session(client_session).await;
+                        Ok(())
                     },
-                    Err(e) => {
-                        error!("Error initializing client session: {:?}", e);
-                    },
+                    Err(e) => Err(format!("Error initializing client session: {:?}", e)),
                 }
             },
             Err(e) => {
                 // no cleanup needed on the WS Gateway state as the client's session has never been created
-                info!("Refused WebSocket connection {:?}", e);
+                Err(format!("Refused WebSocket connection {:?}", e))
             },
         }
-        debug!("Terminated client session handler task");
     }
 
     async fn handle_client_session<S: AsyncRead + AsyncWrite + Unpin>(
@@ -227,11 +228,11 @@ impl ClientSessionHandler {
     //             break 'handler_loop;
     //         },
     //         // wait for canister message to send to client
-    //         Some(poller_message) = message_for_client_rx.recv() => {
+    //         Some(poller_message) = client_channel_rx.recv() => {
     //             match poller_message {
     //                 // check if the poller task detected an error from the CDK
     //                 IcWsCanisterUpdate::Message((canister_message, parent_span)) => {
-    //                     let message_for_client_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
+    //                     let client_channel_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
     //                     let message_key = MessageReference::new(
     //                         self.canister_id
     //                             .read()
@@ -248,12 +249,12 @@ impl ClientSessionHandler {
     //                             match send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await {
     //                                 Ok(_) => {
     //                                     outgoing_canister_message_events.metrics.set_message_sent_to_client();
-    //                                     message_for_client_span.in_scope(|| {
+    //                                     client_channel_span.in_scope(|| {
     //                                         trace!("Message sent to client");
     //                                     });
     //                                 }
     //                                 Err(e) => {
-    //                                     message_for_client_span.in_scope(|| {
+    //                                     client_channel_span.in_scope(|| {
     //                                         outgoing_canister_message_events.metrics.set_message_sent_to_client();
     //                                         error!("Could not send message to client. Error: {:?}", e);
     //                                     });
@@ -262,7 +263,7 @@ impl ClientSessionHandler {
     //                         },
     //                         Err(e) => {
     //                             outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
-    //                             message_for_client_span.in_scope(|| {
+    //                             client_channel_span.in_scope(|| {
     //                                 error!("Could not serialize canister message. Error: {:?}", e);
     //                             });
     //                         }
@@ -334,7 +335,7 @@ impl ClientSessionHandler {
     //                                         .await
     //                                         .expect("must be some by now")
     //                                         .clone(),
-    //                                     message_for_client_tx.clone(),  // used to send canister updates from the demux to the client connection handler
+    //                                     client_channel_tx.clone(),  // used to send canister updates from the demux to the client connection handler
     //                                     Span::current(),
     //                                 );
 

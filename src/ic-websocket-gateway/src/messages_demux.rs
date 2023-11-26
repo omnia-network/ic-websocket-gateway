@@ -133,19 +133,19 @@
 //         let mut to_be_relayed = Vec::new();
 //         self.clients_message_queues
 //             .retain(|client_key, message_queue| {
-//                 if let Some(message_for_client_tx) = self.client_channels.get(&client_key) {
+//                 if let Some(client_channel_tx) = self.client_channels.get(&client_key) {
 //                     // once a client channel is received, messages for that client will not be put in the queue anymore (until that client disconnects)
 //                     // thus the respective queue does not need to be retained
 //                     // relay all the messages previously received for the corresponding client
 //                     to_be_relayed
-//                         .push((message_for_client_tx.to_owned(), message_queue.to_owned()));
+//                         .push((client_channel_tx.to_owned(), message_queue.to_owned()));
 //                     return false;
 //                 }
 //                 // if the client channel has not been received yet, keep the messages in the queue
 //                 true
 //             });
 //         // the tasks must be awaited so that messages in queue are relayed before newly polled messages
-//         for ((message_for_client_tx, parent_span), message_queue) in to_be_relayed {
+//         for ((client_channel_tx, parent_span), message_queue) in to_be_relayed {
 //             for (canister_to_client_message, incoming_canister_message_events) in message_queue {
 //                 let canister_message_span = span!(parent: &parent_span, Level::TRACE, "canister_message", message_key = canister_to_client_message.key);
 //                 canister_message_span.follows_from(polling_iteration_span_id.clone());
@@ -154,7 +154,7 @@
 //                 });
 //                 self.relay_message(
 //                     canister_to_client_message,
-//                     &message_for_client_tx,
+//                     &client_channel_tx,
 //                     incoming_canister_message_events,
 //                 )
 //                 .instrument(canister_message_span)

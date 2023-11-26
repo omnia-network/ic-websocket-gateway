@@ -28,7 +28,7 @@
 //         Sender<Box<dyn Events + Send>>,
 //         Receiver<Box<dyn Events + Send>>,
 //     ) {
-//         let (message_for_client_tx, message_for_client_rx): (
+//         let (client_channel_tx, client_channel_rx): (
 //             Sender<IcWsConnectionUpdate>,
 //             Receiver<IcWsConnectionUpdate>,
 //         ) = mpsc::channel(100);
@@ -36,8 +36,8 @@
 //         let (analyzer_channel_tx, analyzer_channel_rx) = mpsc::channel(100);
 
 //         (
-//             message_for_client_tx,
-//             message_for_client_rx,
+//             client_channel_tx,
+//             client_channel_rx,
 //             analyzer_channel_tx,
 //             analyzer_channel_rx,
 //         )
@@ -305,8 +305,8 @@
 //     /// Relays only open messages for the connected clients.
 //     async fn should_process_canister_messages() {
 //         let (
-//             message_for_client_tx,
-//             mut message_for_client_rx,
+//             client_channel_tx,
+//             mut client_channel_rx,
 //             analyzer_channel_tx,
 //             // the following have to be returned in order not to drop them
 //             _analyzer_channel_rx,
@@ -320,7 +320,7 @@
 //         );
 //         messages_demux.add_client_channel(
 //             reconnecting_client_key.clone(),
-//             message_for_client_tx.clone(),
+//             client_channel_tx.clone(),
 //             Span::current(),
 //         );
 //         // messages from 2chl6-4hpzw-vqaaa-aaaaa-c must be relayed as the client is registered in the poller
@@ -353,7 +353,7 @@
 //         let mut received = 0;
 //         let mut queued = 0;
 //         for _ in 0..messages.len() {
-//             match message_for_client_rx.try_recv() {
+//             match client_channel_rx.try_recv() {
 //                 Ok(update) => {
 //                     if let IcWsConnectionUpdate::Message((m, _span)) = update {
 //                         // counts the messages relayed should only be for client 2chl6-4hpzw-vqaaa-aaaaa-c
@@ -390,8 +390,8 @@
 //     /// Stores the message in the queue so that it can be processed later.
 //     async fn should_push_message_to_queue() {
 //         let (
-//             _message_for_client_tx,
-//             _message_for_client_rx,
+//             _client_channel_tx,
+//             _client_channel_rx,
 //             analyzer_channel_tx,
 //             _analyzer_channel_rx,
 //         ) = init_poller();
@@ -427,8 +427,8 @@
 //     /// Relays the message to the client and empties the queue.
 //     async fn should_process_message_in_queue() {
 //         let (
-//             message_for_client_tx,
-//             mut message_for_client_rx,
+//             client_channel_tx,
+//             mut client_channel_rx,
 //             analyzer_channel_tx,
 //             // the following have to be returned in order not to drop them
 //             _analyzer_channel_rx,
@@ -454,11 +454,11 @@
 //             .add_message_to_client_queue(&client_key, (m, incoming_canister_message_events));
 
 //         // simulates the client being registered in the poller
-//         messages_demux.add_client_channel(client_key, message_for_client_tx, Span::current());
+//         messages_demux.add_client_channel(client_key, client_channel_tx, Span::current());
 
 //         messages_demux.process_queues(Span::current().id()).await;
 
-//         if let None = message_for_client_rx.recv().await {
+//         if let None = client_channel_rx.recv().await {
 //             panic!("should receive message");
 //         }
 
@@ -470,8 +470,8 @@
 //     /// Keeps the message in the queue.
 //     async fn should_keep_message_in_queue() {
 //         let (
-//             _message_for_client_tx,
-//             _message_for_client_rx,
+//             _client_channel_tx,
+//             _client_channel_rx,
 //             analyzer_channel_tx,
 //             _analyzer_channel_rx,
 //         ) = init_poller();
@@ -505,8 +505,8 @@
 //     /// Relays the messages to the client in ascending order specified by the sequence number.
 //     async fn should_receive_messages_from_queue_in_order() {
 //         let (
-//             message_for_client_tx,
-//             mut message_for_client_rx,
+//             client_channel_tx,
+//             mut client_channel_rx,
 //             analyzer_channel_tx,
 //             // the following have to be returned in order not to drop them
 //             _analyzer_channel_rx,
@@ -539,14 +539,14 @@
 //         // simulates the client being registered in the poller
 //         messages_demux.add_client_channel(
 //             client_key.clone(),
-//             message_for_client_tx,
+//             client_channel_tx,
 //             Span::current(),
 //         );
 
 //         messages_demux.process_queues(Span::current().id()).await;
 
 //         let mut expected_sequence_number = 0;
-//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
+//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = client_channel_rx.try_recv() {
 //             let websocket_message: WebsocketMessage = from_slice(&m.content)
 //                 .expect("content of canister_output_message is not of type WebsocketMessage");
 //             assert_eq!(websocket_message.sequence_num, expected_sequence_number);
@@ -564,8 +564,8 @@
 //     /// Relays the messages to the client in ascending order specified by the sequence number.
 //     async fn should_relay_polled_messages_in_order() {
 //         let (
-//             message_for_client_tx,
-//             mut message_for_client_rx,
+//             client_channel_tx,
+//             mut client_channel_rx,
 //             analyzer_channel_tx,
 //             // the following have to be returned in order not to drop them
 //             _analyzer_channel_rx,
@@ -579,7 +579,7 @@
 //         );
 //         messages_demux.add_client_channel(
 //             client_key.clone(),
-//             message_for_client_tx,
+//             client_channel_tx,
 //             Span::current(),
 //         );
 
@@ -601,7 +601,7 @@
 //         }
 
 //         let mut expected_sequence_number = 0;
-//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
+//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = client_channel_rx.try_recv() {
 //             let websocket_message: WebsocketMessage = from_slice(&m.content)
 //                 .expect("content of canister_output_message is not of type WebsocketMessage");
 //             assert_eq!(websocket_message.sequence_num, expected_sequence_number);
@@ -619,8 +619,8 @@
 //     /// Relays the messages to the client in ascending order specified by the sequence number.
 //     async fn should_relay_polled_messages_in_order_after_processing_queue() {
 //         let (
-//             message_for_client_tx,
-//             mut message_for_client_rx,
+//             client_channel_tx,
+//             mut client_channel_rx,
 //             analyzer_channel_tx,
 //             // the following have to be returned in order not to drop them
 //             _analyzer_channel_rx,
@@ -632,7 +632,7 @@
 //             Principal::from_text("2chl6-4hpzw-vqaaa-aaaaa-c").unwrap(),
 //             0,
 //         );
-//         messages_demux.add_client_channel(client_key, message_for_client_tx, Span::current());
+//         messages_demux.add_client_channel(client_key, client_channel_tx, Span::current());
 
 //         let mut messages_in_queue = Vec::new();
 //         let client_key = ClientKey::new(
@@ -677,7 +677,7 @@
 //         }
 
 //         let mut expected_sequence_number = 0;
-//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = message_for_client_rx.try_recv() {
+//         while let Ok(IcWsConnectionUpdate::Message((m, _span))) = client_channel_rx.try_recv() {
 //             let websocket_message: WebsocketMessage = from_slice(&m.content)
 //                 .expect("content of canister_output_message is not of type WebsocketMessage");
 //             assert_eq!(websocket_message.sequence_num, expected_sequence_number);

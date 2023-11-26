@@ -291,7 +291,7 @@
 //             client_principal,
 //             canister_id,
 //             nonce,
-//             ..  // ignore message_for_client_tx as it does does not implement Eq
+//             ..  // ignore client_channel_tx as it does does not implement Eq
 //         }) = ws_connection_state
 //         {
 //             return assert_eq!(
