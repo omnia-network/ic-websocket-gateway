@@ -9,6 +9,7 @@ use tracing::info;
 
 mod canister_methods;
 mod canister_poller;
+mod client_session;
 mod client_session_handler;
 mod events_analyzer;
 mod gateway_tracing;

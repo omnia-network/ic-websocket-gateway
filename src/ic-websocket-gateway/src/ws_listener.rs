@@ -31,6 +31,9 @@ pub struct TlsConfig {
 
 type TlsAcceptorTimeout = Duration;
 
+/// Identifier of the client connection
+pub type ClientId = u64;
+
 /// Status of the rate limiting
 #[derive(Clone)]
 pub enum LimitingRateStatus {
@@ -43,7 +46,7 @@ pub enum LimitingRateStatus {
 /// Contains the information of an accepted connection needed to start a client session handler
 pub struct AcceptedConnection {
     /// Identifier of the client connection
-    pub client_id: u64,
+    pub client_id: ClientId,
     /// TCP stream
     pub stream: CustomStream,
     /// Events related to the connection
@@ -71,7 +74,7 @@ pub struct WsListener {
     // Polling interval in milliseconds
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
-    next_client_id: u64,
+    next_client_id: ClientId,
 }
 
 impl WsListener {
@@ -176,7 +179,7 @@ impl WsListener {
 
     fn start_session_handler(
         &self,
-        client_id: u64,
+        client_id: ClientId,
         stream: CustomStream,
         accept_client_connection_span: Span,
     ) {
@@ -235,7 +238,7 @@ fn must_rate_limit(limiting_rate_status: LimitingRateStatus) -> bool {
 /// because it could take several seconds to complete
 /// and this would otherwise block other incoming connections
 pub fn accept_connection(
-    client_id: u64,
+    client_id: ClientId,
     client_addr: std::net::SocketAddr,
     stream: TcpStream,
     tls_acceptor: Option<TlsAcceptor>,
