@@ -228,14 +228,11 @@ impl ClientSessionHandler {
                 polling_interval_ms,
                 analyzer_channel_tx,
             );
-            match poller.run_polling().await {
-                Ok(()) => {
-                    info!("Canister poller terminated");
-                },
-                Err(_e) => {
-                    unimplemented!("TODO");
-                },
-            };
+            poller.run_polling().await;
+            info!("Poller terminated");
+            // the poller takes care of notifying the session handlers when an error is detected
+            // and removing its corresponding entry from the gateway state
+            // therefore, this task can simply terminate without doing anything
         });
     }
 }

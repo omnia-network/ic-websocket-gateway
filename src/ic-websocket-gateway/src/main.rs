@@ -14,7 +14,6 @@ mod client_session_handler;
 mod events_analyzer;
 mod gateway_tracing;
 mod manager;
-mod messages_demux;
 mod ws_listener;
 mod metrics {
     pub mod canister_poller_metrics;
