@@ -89,7 +89,6 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     session_state: IcWsSessionState,
     gateway_state: GatewayState,
     agent: Arc<Agent>,
-    _client_connection_span: Span,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
@@ -102,7 +101,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         ws_read: SplitStream<WebSocketStream<S>>,
         gateway_state: GatewayState,
         agent: Arc<Agent>,
-        _client_connection_span: Span,
     ) -> Result<Self, IcWsError> {
         let mut client_session = Self {
             _client_id,
@@ -115,7 +113,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             session_state: IcWsSessionState::Init,
             gateway_state,
             agent,
-            _client_connection_span,
         };
 
         // as soon as the WS connection with the client is established, send the gateway principal

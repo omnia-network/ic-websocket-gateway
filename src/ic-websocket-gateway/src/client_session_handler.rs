@@ -1,11 +1,8 @@
 use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterUpdate},
     client_session::{ClientSession, IcWsSessionState},
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
+    events_analyzer::Events,
     manager::GatewayState,
-    metrics::client_session_handler_metrics::{
-        RequestConnectionSetupEvents, RequestConnectionSetupEventsMetrics,
-    },
     ws_listener::ClientId,
 };
 use dashmap::mapref::entry::Entry;
@@ -57,16 +54,6 @@ impl ClientSessionHandler {
     ) -> Result<(), String> {
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                let mut request_connection_setup_events = RequestConnectionSetupEvents::new(
-                    Some(EventsReference::ClientId(self.id)),
-                    EventsCollectionType::NewClientConnection,
-                    RequestConnectionSetupEventsMetrics::default(),
-                );
-
-                request_connection_setup_events
-                    .metrics
-                    .set_accepted_ws_connection();
-
                 debug!("Accepted WebSocket connection");
 
                 let (ws_write, ws_read) = ws_stream.split();
@@ -74,7 +61,7 @@ impl ClientSessionHandler {
                 // [client connection handler task]        [poller task]
                 // client_channel_rx                <----- client_channel_tx
 
-                // channel used by the poller task to send canister messages from the directly to this client connection handler task
+                // channel used by the poller task to send canister updates from the poller to the client session handler task
                 // which will then forward it to the client via the WebSocket connection
                 let (client_channel_tx, client_channel_rx): (
                     Sender<IcWsCanisterUpdate>,
@@ -90,17 +77,19 @@ impl ClientSessionHandler {
                     ws_read,
                     Arc::clone(&self.gateway_state),
                     Arc::clone(&self.agent),
-                    Span::current(),
                 )
+                .instrument(Span::current())
                 .await;
 
                 match client_session {
                     Ok(client_session) => {
                         debug!("Client session initialized");
-                        self.handle_client_session(client_session).await;
+                        self.handle_client_session(client_session)
+                            .instrument(Span::current())
+                            .await;
                         Ok(())
                     },
-                    Err(e) => Err(format!("Error initializing client session: {:?}", e)),
+                    Err(e) => Err(format!("Client session error: {:?}", e)),
                 }
             },
             Err(e) => {
@@ -110,12 +99,17 @@ impl ClientSessionHandler {
         }
     }
 
+    /// Handles the client session by reacting to the changes in the session state
     async fn handle_client_session<S: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         mut client_session: ClientSession<S>,
     ) {
         loop {
-            match client_session.update_state().await {
+            match client_session
+                .update_state()
+                .instrument(Span::current())
+                .await
+            {
                 Ok(Some(IcWsSessionState::Init)) => {
                     error!("Updating the client session state cannot result in Init");
                     break;

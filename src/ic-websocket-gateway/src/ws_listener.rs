@@ -7,7 +7,7 @@ use crate::{
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, sync::Arc, thread::current, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -177,6 +177,7 @@ impl WsListener {
         }
     }
 
+    /// Spawns a new session handler
     fn start_session_handler(
         &self,
         client_id: ClientId,
@@ -193,7 +194,7 @@ impl WsListener {
         let gateway_state = Arc::clone(&self.gateway_state);
         let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         let polling_interval_ms = self.polling_interval_ms;
-        // spawn a connection handler task for each incoming client connection
+        // spawn a session handler task for each incoming client connection
         tokio::spawn(
             async move {
                 let mut client_session_handler = ClientSessionHandler::new(
@@ -203,13 +204,21 @@ impl WsListener {
                     analyzer_channel_tx,
                     polling_interval_ms,
                 );
+                debug!("Started client session handler task");
+
                 if let Err(e) = {
                     match stream {
                         CustomStream::Tcp(stream) => {
-                            client_session_handler.start_session(stream).await
+                            client_session_handler
+                                .start_session(stream)
+                                .instrument(Span::current())
+                                .await
                         },
                         CustomStream::TcpWithTls(stream) => {
-                            client_session_handler.start_session(stream).await
+                            client_session_handler
+                                .start_session(stream)
+                                .instrument(Span::current())
+                                .await
                         },
                     }
                 } {
