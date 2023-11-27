@@ -8,7 +8,7 @@ use crate::{
         Events, EventsCollectionType, EventsImpl, EventsReference, IterationReference,
         MessageReference,
     },
-    manager::{ClientSender, GatewaySharedState, PollerState},
+    manager::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState},
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
         PollerEventsMetrics,
@@ -34,36 +34,11 @@ use tokio::{
 };
 use tracing::{debug, error, info, span, trace, warn, Id, Instrument, Level, Span};
 
+// OLD NOTE: 30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
+//           as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
 // TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
 //       maybe get it once starting to poll the canister (?)
-//       30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
-//       as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
 const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 30;
-
-/// ends of the channels needed by each canister poller tasks
-#[derive(Debug)]
-pub struct PollerChannelsPollerEnds {
-    /// receiving side of the channel used by the main task to send the receiving task of a new client's channel to the poller task
-    main_to_poller: Receiver<PollerToClientChannelData>,
-    /// sending side of the channel used by the poller to send the canister id of the poller which is about to terminate
-    poller_to_main: Sender<TerminationInfo>,
-    /// sending side of the channel used by the poller to send events to the event analyzer
-    poller_to_analyzer: Sender<Box<dyn Events + Send>>,
-}
-
-impl PollerChannelsPollerEnds {
-    pub fn new(
-        main_to_poller: Receiver<PollerToClientChannelData>,
-        poller_to_main: Sender<TerminationInfo>,
-        poller_to_analyzer: Sender<Box<dyn Events + Send>>,
-    ) -> Self {
-        Self {
-            main_to_poller,
-            poller_to_main,
-            poller_to_analyzer,
-        }
-    }
-}
 
 enum PollingStatus {
     NoMessagesPolled,
@@ -84,35 +59,26 @@ pub enum IcWsCanisterUpdate {
     Error(String),
 }
 
-/// contains the information that the main task sends to the poller task:
-#[derive(Debug, Clone)]
-pub enum PollerToClientChannelData {
-    /// contains the sending side of the channel use by the poller to send messages to the client
-    NewClientChannel(ClientKey, Sender<IcWsCanisterUpdate>, Span),
-    /// signals the poller which cllient disconnected
-    ClientDisconnected(ClientKey, Span),
-}
-
-/// determines the reason of the poller task termination:
-pub enum TerminationInfo {
-    /// contains the principal of the last client and therefore there is no need to continue polling
-    LastClientDisconnected(Principal),
-    /// error while polling the canister
-    CdkError(Principal),
-}
-
-/// periodically polls the canister for updates to be relayed to clients
+/// Poller which periodically queries a canister for new messages and relays them to the client
 pub struct CanisterPoller {
+    /// Agent used to communicate with the IC
     agent: Arc<Agent>,
-    canister_id: Principal,
+    /// Principal of the canister which the poller is polling
+    canister_id: CanisterPrincipal,
+    /// State of the poller
     poller_state: PollerState,
+    /// State of the gateway
     gateway_shared_state: GatewaySharedState,
-    /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
+    /// Nonce specified by the gateway during the query call to ws_get_messages,
+    /// used by the CDK to determine which messages to respond with
     message_nonce: u64,
+    /// The number of polling iterations since the poller started
     /// reference of the PollerEvents
     polling_iteration: u64,
+    /// Polling interval in milliseconds
     polling_interval_ms: u64,
-    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
+    /// Sender side of the channel used to send events to the analyzer
+    _analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
 }
 
 impl CanisterPoller {
@@ -121,8 +87,8 @@ impl CanisterPoller {
         canister_id: Principal,
         poller_state: PollerState,
         gateway_shared_state: GatewaySharedState,
-        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval_ms: u64,
+        _analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         Self {
             agent,
@@ -132,70 +98,26 @@ impl CanisterPoller {
             // once the poller starts running, it requests messages from nonce 0.
             // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
+            // TODO: change the CDK so that in this case it returns all the messages in the queue
+            //       the poller relays only the ones that are in the poller state at the time of receiving them
             message_nonce: 0,
             polling_iteration: 0,
             polling_interval_ms,
-            analyzer_channel_tx,
+            _analyzer_channel_tx,
         }
     }
 
+    /// Periodically polls the canister for updates to be relayed to clients
     pub async fn run_polling(&mut self) -> Result<(), String> {
         loop {
             let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration);
+            self.poll_and_relay()
+                .instrument(polling_iteration_span)
+                .await?;
 
-            let polled_messages_span =
-                span!(parent: &polling_iteration_span, Level::TRACE, "Polled messages");
-
-            let start_polling_instant: tokio::time::Instant = tokio::time::Instant::now();
-            match self
-                .poll_canister()
-                .instrument(polling_iteration_span.clone())
-                .await
-            {
-                Ok(PollingStatus::NoMessagesPolled) => {
-                    // counting all polling iterations (instead of only the ones that return at least one canister message)
-                    // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
-                    // this can help us in the future understanding whether the poller is polling too frequently or not
-                    tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
-                },
-                Ok(PollingStatus::MessagesPolled(certified_canister_output)) => {
-                    self.relay_messages(certified_canister_output, Span::current().id())
-                        .instrument(polled_messages_span)
-                        .await?;
-                    let elapsed = get_elapsed(start_polling_instant);
-                    let polling_interval = Duration::from_millis(self.polling_interval_ms);
-                    if elapsed > polling_interval {
-                        // restart polling immediately
-                        warn!(
-                            "Polling and relaying of messages took too long: {:?}. Polling immediately",
-                            elapsed
-                        );
-                    } else {
-                        // SAFETY:
-                        // 'elapsed' is smaller than 'polling_interval'
-                        // therefore, the duration passed to 'sleep' is valid
-
-                        // 'elapsed' is >= 0
-                        // therefore, the next polling iteration is delayed by at most 'polling_interval'
-                        tokio::time::sleep(polling_interval - elapsed).await;
-                    }
-                },
-                Ok(PollingStatus::MaxMessagesPolled(certified_canister_output)) => {
-                    self.relay_messages(certified_canister_output, Span::current().id())
-                        .instrument(polled_messages_span)
-                        .await?;
-                    let elapsed = get_elapsed(start_polling_instant);
-                    if elapsed > Duration::from_millis(self.polling_interval_ms) {
-                        warn!(
-                            "Polling and relaying of messages took too long: {:?}",
-                            elapsed
-                        );
-                    }
-                    // restart polling immediately
-                    warn!("Polled the maximum number of messages. Polling immediately");
-                },
-                Err(e) => return Err(e),
-            }
+            // counting all polling iterations (instead of only the ones that return at least one canister message)
+            // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
+            // this can help us in the future understanding whether the poller is polling too frequently or not
             self.polling_iteration += 1;
 
             if let PollerStatus::Terminated = self.check_poller_termination() {
@@ -205,6 +127,63 @@ impl CanisterPoller {
         }
     }
 
+    async fn poll_and_relay(&mut self) -> Result<(), String> {
+        let relay_messages_span =
+            span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
+
+        let start_polling_instant: tokio::time::Instant = tokio::time::Instant::now();
+        match self.poll_canister().instrument(Span::current()).await {
+            Ok(PollingStatus::NoMessagesPolled) => {
+                // if no messages are returned, sleep for 'polling_interval_ms' before polling again
+                tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
+                Ok(())
+            },
+            Ok(PollingStatus::MessagesPolled(certified_canister_output)) => {
+                self.relay_messages(certified_canister_output, Span::current().id())
+                    .instrument(relay_messages_span)
+                    .await?;
+                let elapsed = get_elapsed(start_polling_instant);
+                let polling_interval = Duration::from_millis(self.polling_interval_ms);
+                // check if polling and relaying took longer than 'polling_interval'
+                // if yes, restart polling immediately
+                // otherwise, sleep for the amount of time remaining to 'polling_interval'
+                if elapsed > polling_interval {
+                    warn!(
+                        "Polling and relaying of messages took too long: {:?}. Polling immediately",
+                        elapsed
+                    );
+                } else {
+                    // SAFETY:
+                    // 'elapsed' is smaller than 'polling_interval'
+                    // therefore, the duration passed to 'sleep' is valid
+
+                    // 'elapsed' is >= 0
+                    // therefore, the next polling iteration is delayed by at most 'polling_interval'
+                    tokio::time::sleep(polling_interval - elapsed).await;
+                }
+                Ok(())
+            },
+            Ok(PollingStatus::MaxMessagesPolled(certified_canister_output)) => {
+                self.relay_messages(certified_canister_output, Span::current().id())
+                    .instrument(relay_messages_span)
+                    .await?;
+                let elapsed = get_elapsed(start_polling_instant);
+                // if polling and relaying took longer than 'polling_interval', create a warning
+                if elapsed > Duration::from_millis(self.polling_interval_ms) {
+                    warn!(
+                        "Polling and relaying of messages took too long: {:?}",
+                        elapsed
+                    );
+                }
+                // poll immediately as the maximum number of messages has beeen polled
+                warn!("Polled the maximum number of messages. Polling immediately");
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Polls the canister for messages
     async fn poll_canister(&mut self) -> Result<PollingStatus, String> {
         trace!("Started polling iteration");
 
@@ -238,7 +217,7 @@ impl CanisterPoller {
     pub async fn relay_messages(
         &mut self,
         msgs: CanisterOutputCertifiedMessages,
-        polled_messages_span_id: Option<Id>,
+        relay_messages_span_id: Option<Id>,
     ) -> Result<(), String> {
         for canister_output_message in msgs.messages {
             let canister_to_client_message = CanisterToClientMessage {
@@ -260,7 +239,7 @@ impl CanisterPoller {
                 .as_deref()
             {
                 let canister_message_span = span!(parent: client_connection_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
-                canister_message_span.follows_from(polled_messages_span_id.clone());
+                canister_message_span.follows_from(relay_messages_span_id.clone());
                 canister_message_span.in_scope(|| trace!("Received message from canister",));
                 self.relay_message(canister_to_client_message, client_channel_tx)
                     .instrument(canister_message_span)

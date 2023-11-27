@@ -225,8 +225,8 @@ impl ClientSessionHandler {
                 canister_id,
                 poller_state,
                 gateway_shared_state,
-                analyzer_channel_tx,
                 polling_interval_ms,
+                analyzer_channel_tx,
             );
             match poller.run_polling().await {
                 Ok(()) => {
