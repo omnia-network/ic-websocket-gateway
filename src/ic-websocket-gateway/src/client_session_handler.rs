@@ -107,7 +107,7 @@ impl ClientSessionHandler {
         // if no new state is returned, try to update the state again
         loop {
             match client_session
-                .update_state()
+                .try_update_state()
                 .instrument(Span::current())
                 .await
             {
@@ -141,7 +141,7 @@ impl ClientSessionHandler {
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
                     client_session
-                        .relay_call_request_to_ic(ws_open_message)
+                        .relay_ws_message_to_ic(ws_open_message)
                         .await
                         .map_err(|e| format!("Could not relay WS open message to IC: {:?}", e))?;
 
