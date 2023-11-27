@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{info, Span};
+use tracing::{info, warn, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
@@ -28,14 +28,6 @@ impl GatewayState {
         client_key: ClientKey,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
     ) -> Option<PollerState> {
-        // SAFETY:
-        // first, update the gateway state
-        // only then, relay the message to the IC
-        // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
-        // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
-        // the message cannot be relayed before doing so because if a poller is already running,
-        // it might poll a response for the connecting client before it gets the sending side of the channel
-
         // TODO: figure out if this is actually atomic
         match self.0.entry(canister_id) {
             Entry::Occupied(mut entry) => {
@@ -86,10 +78,28 @@ impl GatewayState {
         }
     }
 
+    pub fn remove_client_if_exists(
+        &self,
+        canister_id: CanisterPrincipal,
+        client_key: ClientKey,
+    ) -> bool {
+        // TODO: figure out if this is actually atomic
+        if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
+            let poller_state = entry.get_mut();
+            // even if this is the last client session for the canister, do not remove the canister from the gateway state
+            // this will be done by the poller task
+            poller_state.remove(&client_key).is_none()
+        } else {
+            // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
+            // if this is encountered it might indicate a race condition
+            unreachable!("Canister not found in gateway state");
+        }
+    }
+
     pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> bool {
         // SAFETY:
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
-        // if None si returned, the poller state is not empty and therefore there are still clients connected and the poller should not terminate
+        // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller should not terminate
         // if Some is returned, the poller state is empty and therefore the poller should terminate
         self.0
             .remove_if(&canister_id, |_, poller_state| poller_state.is_empty())

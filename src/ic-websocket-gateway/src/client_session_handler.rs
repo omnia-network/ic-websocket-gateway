@@ -2,7 +2,7 @@ use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterUpdate},
     client_session::{ClientSession, IcWsSessionState},
     events_analyzer::Events,
-    manager::GatewaySharedState,
+    manager::{CanisterPrincipal, GatewaySharedState, PollerState},
     ws_listener::ClientId,
 };
 use futures_util::StreamExt;
@@ -102,6 +102,9 @@ impl ClientSessionHandler {
         mut client_session: ClientSession<S>,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
     ) -> Result<(), String> {
+        // keeps trying to update the client session state
+        // if a new state is returned, execute the corresponding logic
+        // if no new state is returned, try to update the state again
         loop {
             match client_session
                 .update_state()
@@ -109,20 +112,33 @@ impl ClientSessionHandler {
                 .await
             {
                 Ok(Some(IcWsSessionState::Init)) => {
-                    return Err(String::from(
-                        "Updating the client session state cannot result in Init",
-                    ));
+                    // no update can bring the session back to Init
+                    // no need to cleanup as the client session has not been created yet
+                    unreachable!("Updating the client session state cannot result in Init");
                 },
-                Ok(Some(IcWsSessionState::Setup(ws_open_message, client_key, canister_id))) => {
+                Ok(Some(IcWsSessionState::Setup(ws_open_message))) => {
+                    // SAFETY:
+                    // first, update the gateway state
+                    // only then, relay the message to the IC
+                    // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
+                    // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
+                    // the message cannot be relayed before doing so because if a poller is already running,
+                    // it might poll a response for the connecting client before it gets the sending side of the channel
+
                     let new_poller_state = self
                         .gateway_shared_state
                         .insert_client_channel_and_get_new_poller_state(
-                            canister_id,
-                            client_key,
+                            client_session
+                                .canister_id
+                                .expect("must be set during Setup"),
+                            client_session
+                                .client_key
+                                .clone()
+                                .expect("must be set during Setup"),
                             client_channel_tx.clone(),
                         );
 
-                    // TODO: figure out if it is guaranteed that all threads see the state of the updated state of the gateway
+                    // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
                     client_session
                         .relay_call_request_to_ic(ws_open_message)
@@ -131,51 +147,54 @@ impl ClientSessionHandler {
 
                     debug!("Client session setup");
 
+                    // check if a new poller has to be started
+                    // if so, start the poller
                     if let Some(new_poller_state) = new_poller_state {
-                        info!("Starting poller");
-
-                        let agent = Arc::clone(&self.agent);
-                        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
-                        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
-                        let polling_interval_ms = self.polling_interval_ms;
-                        // spawn new canister poller task
-                        tokio::spawn(async move {
-                            // we pass both the whole gateway state and the poller state for the specific canister
-                            // the poller can access the poller state to determine which clients are connected
-                            // without having to lock the whole gateway state (TODO: check if true)
-                            // the poller periodically checks whether there are clients connected in the poller state and,
-                            // if not, removes the corresponding entry from the gateway state and terminates
-                            // TODO: figure out if this having the poller state actually helps
-                            let mut poller = CanisterPoller::new(
-                                canister_id,
-                                new_poller_state,
-                                gateway_shared_state,
-                                agent,
-                                analyzer_channel_tx,
-                                polling_interval_ms,
-                            );
-                            match poller.run_polling().await {
-                                Ok(()) => {
-                                    info!("Canister poller terminated");
-                                },
-                                Err(_e) => {
-                                    unimplemented!("TODO");
-                                },
-                            };
-                        });
+                        self.start_poller(
+                            client_session
+                                .canister_id
+                                .expect("must be set during Setup"),
+                            new_poller_state,
+                        );
                     }
+                    // do not return anything as the session is still alive
                 },
                 Ok(Some(IcWsSessionState::Open)) => {
                     debug!("Client session opened");
+                    // do not return anything as the session is still alive
                 },
-                Ok(Some(IcWsSessionState::Closed((client_key, canister_id)))) => {
+                Ok(Some(IcWsSessionState::Closed)) => {
                     debug!("Client session closed");
-                    self.gateway_shared_state
-                        .remove_client(canister_id, client_key);
+
+                    // remove client from poller state
+                    self.gateway_shared_state.remove_client(
+                        client_session
+                            .canister_id
+                            .expect("must be set during Setup"),
+                        client_session
+                            .client_key
+                            .clone()
+                            .expect("must be set during Setup"),
+                    );
+                    // return Ok as the session was closed correctly
                     return Ok(());
                 },
                 Err(e) => {
-                    return Err(format!("Client session error: {:?}", e));
+                    // remove client from poller state, if it is present
+                    // error might have happened before the client session was Setup
+                    if self.gateway_shared_state.remove_client_if_exists(
+                        client_session
+                            .canister_id
+                            .expect("must be set during Setup"),
+                        client_session
+                            .client_key
+                            .clone()
+                            .expect("must be set during Setup"),
+                    ) {
+                        // return Err as the session had an error and cannot be updated anymore
+                        return Err(format!("Client session error: {:?}", e));
+                    }
+                    return Err(format!("Client error before session Setup: {:?}", e));
                 },
                 Ok(None) => {
                     // no state change
@@ -184,272 +203,39 @@ impl ClientSessionHandler {
             }
         }
     }
-    // let wait_for_cancellation = self.token.cancelled();
-    // tokio::pin!(wait_for_cancellation);
-    // let mut ic_websocket_setup = false;
-    // 'handler_loop: loop {
-    //     select! {
-    //         // bias select! to check token cancellation first
-    //         // with 'biased', async functions are polled in the order in which they appear
-    //         biased;
-    //         // waits for the token to be cancelled
-    //         _ = &mut wait_for_cancellation => {
-    //             let graceful_shutdown_span = span!(parent: &Span::current(), Level::DEBUG, "graceful_shutdown");
-    //             // close the WebSocket connection
-    //             if let Err(e) = ws_write.close().await {
-    //                 graceful_shutdown_span.in_scope(|| {
-    //                     error!("Error closing the WS connection: {:?}", e);
-    //                 });
-    //             }
-    //             graceful_shutdown_span.in_scope(|| {
-    //                 debug!("Terminating client connection handler task due to graceful shutdown");
-    //             });
 
-    //             // TODO: update the gateway state to reflect that the client has disconnected
+    /// Starts a new canister poller
+    fn start_poller(&self, canister_id: CanisterPrincipal, poller_state: PollerState) {
+        info!("Starting poller");
 
-    //             // self.send_connection_state_to_clients_manager(
-    //             //     IcWsSessionState::Closed(
-    //             //         (
-    //             //             self.key.clone().expect("must be some by now"),
-    //             //             self.canister_id
-    //             //                 .read()
-    //             //                 .await
-    //             //                 .expect("must be some by now")
-    //             //                 .clone(),
-    //             //             graceful_shutdown_span
-    //             //         )
-    //             //     )
-    //             // )
-    //             // .await;
-    //             break 'handler_loop;
-    //         },
-    //         // wait for canister message to send to client
-    //         Some(poller_message) = client_channel_rx.recv() => {
-    //             match poller_message {
-    //                 // check if the poller task detected an error from the CDK
-    //                 IcWsCanisterUpdate::Message((canister_message, parent_span)) => {
-    //                     let client_channel_span = span!(parent: &parent_span, Level::TRACE, "message_for_client");
-    //                     let message_key = MessageReference::new(
-    //                         self.canister_id
-    //                             .read()
-    //                             .await
-    //                             .expect("must be some by now")
-    //                             .clone(),
-    //                         get_nonce_from_message(&canister_message.key).expect("poller relayed a message not correcly formatted")
-    //                     );
-    //                     let mut outgoing_canister_message_events = OutgoingCanisterMessageEvents::new(Some(EventsReference::MessageReference(message_key)), EventsCollectionType::CanisterMessage, OutgoingCanisterMessageEventsMetrics::default());
-    //                     outgoing_canister_message_events.metrics.set_received_canister_message();
-    //                     // relay canister message to client, cbor encoded
-    //                     match to_vec(&canister_message) {
-    //                         Ok(bytes) => {
-    //                             match send_ws_message_to_client(&mut ws_write, Message::Binary(bytes)).await {
-    //                                 Ok(_) => {
-    //                                     outgoing_canister_message_events.metrics.set_message_sent_to_client();
-    //                                     client_channel_span.in_scope(|| {
-    //                                         trace!("Message sent to client");
-    //                                     });
-    //                                 }
-    //                                 Err(e) => {
-    //                                     client_channel_span.in_scope(|| {
-    //                                         outgoing_canister_message_events.metrics.set_message_sent_to_client();
-    //                                         error!("Could not send message to client. Error: {:?}", e);
-    //                                     });
-    //                                 }
-    //                             }
-    //                         },
-    //                         Err(e) => {
-    //                             outgoing_canister_message_events.metrics.set_no_message_sent_to_client();
-    //                             client_channel_span.in_scope(|| {
-    //                                 error!("Could not serialize canister message. Error: {:?}", e);
-    //                             });
-    //                         }
-    //                     }
-    //                     self.analyzer_channel_tx.send(Box::new(outgoing_canister_message_events)).await.expect("analyzer's side of the channel dropped");
-    //                 },
-    //                 // the poller task terminates all the client connection tasks connected to that poller
-    //                 IcWsCanisterUpdate::Error(e) => {
-    //                     let poller_error_span = span!(parent: &Span::current(), Level::DEBUG, "poller_error");
-    //                     // close the WebSocket connection
-    //                     if let Err(e) = ws_write.close().await {
-    //                         poller_error_span.in_scope(|| {
-    //                             error!("Error closing the WS connection: {:?}", e);
-    //                         });
-    //                     }
-    //                     poller_error_span.in_scope(|| {
-    //                         error!("Terminating client connection handler task. Error: {}", e);
-    //                     });
-    //                     break 'handler_loop;
-    //                 }
-    //             }
-    //         },
-    //         // wait for incoming message from client
-    //         ws_message = ws_read.try_next() => {
-    //             match ws_message {
-    //                 // handle message sent from client via WebSocket
-    //                 Ok(Some(message)) => {
-    //                     // check if the WebSocket connection is closed
-    //                     if message.is_close() {
-    //                         let client_disconnection_span = span!(parent: &Span::current(), Level::DEBUG, "client_disconnection");
-    //                         client_disconnection_span.in_scope(|| {
-    //                             debug!("Terminating client connection handler task due to client disconnection");
-    //                         });
-
-    //                         // let the main task know that it should remove the client's session from the WS Gateway state
-    //                         self.send_connection_state_to_clients_manager(
-    //                             IcWsSessionState::Closed(
-    //                                 (
-    //                                     self.key.clone().expect("must be some by now"),
-    //                                     self.canister_id
-    //                                         .read()
-    //                                         .await
-    //                                         .expect("must be some by now")
-    //                                         .clone(),
-    //                                     client_disconnection_span
-    //                                 ),
-    //                             )
-    //                         )
-    //                         .await;
-    //                         break 'handler_loop;
-    //                     }
-    //                     // check if the IC WebSocket connection hasn't been established yet
-    //                     if !ic_websocket_setup {
-    //                         match self.inspect_ic_ws_open_message(message.clone()).await {
-    //                             // if the IC WS connection is setup, create a new client session and send it to the main task
-    //                             Ok(IcWsSessionState::Requested(client_key)) => {
-    //                                 ic_websocket_setup_span.in_scope(|| {
-    //                                     debug!("Validated WS open message");
-    //                                 });
-
-    //                                 ic_websocket_setup = true;
-
-    //                                 self.key = Some(client_key.clone());
-    //                                 let client_session = ClientSession::new(
-    //                                     self.id,    // used as reference for events metrics of connection establishment in gateway server
-    //                                     client_key, // used to identify the client in poller
-    //                                     self.canister_id    // used to specify which canister the client wants to connect to
-    //                                         .read()
-    //                                         .await
-    //                                         .expect("must be some by now")
-    //                                         .clone(),
-    //                                     client_channel_tx.clone(),  // used to send canister updates from the demux to the client connection handler
-    //                                     Span::current(),
-    //                                 );
-
-    //                                 let setup_connection_async = async {
-    //                                     self.send_connection_state_to_clients_manager(IcWsSessionState::Setup(
-    //                                         client_session,
-    //                                     ))
-    //                                     .await;
-    //                                     // at this point we are NOT guaranteed that the gateway server received the client session
-
-    //                                     // if the poller is already running, it might receive the first canister message before it receives the channel from the gateway server.
-    //                                     // relaying the request to the IC after sending the client session to gateway server might give it enough time to send the client channel to the poller
-    //                                     // but this is not guaranteed
-    //                                     // TODO: evaluate whether it is necessary to wait until the poller receives the channel or if we can assume that
-    //                                     //       time_to_relay_request_to_ic + time_to_poll_first_message >> time_to_send_channel_to_poller
-    //                                     if let Err(e) = self.relay_call_request_to_ic(message).await {
-    //                                         error!("Could not relay request to IC. Error: {:?}", e);
-    //                                     }
-    //                                 };
-    //                                 setup_connection_async.instrument(ic_websocket_setup_span.clone()).await;
-
-    //                                 request_connection_setup_events
-    //                                     .metrics
-    //                                     .set_ws_connection_setup();
-    //                                 self.analyzer_channel_tx
-    //                                     .send(Box::new(request_connection_setup_events.clone()))
-    //                                     .await
-    //                                     .expect("analyzer's side of the channel dropped");
-    //                             }
-    //                             // in case of other errors, we report them and terminate the connection handler task
-    //                             Err(e) => {
-    //                                 warn!("IC WS setup failed. Error: {:?}", e);
-    //                                 break 'handler_loop;
-    //                             }
-    //                             Ok(variant) => unreachable!("handle_ic_ws_setup should not return variant: {:?}", variant)
-    //                         }
-    //                     } else {
-    //                         let client_message_span = span!(parent: &Span::current(), Level::TRACE, "client_message");
-    //                         // relay the envelope to the IC and the response back to the client
-    //                         if let Err(e) = self.handle_ws_message(message).instrument(client_message_span).await {
-    //                             warn!("Handling of WebSocket message failed. Error: {:?}", e);
-    //                             break 'handler_loop;
-    //                         }
-    //                     }
-    //                 },
-    //                 // in this case, client's session should have been cleaned up on the WS Gateway state already
-    //                 // once the connection handler received Message::Close
-    //                 // just to be sure, send the cleanup message again
-    //                 // TODO: figure out if this is necessary or can be ignored
-    //                 Ok(None) => {
-    //                     let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
-    //                     websocket_error_span.in_scope(|| {
-    //                         warn!("Client WebSocket connection already closed");
-    //                     });
-    //                     self.send_connection_state_to_clients_manager(
-    //                         IcWsSessionState::Closed(
-    //                             (
-    //                                 self.key.clone().expect("must be some by now"),
-    //                                 self.canister_id
-    //                                     .read()
-    //                                     .await
-    //                                     .expect("must be some by now")
-    //                                     .clone(),
-    //                                 websocket_error_span
-    //                             )
-    //                         )
-    //                     )
-    //                     .await;
-    //                     break 'handler_loop;
-    //                 },
-    //                 // the client's still needs to be cleaned up so it is necessary to return the client id
-    //                 Err(e) => {
-    //                     let websocket_error_span = span!(parent: &Span::current(), Level::DEBUG, "websocket_error");
-    //                     websocket_error_span.in_scope(|| {
-    //                         warn!("Client WebSocket connection error: {:?}", e);
-    //                     });
-    //                     // let the main task know that it should remove the client's session from the WS Gateway state
-    //                     self.send_connection_state_to_clients_manager(
-    //                         IcWsSessionState::Closed(
-    //                             (
-    //                                 self.key.clone().expect("must be some by now"),
-    //                                 self.canister_id
-    //                                     .read()
-    //                                     .await
-    //                                     .expect("must be some by now")
-    //                                     .clone(),
-    //                                 websocket_error_span
-    //                             )
-    //                         )
-    //                     )
-    //                     .await;
-    //                     break 'handler_loop;
-    //                 }
-    //             };
-    //         }
-    //     }
-    // }
-
-    // /// relays relays the client's request to the IC and then sends the response back to the client via WS
-    // /// the caller does not need to check the state fo the response, it just relays the messages back and forth
-    // async fn handle_ws_message(&self, message: Message) -> Result<(), IcWsError> {
-    //     self.relay_call_request_to_ic(message).await?;
-    //     Ok(())
-    // }
-
-    // async fn send_connection_state_to_clients_manager(
-    //     &self,
-    //     connection_state: IcWsSessionState,
-    // ) {
-    //     if let Err(e) = self
-    //         .client_connection_handler_tx
-    //         .send(connection_state)
-    //         .await
-    //     {
-    //         error!(
-    //             "Receiver has been dropped on the clients connection manager's side. Error: {:?}",
-    //             e
-    //         );
-    //     }
-    // }
+        // spawn new canister poller task
+        let agent = Arc::clone(&self.agent);
+        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
+        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
+        let polling_interval_ms = self.polling_interval_ms;
+        tokio::spawn(async move {
+            // we pass both the whole gateway state and the poller state for the specific canister
+            // the poller can access the poller state to determine which clients are connected
+            // without having to lock the whole gateway state (TODO: check if true)
+            // the poller periodically checks whether there are clients connected in the poller state and,
+            // if not, removes the corresponding entry from the gateway state and terminates
+            // TODO: figure out if this having the poller state actually helps
+            let mut poller = CanisterPoller::new(
+                agent,
+                canister_id,
+                poller_state,
+                gateway_shared_state,
+                analyzer_channel_tx,
+                polling_interval_ms,
+            );
+            match poller.run_polling().await {
+                Ok(()) => {
+                    info!("Canister poller terminated");
+                },
+                Err(_e) => {
+                    unimplemented!("TODO");
+                },
+            };
+        });
+    }
 }

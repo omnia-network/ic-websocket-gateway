@@ -1,7 +1,6 @@
 use crate::{
     canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsCanisterUpdate,
-    manager::CanisterPrincipal,
 };
 use candid::{decode_args, Principal};
 use futures_util::{
@@ -40,32 +39,31 @@ struct ClientRequest<'a> {
 }
 
 /// possible states of an IC WebSocket session
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum IcWsSessionState {
     Init,
-    Setup(Message, ClientKey, CanisterPrincipal),
+    Setup(Message),
     Open,
-    Closed((ClientKey, CanisterPrincipal)),
+    Closed,
 }
 
-impl Eq for IcWsSessionState {}
+// impl Eq for IcWsSessionState {}
 
-impl PartialEq for IcWsSessionState {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (IcWsSessionState::Init, IcWsSessionState::Init) => true,
-            (
-                IcWsSessionState::Setup(_, client_key1, canister_id1),
-                IcWsSessionState::Setup(_, client_key2, canister_id2),
-            ) => client_key1 == client_key2 && canister_id1 == canister_id2,
-            (IcWsSessionState::Open, IcWsSessionState::Open) => true,
-            (IcWsSessionState::Closed(canister_id1), IcWsSessionState::Closed(canister_id2)) => {
-                canister_id1 == canister_id2
-            },
-            _ => false,
-        }
-    }
-}
+// impl PartialEq for IcWsSessionState {
+//     fn eq(&self, other: &Self) -> bool {
+//         match (self, other) {
+//             (IcWsSessionState::Init, IcWsSessionState::Init) => true,
+//             (IcWsSessionState::Setup(_), IcWsSessionState::Setup(_)) => {
+//                 client_key1 == client_key2 && canister_id1 == canister_id2
+//             },
+//             (IcWsSessionState::Open, IcWsSessionState::Open) => true,
+//             (IcWsSessionState::Closed(canister_id1), IcWsSessionState::Closed(canister_id2)) => {
+//                 canister_id1 == canister_id2
+//             },
+//             _ => false,
+//         }
+//     }
+// }
 
 /// Possible errors that can occur during an IC WebSocket session
 #[derive(Debug, Clone)]
@@ -78,9 +76,10 @@ pub enum IcWsError {
 
 /// IC WebSocket session
 pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
+    /// Identifier of the client connection
     _client_id: u64,
-    client_key: Option<ClientKey>,
-    canister_id: Option<Principal>,
+    pub client_key: Option<ClientKey>,
+    pub canister_id: Option<Principal>,
     client_channel_rx: Receiver<IcWsCanisterUpdate>,
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     ws_read: SplitStream<WebSocketStream<S>>,
@@ -161,14 +160,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     Ok(())
                 } else {
                     trace!("Client closed connection while in Init state");
-                    self.session_state = IcWsSessionState::Closed((
-                        self.client_key.clone().expect("must be set"),
-                        self.canister_id.expect("must be set"),
-                    ));
+                    self.session_state = IcWsSessionState::Closed;
                     Ok(())
                 }
             },
-            IcWsSessionState::Setup(_, _, _) => {
+            IcWsSessionState::Setup(_) => {
                 // upon receiving a message while the session is Setup, discard the message
                 // and return an error as the client shall not send a message while in Setup state
                 // this implies a bug in the client SDK
@@ -186,14 +182,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     Ok(())
                 } else {
                     trace!("Client closed connection while in Open state");
-                    self.session_state = IcWsSessionState::Closed((
-                        self.client_key.clone().expect("must be set"),
-                        self.canister_id.expect("must be set"),
-                    ));
+                    self.session_state = IcWsSessionState::Closed;
                     Ok(())
                 }
             },
-            IcWsSessionState::Closed(_) => {
+            IcWsSessionState::Closed => {
                 // upon receiving a message while the session is Closed, discard the message
                 // and return an error as this shall not be possible
                 // this implies a bug in the WS Gateway
@@ -215,7 +208,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     IcWsSessionState::Init => Err(IcWsError::IcWsProtocol(String::from(
                         "Canister shall not send messages while in Init state",
                     ))),
-                    IcWsSessionState::Setup(_, _, _) => {
+                    IcWsSessionState::Setup(_) => {
                         let open_state = self.check_open_transition(canister_message).await?;
                         self.session_state = open_state;
                         Ok(())
@@ -226,7 +219,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         self.relay_canister_message(canister_message).await?;
                         Ok(())
                     },
-                    IcWsSessionState::Closed(_) => {
+                    IcWsSessionState::Closed => {
                         // upon receiving a message while the session is Closed, discard the message
                         // and return an error as this shall not be possible
                         // this implies a bug in the WS Gateway
@@ -248,20 +241,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         match canister_update {
             Some(Ok(ws_message)) => Ok(ws_message),
             Some(Err(e)) => {
-                self.session_state = IcWsSessionState::Closed((
-                    self.client_key.clone().expect("must be set"),
-                    self.canister_id.expect("must be set"),
-                ));
+                self.session_state = IcWsSessionState::Closed;
                 Err(IcWsError::WebSocket(format!(
                     "Error receiving message from client: {:?}",
                     e
                 )))
             },
             None => {
-                self.session_state = IcWsSessionState::Closed((
-                    self.client_key.clone().expect("must be set"),
-                    self.canister_id.expect("must be set"),
-                ));
+                self.session_state = IcWsSessionState::Closed;
                 Err(IcWsError::WebSocket(String::from(
                     "Client connection already closed",
                 )))
@@ -296,11 +283,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 trace!("Validated WS open message");
 
                 // client session is now Setup
-                Ok(IcWsSessionState::Setup(
-                    ws_open_message,
-                    client_key,
-                    canister_id,
-                ))
+                Ok(IcWsSessionState::Setup(ws_open_message))
             },
             // in case of other errors, we report them and terminate the connection handler task
             Err(e) => {

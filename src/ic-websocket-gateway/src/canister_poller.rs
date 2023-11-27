@@ -103,6 +103,7 @@ pub enum TerminationInfo {
 
 /// periodically polls the canister for updates to be relayed to clients
 pub struct CanisterPoller {
+    agent: Arc<Agent>,
     canister_id: Principal,
     poller_state: PollerState,
     gateway_shared_state: GatewaySharedState,
@@ -110,21 +111,21 @@ pub struct CanisterPoller {
     message_nonce: u64,
     /// reference of the PollerEvents
     polling_iteration: u64,
-    agent: Arc<Agent>,
     polling_interval_ms: u64,
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
 }
 
 impl CanisterPoller {
     pub fn new(
+        agent: Arc<Agent>,
         canister_id: Principal,
         poller_state: PollerState,
         gateway_shared_state: GatewaySharedState,
-        agent: Arc<Agent>,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
+            agent,
             canister_id,
             poller_state,
             gateway_shared_state,
@@ -133,7 +134,6 @@ impl CanisterPoller {
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
             message_nonce: 0,
             polling_iteration: 0,
-            agent,
             polling_interval_ms,
             analyzer_channel_tx,
         }
