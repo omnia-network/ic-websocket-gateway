@@ -88,7 +88,8 @@ impl GatewayState {
             let poller_state = entry.get_mut();
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
-            poller_state.remove(&client_key).is_none()
+            // returns true if the client was removed, false if there was no such client
+            poller_state.remove(&client_key).is_some()
         } else {
             // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
             // if this is encountered it might indicate a race condition
