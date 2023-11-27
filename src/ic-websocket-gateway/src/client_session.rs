@@ -1,10 +1,9 @@
 use crate::{
     canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsCanisterUpdate,
-    manager::{ClientSender, GatewayState, PollerState},
+    manager::CanisterPrincipal,
 };
 use candid::{decode_args, Principal};
-use dashmap::{mapref::entry::Entry, DashMap};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -19,7 +18,7 @@ use std::sync::Arc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::Receiver,
 };
 use tokio_tungstenite::{
     tungstenite::{Error, Message},
@@ -44,9 +43,9 @@ struct ClientRequest<'a> {
 #[derive(Debug, Clone)]
 pub enum IcWsSessionState {
     Init,
-    Setup(Option<PollerState>, Principal),
+    Setup(Message, ClientKey, CanisterPrincipal),
     Open,
-    Closed((ClientKey, Principal)),
+    Closed((ClientKey, CanisterPrincipal)),
 }
 
 impl Eq for IcWsSessionState {}
@@ -56,9 +55,9 @@ impl PartialEq for IcWsSessionState {
         match (self, other) {
             (IcWsSessionState::Init, IcWsSessionState::Init) => true,
             (
-                IcWsSessionState::Setup(_, canister_id1),
-                IcWsSessionState::Setup(_, canister_id2),
-            ) => canister_id1 == canister_id2,
+                IcWsSessionState::Setup(_, client_key1, canister_id1),
+                IcWsSessionState::Setup(_, client_key2, canister_id2),
+            ) => client_key1 == client_key2 && canister_id1 == canister_id2,
             (IcWsSessionState::Open, IcWsSessionState::Open) => true,
             (IcWsSessionState::Closed(canister_id1), IcWsSessionState::Closed(canister_id2)) => {
                 canister_id1 == canister_id2
@@ -82,12 +81,10 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     _client_id: u64,
     client_key: Option<ClientKey>,
     canister_id: Option<Principal>,
-    client_channel_tx: Option<Sender<IcWsCanisterUpdate>>,
     client_channel_rx: Receiver<IcWsCanisterUpdate>,
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     ws_read: SplitStream<WebSocketStream<S>>,
     session_state: IcWsSessionState,
-    gateway_state: GatewayState,
     agent: Arc<Agent>,
 }
 
@@ -95,23 +92,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn init(
         _client_id: u64,
         gateway_principal: Principal,
-        client_channel_tx: Sender<IcWsCanisterUpdate>,
         client_channel_rx: Receiver<IcWsCanisterUpdate>,
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
-        gateway_state: GatewayState,
         agent: Arc<Agent>,
     ) -> Result<Self, IcWsError> {
         let mut client_session = Self {
             _client_id,
             client_key: None,
             canister_id: None,
-            client_channel_tx: Some(client_channel_tx),
             client_channel_rx,
             ws_write,
             ws_read,
             session_state: IcWsSessionState::Init,
-            gateway_state,
             agent,
         };
 
@@ -175,7 +168,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     Ok(())
                 }
             },
-            IcWsSessionState::Setup(_, _) => {
+            IcWsSessionState::Setup(_, _, _) => {
                 // upon receiving a message while the session is Setup, discard the message
                 // and return an error as the client shall not send a message while in Setup state
                 // this implies a bug in the client SDK
@@ -222,7 +215,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     IcWsSessionState::Init => Err(IcWsError::IcWsProtocol(String::from(
                         "Canister shall not send messages while in Init state",
                     ))),
-                    IcWsSessionState::Setup(_, _) => {
+                    IcWsSessionState::Setup(_, _, _) => {
                         let open_state = self.check_open_transition(canister_message).await?;
                         self.session_state = open_state;
                         Ok(())
@@ -278,9 +271,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
     async fn check_setup_transition(
         &mut self,
-        ws_message: Message,
+        ws_open_message: Message,
     ) -> Result<IcWsSessionState, IcWsError> {
-        match self.inspect_ic_ws_open_message(ws_message.clone()).await {
+        match self
+            .inspect_ic_ws_open_message(ws_open_message.clone())
+            .await
+        {
             // if the IC WS connection is setup, create a new client session and send it to the main task
             Ok((client_key, canister_id)) => {
                 // replace the field with the canister_id received in the first envelope
@@ -299,52 +295,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 }
                 trace!("Validated WS open message");
 
-                // SAFETY:
-                // first, update the gateway state
-                // only then, relay the message to the IC
-                // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
-                // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
-                // the message cannot be relayed before doing so because if a poller is already running,
-                // it might poll a response for the connecting client before it gets the sending side of the channel
-
-                // TODO: figure out if this is actually atomic
-                let poller_state = match self.gateway_state.entry(canister_id) {
-                    Entry::Occupied(mut entry) => {
-                        // the poller has already been started
-                        // add client key and sender end of the channel to the poller state
-                        let poller_state = entry.get_mut();
-                        poller_state.insert(
-                            client_key,
-                            ClientSender {
-                                sender: self.client_channel_tx.take().expect("must be set once"),
-                                span: Span::current(),
-                            },
-                        );
-                        None
-                    },
-                    Entry::Vacant(entry) => {
-                        // the poller has not been started yet
-                        // initialize the poller state and add client key and sender end of the channel
-                        let poller_state =
-                            Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
-                        poller_state.insert(
-                            client_key,
-                            ClientSender {
-                                sender: self.client_channel_tx.take().expect("must be set once"),
-                                span: Span::current(),
-                            },
-                        );
-                        entry.insert(Arc::clone(&poller_state));
-                        Some(Arc::clone(&poller_state))
-                    },
-                };
-
-                // TODO: figure out if it is guaranteed that all threads see the state of the updated state of the gateway
-                //       before relaying the message to the IC
-                self.relay_call_request_to_ic(ws_message).await?;
-
                 // client session is now Setup
-                Ok(IcWsSessionState::Setup(poller_state, canister_id))
+                Ok(IcWsSessionState::Setup(
+                    ws_open_message,
+                    client_key,
+                    canister_id,
+                ))
             },
             // in case of other errors, we report them and terminate the connection handler task
             Err(e) => {
@@ -366,7 +322,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     }
 
     /// relays the client's request to the IC only if the content of the envelope is of the Call variant
-    async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+    pub async fn relay_call_request_to_ic(&self, message: Message) -> Result<(), IcWsError> {
         let client_request = get_client_request(message)?;
         if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;

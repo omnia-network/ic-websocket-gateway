@@ -2,10 +2,10 @@ use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterUpdate},
     client_session::{ClientSession, IcWsSessionState},
     events_analyzer::Events,
-    manager::GatewayState,
+    manager::{ClientSender, GatewayState},
     ws_listener::ClientId,
 };
-use dashmap::mapref::entry::Entry;
+use dashmap::{mapref::entry::Entry, DashMap};
 use futures_util::StreamExt;
 use ic_agent::Agent;
 use std::sync::Arc;
@@ -71,11 +71,9 @@ impl ClientSessionHandler {
                 let client_session = ClientSession::init(
                     self.id,
                     self.agent.get_principal().expect("Principal should be set"),
-                    client_channel_tx,
                     client_channel_rx,
                     ws_write,
                     ws_read,
-                    Arc::clone(&self.gateway_state),
                     Arc::clone(&self.agent),
                 )
                 .instrument(Span::current())
@@ -84,9 +82,9 @@ impl ClientSessionHandler {
                 match client_session {
                     Ok(client_session) => {
                         debug!("Client session initialized");
-                        self.handle_client_session(client_session)
+                        self.handle_client_session(client_session, client_channel_tx)
                             .instrument(Span::current())
-                            .await;
+                            .await?;
                         Ok(())
                     },
                     Err(e) => Err(format!("Client session error: {:?}", e)),
@@ -103,7 +101,8 @@ impl ClientSessionHandler {
     async fn handle_client_session<S: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         mut client_session: ClientSession<S>,
-    ) {
+        client_channel_tx: Sender<IcWsCanisterUpdate>,
+    ) -> Result<(), String> {
         loop {
             match client_session
                 .update_state()
@@ -111,11 +110,60 @@ impl ClientSessionHandler {
                 .await
             {
                 Ok(Some(IcWsSessionState::Init)) => {
-                    error!("Updating the client session state cannot result in Init");
-                    break;
+                    return Err(String::from(
+                        "Updating the client session state cannot result in Init",
+                    ));
                 },
-                Ok(Some(IcWsSessionState::Setup(poller_state, canister_id))) => {
+                Ok(Some(IcWsSessionState::Setup(ws_open_message, client_key, canister_id))) => {
+                    // SAFETY:
+                    // first, update the gateway state
+                    // only then, relay the message to the IC
+                    // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
+                    // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
+                    // the message cannot be relayed before doing so because if a poller is already running,
+                    // it might poll a response for the connecting client before it gets the sending side of the channel
+
+                    // TODO: figure out if this is actually atomic
+                    let poller_state = match self.gateway_state.entry(canister_id) {
+                        Entry::Occupied(mut entry) => {
+                            // the poller has already been started
+                            // add client key and sender end of the channel to the poller state
+                            let poller_state = entry.get_mut();
+                            poller_state.insert(
+                                client_key,
+                                ClientSender {
+                                    sender: client_channel_tx.clone(),
+                                    span: Span::current(),
+                                },
+                            );
+                            None
+                        },
+                        Entry::Vacant(entry) => {
+                            // the poller has not been started yet
+                            // initialize the poller state and add client key and sender end of the channel
+                            let poller_state =
+                                Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
+                            poller_state.insert(
+                                client_key,
+                                ClientSender {
+                                    sender: client_channel_tx.clone(),
+                                    span: Span::current(),
+                                },
+                            );
+                            entry.insert(Arc::clone(&poller_state));
+                            Some(Arc::clone(&poller_state))
+                        },
+                    };
+
+                    // TODO: figure out if it is guaranteed that all threads see the state of the updated state of the gateway
+                    //       before relaying the message to the IC
+                    client_session
+                        .relay_call_request_to_ic(ws_open_message)
+                        .await
+                        .map_err(|e| format!("Could not relay WS open message to IC: {:?}", e))?;
+
                     debug!("Client session setup");
+
                     if let Some(poller_state) = poller_state {
                         info!("Starting poller");
 
@@ -161,19 +209,20 @@ impl ClientSessionHandler {
                         let poller_state = entry.get_mut();
                         if poller_state.remove(&client_key).is_none() {
                             // as the client was connected, the poller state must contain an entry for 'client_key'
+                            // if this is encountered it might indicate a race condition
                             unreachable!("Client key not found in poller state");
                         }
                         // even if this is the last client session for the canister, do not remove the canister from the gateway state
                         // this will be done by the poller task
                     } else {
                         // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
+                        // if this is encountered it might indicate a race condition
                         unreachable!("Canister not found in gateway state");
                     }
-                    break;
+                    return Ok(());
                 },
                 Err(e) => {
-                    error!("Client session error: {:?}", e);
-                    break;
+                    return Err(format!("Client session error: {:?}", e));
                 },
                 Ok(None) => {
                     // no state change
