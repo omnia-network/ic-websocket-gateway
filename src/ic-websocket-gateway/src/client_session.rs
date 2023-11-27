@@ -1,6 +1,7 @@
 use crate::{
     canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
     canister_poller::IcWsCanisterUpdate,
+    manager::CanisterPrincipal,
 };
 use candid::{decode_args, Principal};
 use futures_util::{
@@ -60,12 +61,19 @@ pub enum IcWsError {
 pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     /// Identifier of the client connection
     _client_id: u64,
+    /// Key identifying a IC WS session
     pub client_key: Option<ClientKey>,
-    pub canister_id: Option<Principal>,
+    /// Principal of the canister the client is connected to
+    pub canister_id: Option<CanisterPrincipal>,
+    /// Channel used to receive canister updates by the poller
     client_channel_rx: Receiver<IcWsCanisterUpdate>,
+    /// Sending side of the WS connection with the client
     ws_write: SplitSink<WebSocketStream<S>, Message>,
+    /// Receiving side of the WS connection with the client
     ws_read: SplitStream<WebSocketStream<S>>,
+    /// Current state of the IC WS session
     session_state: IcWsSessionState,
+    /// Agent used to communicate with the IC
     agent: Arc<Agent>,
 }
 
