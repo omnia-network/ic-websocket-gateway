@@ -2,10 +2,9 @@ use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterUpdate},
     client_session::{ClientSession, IcWsSessionState},
     events_analyzer::Events,
-    manager::{ClientSender, GatewayState},
+    manager::GatewaySharedState,
     ws_listener::ClientId,
 };
-use dashmap::{mapref::entry::Entry, DashMap};
 use futures_util::StreamExt;
 use ic_agent::Agent;
 use std::sync::Arc;
@@ -23,7 +22,7 @@ pub struct ClientSessionHandler {
     /// Agent used to interact with the IC
     agent: Arc<Agent>,
     /// State of the gateway
-    gateway_state: GatewayState,
+    gateway_shared_state: GatewaySharedState,
     /// Sender side of the channel used to send events from different components to the events analyzer
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     /// Polling interval in milliseconds
@@ -34,14 +33,14 @@ impl ClientSessionHandler {
     pub fn new(
         id: ClientId,
         agent: Arc<Agent>,
-        gateway_state: GatewayState,
+        gateway_shared_state: GatewaySharedState,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
             id,
             agent,
-            gateway_state,
+            gateway_shared_state,
             analyzer_channel_tx,
             polling_interval_ms,
         }
@@ -115,45 +114,13 @@ impl ClientSessionHandler {
                     ));
                 },
                 Ok(Some(IcWsSessionState::Setup(ws_open_message, client_key, canister_id))) => {
-                    // SAFETY:
-                    // first, update the gateway state
-                    // only then, relay the message to the IC
-                    // this is necessary to guarantee that once the poller retrieves the response to the WS open message,
-                    // the poller sees (in the gateway state) the sending side of the channel needed to relay the response to the client session handler.
-                    // the message cannot be relayed before doing so because if a poller is already running,
-                    // it might poll a response for the connecting client before it gets the sending side of the channel
-
-                    // TODO: figure out if this is actually atomic
-                    let poller_state = match self.gateway_state.entry(canister_id) {
-                        Entry::Occupied(mut entry) => {
-                            // the poller has already been started
-                            // add client key and sender end of the channel to the poller state
-                            let poller_state = entry.get_mut();
-                            poller_state.insert(
-                                client_key,
-                                ClientSender {
-                                    sender: client_channel_tx.clone(),
-                                    span: Span::current(),
-                                },
-                            );
-                            None
-                        },
-                        Entry::Vacant(entry) => {
-                            // the poller has not been started yet
-                            // initialize the poller state and add client key and sender end of the channel
-                            let poller_state =
-                                Arc::new(DashMap::with_capacity_and_shard_amount(1024, 1024));
-                            poller_state.insert(
-                                client_key,
-                                ClientSender {
-                                    sender: client_channel_tx.clone(),
-                                    span: Span::current(),
-                                },
-                            );
-                            entry.insert(Arc::clone(&poller_state));
-                            Some(Arc::clone(&poller_state))
-                        },
-                    };
+                    let new_poller_state = self
+                        .gateway_shared_state
+                        .insert_client_channel_and_get_new_poller_state(
+                            canister_id,
+                            client_key,
+                            client_channel_tx.clone(),
+                        );
 
                     // TODO: figure out if it is guaranteed that all threads see the state of the updated state of the gateway
                     //       before relaying the message to the IC
@@ -164,25 +131,25 @@ impl ClientSessionHandler {
 
                     debug!("Client session setup");
 
-                    if let Some(poller_state) = poller_state {
+                    if let Some(new_poller_state) = new_poller_state {
                         info!("Starting poller");
 
                         let agent = Arc::clone(&self.agent);
+                        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
                         let analyzer_channel_tx = self.analyzer_channel_tx.clone();
-                        let gateway_state = Arc::clone(&self.gateway_state);
                         let polling_interval_ms = self.polling_interval_ms;
                         // spawn new canister poller task
                         tokio::spawn(async move {
                             // we pass both the whole gateway state and the poller state for the specific canister
                             // the poller can access the poller state to determine which clients are connected
-                            // without having to lock the whole gateway state
-                            // the poller periodically checks whether there are clients connected in the poller state and, if not,
-                            // removes the corresponding entry from the gateway state and terminates
+                            // without having to lock the whole gateway state (TODO: check if true)
+                            // the poller periodically checks whether there are clients connected in the poller state and,
+                            // if not, removes the corresponding entry from the gateway state and terminates
                             // TODO: figure out if this having the poller state actually helps
                             let mut poller = CanisterPoller::new(
                                 canister_id,
-                                poller_state,
-                                gateway_state,
+                                new_poller_state,
+                                gateway_shared_state,
                                 agent,
                                 analyzer_channel_tx,
                                 polling_interval_ms,
@@ -203,22 +170,8 @@ impl ClientSessionHandler {
                 },
                 Ok(Some(IcWsSessionState::Closed((client_key, canister_id)))) => {
                     debug!("Client session closed");
-
-                    // TODO: figure out if this is actually atomic
-                    if let Entry::Occupied(mut entry) = self.gateway_state.entry(canister_id) {
-                        let poller_state = entry.get_mut();
-                        if poller_state.remove(&client_key).is_none() {
-                            // as the client was connected, the poller state must contain an entry for 'client_key'
-                            // if this is encountered it might indicate a race condition
-                            unreachable!("Client key not found in poller state");
-                        }
-                        // even if this is the last client session for the canister, do not remove the canister from the gateway state
-                        // this will be done by the poller task
-                    } else {
-                        // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
-                        // if this is encountered it might indicate a race condition
-                        unreachable!("Canister not found in gateway state");
-                    }
+                    self.gateway_shared_state
+                        .remove_client(canister_id, client_key);
                     return Ok(());
                 },
                 Err(e) => {

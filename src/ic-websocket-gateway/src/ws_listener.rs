@@ -1,13 +1,13 @@
 use crate::{
     client_session_handler::ClientSessionHandler,
     events_analyzer::{Events, EventsCollectionType, EventsReference},
-    manager::GatewayState,
+    manager::GatewaySharedState,
     metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
 };
 use ic_agent::Agent;
 use native_tls::Identity;
 use rand::Rng;
-use std::{fs, sync::Arc, thread::current, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -66,7 +66,7 @@ pub struct WsListener {
     /// Agent used to interact with the IC
     agent: Arc<Agent>,
     /// State of the gateway
-    gateway_state: GatewayState,
+    gateway_shared_state: GatewaySharedState,
     /// Sender side of the channel used to send events from different components to the events analyzer
     analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     // Receiver side of the channel used to send the current limiting rate to be applied to incoming connections
@@ -81,7 +81,7 @@ impl WsListener {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        gateway_state: GatewayState,
+        gateway_shared_state: GatewaySharedState,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         rate_limiting_channel_rx: Receiver<Option<f64>>,
         polling_interval_ms: u64,
@@ -114,7 +114,7 @@ impl WsListener {
             listener,
             tls_acceptor,
             agent,
-            gateway_state,
+            gateway_shared_state,
             analyzer_channel_tx,
             rate_limiting_channel_rx,
             polling_interval_ms,
@@ -191,7 +191,7 @@ impl WsListener {
         client_connection_span.follows_from(accept_client_connection_span.id());
 
         let agent = Arc::clone(&self.agent);
-        let gateway_state = Arc::clone(&self.gateway_state);
+        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
         let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
@@ -200,7 +200,7 @@ impl WsListener {
                 let mut client_session_handler = ClientSessionHandler::new(
                     client_id,
                     agent,
-                    gateway_state,
+                    gateway_shared_state,
                     analyzer_channel_tx,
                     polling_interval_ms,
                 );

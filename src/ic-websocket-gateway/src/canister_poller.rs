@@ -8,7 +8,7 @@ use crate::{
         Events, EventsCollectionType, EventsImpl, EventsReference, IterationReference,
         MessageReference,
     },
-    manager::{ClientSender, GatewayState, PollerState},
+    manager::{ClientSender, GatewaySharedState, PollerState},
     metrics::canister_poller_metrics::{
         IncomingCanisterMessageEvents, IncomingCanisterMessageEventsMetrics, PollerEvents,
         PollerEventsMetrics,
@@ -105,7 +105,7 @@ pub enum TerminationInfo {
 pub struct CanisterPoller {
     canister_id: Principal,
     poller_state: PollerState,
-    gateway_state: GatewayState,
+    gateway_shared_state: GatewaySharedState,
     /// nonce specified by the gateway during the query call to ws_get_messages, used by the CDK to determine which messages to send
     message_nonce: u64,
     /// reference of the PollerEvents
@@ -119,7 +119,7 @@ impl CanisterPoller {
     pub fn new(
         canister_id: Principal,
         poller_state: PollerState,
-        gateway_state: GatewayState,
+        gateway_shared_state: GatewaySharedState,
         agent: Arc<Agent>,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval_ms: u64,
@@ -127,7 +127,7 @@ impl CanisterPoller {
         Self {
             canister_id,
             poller_state,
-            gateway_state,
+            gateway_shared_state,
             // once the poller starts running, it requests messages from nonce 0.
             // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
             // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
@@ -305,16 +305,9 @@ impl CanisterPoller {
         // the poller does not necessarily need to be terminated as soon as the last client disconnects
         // therefore, we do not need to check if the poller state is empty in every single polling iteration
         if self.polling_iteration % 100 == 0 {
-            // SAFETY:
-            // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
-            // if None si returned, the poller state is not empty and therefore there are still clients connected and the poller should not terminate
-            // if Some is returned, the poller state is empty and therefore the poller should terminate
             if self
-                .gateway_state
-                .remove_if(&self.canister_id, |_canister_id, poller_state| {
-                    poller_state.is_empty()
-                })
-                .is_some()
+                .gateway_shared_state
+                .remove_canister_if_empty(self.canister_id)
             {
                 info!("Terminating poller");
                 return PollerStatus::Terminated;
