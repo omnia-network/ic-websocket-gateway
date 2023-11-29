@@ -67,6 +67,9 @@ impl ClientSessionHandler {
                     Receiver<IcWsCanisterUpdate>,
                 ) = mpsc::channel(100);
 
+                let client_session_span =
+                    span!(parent: &Span::current(), Level::TRACE, "Client Session");
+
                 let client_session = ClientSession::init(
                     self.id,
                     self.agent.get_principal().expect("Principal should be set"),
@@ -75,12 +78,15 @@ impl ClientSessionHandler {
                     ws_read,
                     Arc::clone(&self.agent),
                 )
+                .instrument(client_session_span.clone())
                 .await
                 .map_err(|e| format!("Client session error: {:?}", e))?;
 
-                debug!("Client session initialized");
+                client_session_span.in_scope(|| {
+                    debug!("Client session initialized");
+                });
 
-                self.handle_client_session(client_session, client_channel_tx)
+                self.handle_client_session(client_session, client_channel_tx, client_session_span)
                     .instrument(Span::current())
                     .await?;
                 Ok(())
@@ -97,8 +103,8 @@ impl ClientSessionHandler {
         &mut self,
         mut client_session: ClientSession<S>,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
+        client_session_span: Span,
     ) -> Result<(), String> {
-        let client_session_span = span!(parent: &Span::current(), Level::TRACE, "Client Session");
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
         // if no new state is returned, try to update the state again

@@ -156,7 +156,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     self.session_state = setup_state;
                     Ok(())
                 } else {
-                    trace!("Client closed connection while in Init state");
+                    trace!("Client disconnected while in Init state");
                     self.session_state = IcWsSessionState::Closed;
                     Ok(())
                 }
@@ -184,7 +184,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         .await?;
                     Ok(())
                 } else {
-                    trace!("Client closed connection while in Open state");
+                    trace!("Client disconnected while in Open state");
                     self.session_state = IcWsSessionState::Closed;
                     Ok(())
                 }
