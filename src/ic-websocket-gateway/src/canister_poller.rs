@@ -218,13 +218,13 @@ impl CanisterPoller {
             // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
             if let Some(ClientSender {
                 sender: client_channel_tx,
-                span: client_session_span,
+                span: client_session_handler_span,
             }) = self
                 .poller_state
                 .get(&canister_output_message.client_key)
                 .as_deref()
             {
-                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
+                let canister_message_span = span!(parent: client_session_handler_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
                 canister_message_span.follows_from(relay_messages_span_id.clone());
                 canister_message_span.in_scope(|| trace!("Received message from canister",));
                 self.relay_message(canister_to_client_message, client_channel_tx)

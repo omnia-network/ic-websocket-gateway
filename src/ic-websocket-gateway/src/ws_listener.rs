@@ -168,66 +168,15 @@ impl WsListener {
                     mut listener_events,
                     span: accept_client_connection_span
                 }) = tls_acceptor_channel_rx.recv() => {
-                    // the client connection has been accepted and therefore the connection handler has to be started
-                    self.start_session_handler(client_id, stream, accept_client_connection_span);
+                    accept_client_connection_span.in_scope(|| {
+                        // the client connection has been accepted and therefore the connection handler has to be started
+                        self.start_session_handler(client_id, stream);
+                    });
                     listener_events.metrics.set_started_handler();
                     self.analyzer_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
             }
         }
-    }
-
-    /// Spawns a new session handler
-    fn start_session_handler(
-        &self,
-        client_id: ClientId,
-        stream: CustomStream,
-        accept_client_connection_span: Span,
-    ) {
-        accept_client_connection_span.in_scope(|| {
-            debug!("Spawning new connection handler");
-        });
-        let client_session_span = span!(Level::DEBUG, "Client Session", client_id);
-        client_session_span.follows_from(accept_client_connection_span.id());
-
-        let agent = Arc::clone(&self.agent);
-        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
-        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
-        let polling_interval_ms = self.polling_interval_ms;
-        // spawn a session handler task for each incoming client connection
-        tokio::spawn(
-            async move {
-                let mut client_session_handler = ClientSessionHandler::new(
-                    client_id,
-                    agent,
-                    gateway_shared_state,
-                    analyzer_channel_tx,
-                    polling_interval_ms,
-                );
-                debug!("Started client session handler task");
-
-                if let Err(e) = {
-                    match stream {
-                        CustomStream::Tcp(stream) => {
-                            client_session_handler
-                                .start_session(stream)
-                                .instrument(Span::current())
-                                .await
-                        },
-                        CustomStream::TcpWithTls(stream) => {
-                            client_session_handler
-                                .start_session(stream)
-                                .instrument(Span::current())
-                                .await
-                        },
-                    }
-                } {
-                    warn!("Error in client session handler: {:?}", e);
-                }
-                debug!("Terminated client session handler task");
-            }
-            .instrument(client_session_span),
-        );
     }
 
     fn must_rate_limit(&self) -> bool {
@@ -313,6 +262,52 @@ impl WsListener {
                 }
             }
             .instrument(accept_client_connection_span),
+        );
+    }
+
+    /// Spawns a new session handler
+    fn start_session_handler(&self, client_id: ClientId, stream: CustomStream) {
+        debug!("Spawning new connection handler");
+        let client_session_handler_span =
+            span!(parent: &Span::current(),Level::DEBUG, "Client Session Handler", client_id);
+
+        let agent = Arc::clone(&self.agent);
+        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
+        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
+        let polling_interval_ms = self.polling_interval_ms;
+        // spawn a session handler task for each incoming client connection
+        tokio::spawn(
+            async move {
+                let mut client_session_handler = ClientSessionHandler::new(
+                    client_id,
+                    agent,
+                    gateway_shared_state,
+                    analyzer_channel_tx,
+                    polling_interval_ms,
+                );
+                debug!("Started client session handler task");
+
+                if let Err(e) = {
+                    match stream {
+                        CustomStream::Tcp(stream) => {
+                            client_session_handler
+                                .start_session(stream)
+                                .instrument(Span::current())
+                                .await
+                        },
+                        CustomStream::TcpWithTls(stream) => {
+                            client_session_handler
+                                .start_session(stream)
+                                .instrument(Span::current())
+                                .await
+                        },
+                    }
+                } {
+                    warn!("Error in client session handler: {:?}", e);
+                }
+                debug!("Terminated client session handler task");
+            }
+            .instrument(client_session_handler_span),
         );
     }
 }
