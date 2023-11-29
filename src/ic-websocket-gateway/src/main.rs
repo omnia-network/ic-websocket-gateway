@@ -63,7 +63,7 @@ struct DeploymentInfo {
     #[structopt(long)]
     /// Jaeger agent endpoint for the telemetry in the format <host>:<port>
     ///
-    /// To run a Jaeger instance that listens on port 16686:
+    /// To run a Jaeger instance that listens on port 6831:
     /// ```bash
     /// docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
     /// ```
