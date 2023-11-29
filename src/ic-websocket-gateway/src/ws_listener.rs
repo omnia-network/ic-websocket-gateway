@@ -75,6 +75,8 @@ pub struct WsListener {
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
     next_client_id: ClientId,
+    // Status of the rate limiting
+    limiting_rate_status: LimitingRateStatus,
 }
 
 impl WsListener {
@@ -119,6 +121,7 @@ impl WsListener {
             rate_limiting_channel_rx,
             polling_interval_ms,
             next_client_id: 0,
+            limiting_rate_status: LimitingRateStatus::Disabled,
         }
     }
 
@@ -133,23 +136,22 @@ impl WsListener {
             Receiver<AcceptedConnection>,
         ) = mpsc::channel(100);
 
-        let mut limiting_rate_status = LimitingRateStatus::Disabled;
         loop {
             select! {
                 Some(rate) = self.rate_limiting_channel_rx.recv() => {
                     match rate {
                         Some(rate) => {
                             warn!("Rate limiting {}% of incoming connections", rate*100.0);
-                            limiting_rate_status = LimitingRateStatus::Enabled(rate);
+                            self.limiting_rate_status = LimitingRateStatus::Enabled(rate);
                         },
                         None => {
                             warn!("No rate limiting applied");
-                            limiting_rate_status = LimitingRateStatus::Disabled;
+                            self.limiting_rate_status = LimitingRateStatus::Disabled;
                         }
                     }
                 }
                 Ok((stream, client_addr)) = self.listener.accept() => {
-                    if !must_rate_limit(limiting_rate_status.clone()) {
+                    if !self.must_rate_limit() {
                         accept_connection(
                             self.next_client_id,
                             client_addr,
@@ -229,25 +231,25 @@ impl WsListener {
             .instrument(client_connection_span),
         );
     }
-}
 
-fn must_rate_limit(limiting_rate_status: LimitingRateStatus) -> bool {
-    if let LimitingRateStatus::Enabled(limiting_rate) = limiting_rate_status {
-        if limiting_rate < 0.0 || limiting_rate > 1.0 {
-            error!(
-                "Received invalid limiting rate: {:?}. Ignoring incoming connection...",
-                limiting_rate
-            );
-            return true;
+    fn must_rate_limit(&self) -> bool {
+        if let LimitingRateStatus::Enabled(limiting_rate) = self.limiting_rate_status {
+            if limiting_rate < 0.0 || limiting_rate > 1.0 {
+                error!(
+                    "Received invalid limiting rate: {:?}. Ignoring incoming connection...",
+                    limiting_rate
+                );
+                return true;
+            }
+            // receives 'limiting_rate' within [0, 1]
+            // returns 'true' with probability 'limiting_rate'
+            let mut rng = rand::thread_rng();
+            let random_value: f64 = rng.gen(); // generate a random f64 between 0 and 1
+
+            return random_value < limiting_rate;
         }
-        // receives 'limiting_rate' within [0, 1]
-        // returns 'true' with probability 'limiting_rate'
-        let mut rng = rand::thread_rng();
-        let random_value: f64 = rng.gen(); // generate a random f64 between 0 and 1
-
-        return random_value < limiting_rate;
+        false
     }
-    false
 }
 
 /// Performs the TLS handshake in a separate task
