@@ -75,19 +75,15 @@ impl ClientSessionHandler {
                     ws_read,
                     Arc::clone(&self.agent),
                 )
-                .instrument(Span::current())
-                .await;
+                .await
+                .map_err(|e| format!("Client session error: {:?}", e))?;
 
-                match client_session {
-                    Ok(client_session) => {
-                        debug!("Client session initialized");
-                        self.handle_client_session(client_session, client_channel_tx)
-                            .instrument(Span::current())
-                            .await?;
-                        Ok(())
-                    },
-                    Err(e) => Err(format!("Client session error: {:?}", e)),
-                }
+                debug!("Client session initialized");
+
+                self.handle_client_session(client_session, client_channel_tx)
+                    .instrument(Span::current())
+                    .await?;
+                Ok(())
             },
             Err(e) => {
                 // no cleanup needed on the WS Gateway state as the client's session has never been created
@@ -102,13 +98,14 @@ impl ClientSessionHandler {
         mut client_session: ClientSession<S>,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
     ) -> Result<(), String> {
+        let client_session_span = span!(parent: &Span::current(), Level::TRACE, "Client Session");
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
         // if no new state is returned, try to update the state again
         loop {
             match client_session
                 .try_update_state()
-                .instrument(Span::current())
+                .instrument(client_session_span.clone())
                 .await
             {
                 Ok(Some(IcWsSessionState::Init)) => {
@@ -136,16 +133,20 @@ impl ClientSessionHandler {
                                 .clone()
                                 .expect("must be set during Setup"),
                             client_channel_tx.clone(),
+                            client_session_span.clone(),
                         );
 
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
                     client_session
-                        .relay_ws_message_to_ic(ws_open_message)
+                        .relay_client_message(ws_open_message)
+                        .instrument(client_session_span.clone())
                         .await
                         .map_err(|e| format!("Could not relay WS open message to IC: {:?}", e))?;
 
-                    debug!("Client session setup");
+                    client_session_span.in_scope(|| {
+                        debug!("Client session setup");
+                    });
 
                     // check if a new poller has to be started
                     // if so, start the poller
@@ -160,11 +161,15 @@ impl ClientSessionHandler {
                     // do not return anything as the session is still alive
                 },
                 Ok(Some(IcWsSessionState::Open)) => {
-                    debug!("Client session opened");
+                    client_session_span.in_scope(|| {
+                        debug!("Client session opened");
+                    });
                     // do not return anything as the session is still alive
                 },
                 Ok(Some(IcWsSessionState::Closed)) => {
-                    debug!("Client session closed");
+                    client_session_span.in_scope(|| {
+                        debug!("Client session closed");
+                    });
 
                     // remove client from poller state
                     self.gateway_shared_state.remove_client(

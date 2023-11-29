@@ -27,6 +27,7 @@ impl GatewayState {
         canister_id: CanisterPrincipal,
         client_key: ClientKey,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
+        client_session_span: Span,
     ) -> Option<PollerState> {
         // TODO: figure out if this is actually atomic
         match self.0.entry(canister_id) {
@@ -38,7 +39,7 @@ impl GatewayState {
                     client_key,
                     ClientSender {
                         sender: client_channel_tx.clone(),
-                        span: Span::current(),
+                        span: client_session_span,
                     },
                 );
                 None
@@ -51,7 +52,7 @@ impl GatewayState {
                     client_key,
                     ClientSender {
                         sender: client_channel_tx.clone(),
-                        span: Span::current(),
+                        span: client_session_span,
                     },
                 );
                 entry.insert(Arc::clone(&poller_state));

@@ -106,6 +106,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             .send_ws_message_to_client(Message::Binary(
                 serialize(handshake_message).expect("Principal should be serializable"),
             ))
+            .instrument(Span::current())
             .await
         {
             return Err(IcWsError::WebSocket(format!(
@@ -113,7 +114,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 e
             )));
         }
-
         Ok(client_session)
     }
 }
@@ -179,7 +179,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 if !ws_message.is_close() {
                     // upon receiving a message while the session is Open, immediately relay the client messages to the IC
                     // this does not result in a state transition, which shall remain in Open state
-                    self.relay_ws_message_to_ic(ws_message).await?;
+                    self.relay_client_message(ws_message)
+                        .instrument(Span::current())
+                        .await?;
                     Ok(())
                 } else {
                     trace!("Client closed connection while in Open state");
@@ -204,7 +206,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         canister_update: IcWsCanisterUpdate,
     ) -> Result<(), IcWsError> {
         match canister_update {
-            IcWsCanisterUpdate::Message((canister_message, _parent_span)) => {
+            IcWsCanisterUpdate::Message((canister_message, canister_message_span)) => {
                 match self.session_state {
                     IcWsSessionState::Init => {
                         // no need to update the session state to Closed as getting to this state shall not be possible
@@ -213,14 +215,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         unreachable!("Canister shall not send messages while in Init state")
                     },
                     IcWsSessionState::Setup(_) => {
-                        let open_state = self.check_open_transition(canister_message).await?;
+                        let open_state = self
+                            .check_open_transition(canister_message)
+                            .instrument(canister_message_span)
+                            .await?;
                         self.session_state = open_state;
                         Ok(())
                     },
                     IcWsSessionState::Open => {
                         // once the connection is open, immediately relay the canister messages to the client via the WS
                         // this does not result in a state transition, which shall remain in Open state
-                        self.relay_canister_message(canister_message).await?;
+                        self.relay_canister_message(canister_message)
+                            .instrument(canister_message_span)
+                            .await?;
                         Ok(())
                     },
                     IcWsSessionState::Closed => {
@@ -324,8 +331,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         )))
     }
 
+    pub async fn relay_client_message(&self, message: Message) -> Result<(), IcWsError> {
+        let client_message_span = span!(
+            parent: &Span::current(),
+            Level::TRACE,
+            "Client Message",
+        );
+
+        self.relay_ws_message_to_ic(message)
+            .instrument(client_message_span)
+            .await
+    }
+
     /// relays the client's request to the IC only if the content of the envelope is of the Call variant
-    pub async fn relay_ws_message_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+    async fn relay_ws_message_to_ic(&self, message: Message) -> Result<(), IcWsError> {
         let client_request = get_client_request(message)?;
         if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;
