@@ -125,6 +125,7 @@ impl CanisterPoller {
                 Ok(())
             },
             Ok(PollingStatus::MessagesPolled(certified_canister_output)) => {
+                let end_of_queue_reached = certified_canister_output.is_end_of_queue;
                 self.relay_messages(certified_canister_output)
                     .instrument(relay_messages_span)
                     .await?;
@@ -132,12 +133,16 @@ impl CanisterPoller {
                 let polling_interval = Duration::from_millis(self.polling_interval_ms);
                 // check if polling and relaying took longer than 'polling_interval'
                 // if yes, restart polling immediately
+                // check if the canister signaled that there are more messages in the queue
+                // if yes, restart polling immediately
                 // otherwise, sleep for the amount of time remaining to 'polling_interval'
                 if elapsed > polling_interval {
                     warn!(
                         "Polling and relaying of messages took too long: {:?}. Polling immediately",
                         elapsed
                     );
+                } else if !end_of_queue_reached {
+                    warn!("Canister queue is not fully drained. Polling immediately");
                 } else {
                     // SAFETY:
                     // 'elapsed' is smaller than 'polling_interval'

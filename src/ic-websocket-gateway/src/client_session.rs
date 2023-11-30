@@ -150,9 +150,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 if !ws_message.is_close() {
                     // upon receiving a message while the session is Init, check if the message is valid
                     // if not return an error, otherwise set the session state to Setup
-                    // if multiple messages are received while in Init state, 'check_setup_transition' will
+                    // if multiple messages are received while in Init state, 'handle_setup_transition' will
                     // return an error as the client shall not send more than one message while in Init state
-                    let setup_state = self.check_setup_transition(ws_message).await?;
+                    let setup_state = self.handle_setup_transition(ws_message).await?;
                     self.session_state = setup_state;
                     Ok(())
                 } else {
@@ -216,7 +216,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     },
                     IcWsSessionState::Setup(_) => {
                         let open_state = self
-                            .check_open_transition(canister_message)
+                            .handle_open_transition(canister_message)
                             .instrument(canister_message_span)
                             .await?;
                         self.session_state = open_state;
@@ -264,7 +264,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         }
     }
 
-    async fn check_setup_transition(
+    async fn handle_setup_transition(
         &mut self,
         ws_open_message: Message,
     ) -> Result<IcWsSessionState, IcWsError> {
@@ -379,7 +379,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         return Ok(());
     }
 
-    async fn check_open_transition(
+    async fn handle_open_transition(
         &mut self,
         canister_message: CanisterToClientMessage,
     ) -> Result<IcWsSessionState, IcWsError> {

@@ -1145,8 +1145,7 @@ dependencies = [
 [[package]]
 name = "ic-websocket-cdk"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d72b8cde4ff2eb6c0fb9a77cfd7e093e214e9e689a12f072aca21b3f3a5dd81"
+source = "git+https://github.com/omnia-network/ic-websocket-cdk-rs.git?rev=a7ef0c4841aa120395a65db623da517ec227b9fd#a7ef0c4841aa120395a65db623da517ec227b9fd"
 dependencies = [
  "base64 0.21.4",
  "candid",
