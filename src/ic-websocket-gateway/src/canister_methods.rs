@@ -121,18 +121,13 @@ pub struct CanisterOutputCertifiedMessages {
     #[serde(with = "serde_bytes")]
     /// cert+tree constitute the certificate for all returned messages
     pub tree: Vec<u8>,
-    #[serde(default = "default_is_end_of_queue")]
     /// Flag set by the canister CDK to indicate if the messages polled are the last in the queue
     /// If true, the GW polls after waiting for 'polling_interval'
     /// If false, the GW polls immediately
-    pub is_end_of_queue: bool,
-}
-
-fn default_is_end_of_queue() -> bool {
-    // in order to make the GW consistent with the canister CDK versions < 0.3.1,
-    // set 'is_end_of_queue' to false in case it is missing in 'CanisterOutputCertifiedMessages'
-    // this way, the GW will poll the canister after waiting for 'polling_interval'
-    true
+    /// Wrapped in an Option because the canister CDK versions < 0.3.1 did not have this field
+    /// When interacting with the canister CDK versions < 0.3.1, 'is_end_of_queue' is 'None'
+    /// and the GW will apply the same logic as if it were 'Some(true)'
+    pub is_end_of_queue: Option<bool>,
 }
 
 pub async fn get_new_agent(

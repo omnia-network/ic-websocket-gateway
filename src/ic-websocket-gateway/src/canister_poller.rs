@@ -89,7 +89,7 @@ impl CanisterPoller {
     pub async fn run_polling(&mut self) {
         loop {
             let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration);
-            if let Err(_e) = self
+            if let Err(e) = self
                 .poll_and_relay()
                 .instrument(polling_iteration_span)
                 .await
@@ -98,6 +98,7 @@ impl CanisterPoller {
                 // poller returned an error, terminate client sessions once no more clients are connected,
                 // cleanup the corresponding state in the gateway state
                 // in the meantime, prevent new clients from connecting
+                error!("Error polling canister: {:?}", e);
                 unimplemented!("TODO");
             }
 
@@ -118,14 +119,22 @@ impl CanisterPoller {
             span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
 
         let start_polling_instant: tokio::time::Instant = tokio::time::Instant::now();
-        match self.poll_canister().instrument(Span::current()).await {
-            Ok(PollingStatus::NoMessagesPolled) => {
+        match self.poll_canister().await? {
+            PollingStatus::NoMessagesPolled => {
                 // if no messages are returned, sleep for 'polling_interval_ms' before polling again
                 tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
                 Ok(())
             },
-            Ok(PollingStatus::MessagesPolled(certified_canister_output)) => {
-                let end_of_queue_reached = certified_canister_output.is_end_of_queue;
+            PollingStatus::MessagesPolled(certified_canister_output) => {
+                let end_of_queue_reached = {
+                    match certified_canister_output.is_end_of_queue {
+                        Some(is_end_of_queue_reached) => is_end_of_queue_reached,
+                        // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
+                        // in this case, assume that the queue is fully drained and therefore will be polled again
+                        // after waiting for 'polling_interval_ms'
+                        None => true,
+                    }
+                };
                 self.relay_messages(certified_canister_output)
                     .instrument(relay_messages_span)
                     .await?;
@@ -154,7 +163,7 @@ impl CanisterPoller {
                 }
                 Ok(())
             },
-            Ok(PollingStatus::MaxMessagesPolled(certified_canister_output)) => {
+            PollingStatus::MaxMessagesPolled(certified_canister_output) => {
                 self.relay_messages(certified_canister_output)
                     .instrument(relay_messages_span)
                     .await?;
@@ -170,7 +179,6 @@ impl CanisterPoller {
                 warn!("Polled the maximum number of messages. Polling immediately");
                 Ok(())
             },
-            Err(e) => Err(e),
         }
     }
 
