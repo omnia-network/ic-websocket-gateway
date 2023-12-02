@@ -1,4 +1,4 @@
-use candid::{CandidType, Decode, Principal};
+use candid::{CandidType, Decode, Error, Principal};
 use ic_agent::AgentError;
 use ic_agent::{
     agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
@@ -30,12 +30,20 @@ impl fmt::Display for ClientKey {
     }
 }
 
+pub enum IcError {
+    Agent(AgentError),
+    Candid(Error),
+    Cdk(String),
+}
+
 /// The result of [ws_close].
 pub type CanisterWsCloseResult = Result<(), String>;
 /// The result of [ws_get_messages].
+pub type CanisterWsGetMessagesResultWithIcError = Result<CanisterOutputCertifiedMessages, IcError>;
+/// The result of the canister method 'ws_get_messages'.
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
-/// The arguments for [ws_open].
+/// The arguments for the canister method 'ws_open'.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenArguments {
     pub client_nonce: u64,
@@ -167,15 +175,16 @@ pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsGetMessagesArguments,
-) -> CanisterWsGetMessagesResult {
-    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
+) -> CanisterWsGetMessagesResultWithIcError {
+    let args = candid::encode_args((args,)).map_err(|e| IcError::Candid(e))?;
 
     let res = agent
         .query(canister_id, "ws_get_messages")
         .with_arg(args)
         .call()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| IcError::Agent(e))?;
 
-    Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| e.to_string())?
+    let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
+    res.map_err(|e| IcError::Cdk(e))
 }

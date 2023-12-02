@@ -1,13 +1,13 @@
 use crate::{
     canister_methods::{
         self, CanisterOutputCertifiedMessages, CanisterToClientMessage,
-        CanisterWsGetMessagesArguments,
+        CanisterWsGetMessagesArguments, IcError,
     },
     events_analyzer::Events,
     manager::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState},
 };
 use candid::Principal;
-use ic_agent::Agent;
+use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::Instant};
 use tracing::{debug, error, info, span, trace, warn, Id, Instrument, Level, Span};
@@ -187,29 +187,47 @@ impl CanisterPoller {
         trace!("Started polling iteration");
 
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        let certified_canister_output = canister_methods::ws_get_messages(
+        match canister_methods::ws_get_messages(
             &self.agent,
             &self.canister_id,
             CanisterWsGetMessagesArguments {
                 nonce: self.message_nonce,
             },
         )
-        .await?;
+        .await
+        {
+            Ok(certified_canister_output) => {
+                let number_of_polled_messages = certified_canister_output.messages.len();
 
-        let number_of_polled_messages = certified_canister_output.messages.len();
-
-        if number_of_polled_messages == 0 {
-            trace!("No messages polled from canister");
-            Ok(PollingStatus::NoMessagesPolled)
-        } else if number_of_polled_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
-            trace!("Polled the maximum number of messages");
-            Ok(PollingStatus::MaxMessagesPolled(certified_canister_output))
-        } else {
-            trace!(
-                "Polled {} messages from canister",
-                number_of_polled_messages
-            );
-            Ok(PollingStatus::MessagesPolled(certified_canister_output))
+                if number_of_polled_messages == 0 {
+                    trace!("No messages polled from canister");
+                    Ok(PollingStatus::NoMessagesPolled)
+                } else if number_of_polled_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
+                    trace!("Polled the maximum number of messages");
+                    Ok(PollingStatus::MaxMessagesPolled(certified_canister_output))
+                } else {
+                    trace!(
+                        "Polled {} messages from canister",
+                        number_of_polled_messages
+                    );
+                    Ok(PollingStatus::MessagesPolled(certified_canister_output))
+                }
+            },
+            Err(IcError::Agent(e)) => {
+                if is_recoverable_error(&e) {
+                    // if the error is due to a replica which is either actively malicious or simply unavailable
+                    // or to a malfunctioning boundary node,
+                    // continue polling the canister as this is expected and other replicas might still be able to
+                    // provide the canister updates
+                    // TODO: add counter as after several retries the poller should be stopped
+                    warn!("Ignoring replica error: {:?}", e);
+                    Ok(PollingStatus::NoMessagesPolled)
+                } else {
+                    Err(format!("Unrecoverable agent error: {:?}", e))
+                }
+            },
+            Err(IcError::Candid(e)) => Err(format!("Unrecoverable candid error: {:?}", e)),
+            Err(IcError::Cdk(e)) => Err(format!("Unrecoverable CDK error: {:?}", e)),
         }
     }
 
@@ -309,4 +327,27 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
 fn get_elapsed(start: Instant) -> Duration {
     let now = Instant::now();
     now - start
+}
+
+fn is_recoverable_error(e: &AgentError) -> bool {
+    match e {
+        // TODO: make sure that we include all the "recoverable" errors
+        AgentError::InvalidReplicaUrl(_)
+        | AgentError::TimeoutWaitingForResponse()
+        | AgentError::InvalidCborData(_)
+        | AgentError::ReplicaError(_)
+        | AgentError::HttpError(_)
+        | AgentError::InvalidReplicaStatus
+        | AgentError::RequestStatusDoneNoReply(_)
+        | AgentError::LookupPathAbsent(_)
+        | AgentError::LookupPathUnknown(_)
+        | AgentError::LookupPathError(_)
+        | AgentError::CertificateVerificationFailed()
+        | AgentError::CertificateNotAuthorized()
+        | AgentError::ResponseSizeExceededLimit()
+        | AgentError::TransportError(_)
+        | AgentError::CallDataMismatch { .. }
+        | AgentError::InvalidRejectCode(_) => true,
+        _ => false,
+    }
 }
