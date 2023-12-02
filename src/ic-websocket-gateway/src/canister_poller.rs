@@ -94,12 +94,44 @@ impl CanisterPoller {
                 .instrument(polling_iteration_span)
                 .await
             {
-                // TODO:
-                // poller returned an error, terminate client sessions once no more clients are connected,
-                // cleanup the corresponding state in the gateway state
-                // in the meantime, prevent new clients from connecting
                 error!("Error polling canister: {:?}", e);
-                unimplemented!("TODO");
+                // set poller status to 'Failed' so that no other client connections are accepted and the existing client sessions are terminated
+                self.gateway_shared_state
+                    .set_poller_status_to_failed(self.canister_id);
+                // notify all the connected clients that they should terminate
+                for client_state in self.poller_state.iter() {
+                    self.relay_message(
+                        IcWsCanisterUpdate::Error(format!("Poller failed. Error: {:?}", e)),
+                        &client_state.sender,
+                    )
+                    .await
+                }
+
+                // TODO: notify the canister that it cannot be polled anymore
+
+                // wait for all client sessions to terminate and then terminate the poller
+                while let PollerStatus::Running = self.check_poller_termination() {}
+                // the poller has been terminated
+                break;
+            }
+
+            if self.polling_iteration == 200 {
+                error!("Error polling canister");
+                // set poller status to 'Failed' so that no other client connections are accepted and the existing client sessions are terminated
+                self.gateway_shared_state
+                    .set_poller_status_to_failed(self.canister_id);
+                // notify all the connected clients that they should terminate
+                for client_state in self.poller_state.iter() {
+                    self.relay_message(
+                        IcWsCanisterUpdate::Error(format!("Poller failed. Error")),
+                        &client_state.sender,
+                    )
+                    .await
+                }
+                // wait for all client sessions to terminate and then terminate the poller
+                while let PollerStatus::Running = self.check_poller_termination() {}
+                // the poller has been terminated
+                break;
             }
 
             // counting all polling iterations (instead of only the ones that return at least one canister message)
@@ -256,8 +288,11 @@ impl CanisterPoller {
             {
                 let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
                 canister_message_span.follows_from(Span::current().id());
-                canister_message_span.in_scope(|| trace!("Received message from canister",));
-                self.relay_message(canister_to_client_message, client_channel_tx)
+                let canister_update = canister_message_span.in_scope(|| {
+                    trace!("Received message from canister",);
+                    IcWsCanisterUpdate::Message((canister_to_client_message, Span::current()))
+                });
+                self.relay_message(canister_update, client_channel_tx)
                     .instrument(canister_message_span)
                     .await;
             } else {
@@ -275,16 +310,10 @@ impl CanisterPoller {
 
     pub async fn relay_message(
         &self,
-        canister_to_client_message: CanisterToClientMessage,
+        canister_update: IcWsCanisterUpdate,
         client_channel_tx: &Sender<IcWsCanisterUpdate>,
     ) {
-        if let Err(e) = client_channel_tx
-            .send(IcWsCanisterUpdate::Message((
-                canister_to_client_message,
-                Span::current(),
-            )))
-            .await
-        {
+        if let Err(e) = client_channel_tx.send(canister_update).await {
             // SAFETY:
             // no need to panic here as the client session handler might have terminated
             // after the poller got the client_chanel_tx

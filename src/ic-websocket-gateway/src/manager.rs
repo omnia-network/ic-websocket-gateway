@@ -28,7 +28,7 @@ impl GatewayState {
         client_key: ClientKey,
         client_channel_tx: Sender<IcWsCanisterUpdate>,
         client_session_span: Span,
-    ) -> Option<PollerState> {
+    ) -> Result<Option<PollerState>, String> {
         // TODO: figure out if this is actually atomic
         match self.0.entry(canister_id) {
             Entry::Occupied(mut entry) => {
@@ -42,9 +42,11 @@ impl GatewayState {
                             span: client_session_span,
                         },
                     );
+                    // the poller shall not be started again
+                    return Ok(None);
                 }
-                // independently of the poller state, the poller shall not be started again
-                None
+                // if the poller is 'Failed', the client session shall not be started
+                Err(String::from("Poller is in 'Failed' status"))
             },
             Entry::Vacant(entry) => {
                 // the poller has not been started yet
@@ -59,7 +61,7 @@ impl GatewayState {
                 );
                 entry.insert(PollerStatus::Active(Arc::clone(&poller_state)));
                 // the poller shall be started
-                Some(Arc::clone(&poller_state))
+                Ok(Some(Arc::clone(&poller_state)))
             },
         }
     }
@@ -76,7 +78,7 @@ impl GatewayState {
                 // even if this is the last client session for the canister, do not remove the canister from the gateway state
                 // this will be done by the poller task
             }
-            // if the poller status is 'Failed', the client has already been removed
+            // if the poller status is 'Failed', the client will be removed upon receiving the error update from the canister
         } else {
             // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
             // if this is encountered it might indicate a race condition
@@ -91,19 +93,20 @@ impl GatewayState {
     ) -> bool {
         // TODO: figure out if this is actually atomic
         if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
-            if let PollerStatus::Active(poller_state) = entry.get_mut() {
+            if let PollerStatus::Active(poller_state) | PollerStatus::Failed(poller_state) =
+                entry.get_mut()
+            {
                 // even if this is the last client session for the canister, do not remove the canister from the gateway state
                 // this will be done by the poller task
                 // returns true if the client was removed, false if there was no such client
                 return poller_state.remove(&client_key).is_some();
             }
-            // if the poller status is 'Failed', the client has been implicitly removed already
-            true
-        } else {
-            // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
-            // if this is encountered it might indicate a race condition
-            unreachable!("Canister not found in gateway state");
+            unreachable!("poller status must be 'Active' or 'Failed'");
         }
+        // this can happen when clients try to connect when the poller status is 'Failed'
+        // trying to setup the connection will return an error and therefore the client will not be inserted in the poller state
+        // therefore, there is no need to remove it
+        false
     }
 
     pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> bool {
@@ -121,12 +124,21 @@ impl GatewayState {
             })
             .is_some()
     }
+
+    pub fn set_poller_status_to_failed(&self, canister_id: CanisterPrincipal) {
+        self.0.alter(&canister_id, |_canister_id, poller_status| {
+            if let PollerStatus::Active(poller_state) = poller_status {
+                return PollerStatus::Failed(poller_state);
+            }
+            unreachable!("cannot be called on 'Failed' poller status");
+        })
+    }
 }
 
 /// Status of the poller containing the poller state, if Active
 pub enum PollerStatus {
     Active(PollerState),
-    Failed,
+    Failed(PollerState),
 }
 
 /// State of each poller consisting of the keys of the clients connected to the poller

@@ -55,6 +55,8 @@ pub enum IcWsError {
     IcWsProtocol(String),
     /// WebSocket error
     WebSocket(String),
+    /// Poller error
+    Poller(String),
 }
 
 /// IC WebSocket session
@@ -241,7 +243,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     },
                 }
             },
-            IcWsCanisterUpdate::Error(_e) => unimplemented!("TODO"),
+            IcWsCanisterUpdate::Error(e) => Err(IcWsError::Poller(e)),
         }
     }
 

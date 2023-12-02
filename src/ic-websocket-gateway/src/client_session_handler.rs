@@ -1,6 +1,6 @@
 use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterUpdate},
-    client_session::{ClientSession, IcWsSessionState},
+    client_session::{ClientSession, IcWsError, IcWsSessionState},
     events_analyzer::Events,
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
     ws_listener::ClientId,
@@ -140,7 +140,10 @@ impl ClientSessionHandler {
                                 .expect("must be set during Setup"),
                             client_channel_tx.clone(),
                             client_session_span.clone(),
-                        );
+                        )
+                        // if the poller status is 'Failed', the client channel is not inserted and therefore there is no need to remove it
+                        // the client session handler returns the error and terminates
+                        ?;
 
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
@@ -190,9 +193,14 @@ impl ClientSessionHandler {
                     // return Ok as the session was closed correctly
                     return Ok(());
                 },
+                Ok(None) => {
+                    // no state change
+                    continue;
+                },
                 Err(e) => {
                     // remove client from poller state, if it is present
                     // error might have happened before the client session was Setup
+                    // if so, there is no need to remove the client as it is not yet in the poller state
                     if self.gateway_shared_state.remove_client_if_exists(
                         client_session
                             .canister_id
@@ -206,10 +214,6 @@ impl ClientSessionHandler {
                         return Err(format!("Client session error: {:?}", e));
                     }
                     return Err(format!("Client error before session Setup: {:?}", e));
-                },
-                Ok(None) => {
-                    // no state change
-                    continue;
                 },
             }
         }
