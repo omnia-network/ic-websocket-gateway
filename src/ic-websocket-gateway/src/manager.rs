@@ -18,8 +18,8 @@ use crate::{
 pub type GatewaySharedState = Arc<GatewayState>;
 
 /// State of the WS Gateway consisting of the principal of each canister being polled
-/// and the state associated to each poller
-pub struct GatewayState(DashMap<CanisterPrincipal, PollerState>);
+/// and the status of each poller
+pub struct GatewayState(DashMap<CanisterPrincipal, PollerStatus>);
 
 impl GatewayState {
     pub fn insert_client_channel_and_get_new_poller_state(
@@ -33,15 +33,17 @@ impl GatewayState {
         match self.0.entry(canister_id) {
             Entry::Occupied(mut entry) => {
                 // the poller has already been started
-                // add client key and sender end of the channel to the poller state
-                let poller_state = entry.get_mut();
-                poller_state.insert(
-                    client_key,
-                    ClientSender {
-                        sender: client_channel_tx.clone(),
-                        span: client_session_span,
-                    },
-                );
+                // if the poller is active, add client key and sender end of the channel to the poller state
+                if let PollerStatus::Active(poller_state) = entry.get_mut() {
+                    poller_state.insert(
+                        client_key,
+                        ClientSender {
+                            sender: client_channel_tx.clone(),
+                            span: client_session_span,
+                        },
+                    );
+                }
+                // independently of the poller state, the poller shall not be started again
                 None
             },
             Entry::Vacant(entry) => {
@@ -55,7 +57,8 @@ impl GatewayState {
                         span: client_session_span,
                     },
                 );
-                entry.insert(Arc::clone(&poller_state));
+                entry.insert(PollerStatus::Active(Arc::clone(&poller_state)));
+                // the poller shall be started
                 Some(Arc::clone(&poller_state))
             },
         }
@@ -64,14 +67,16 @@ impl GatewayState {
     pub fn remove_client(&self, canister_id: CanisterPrincipal, client_key: ClientKey) {
         // TODO: figure out if this is actually atomic
         if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
-            let poller_state = entry.get_mut();
-            if poller_state.remove(&client_key).is_none() {
-                // as the client was connected, the poller state must contain an entry for 'client_key'
-                // if this is encountered it might indicate a race condition
-                unreachable!("Client key not found in poller state");
+            if let PollerStatus::Active(poller_state) = entry.get_mut() {
+                if poller_state.remove(&client_key).is_none() {
+                    // as the client was connected, the poller state must contain an entry for 'client_key'
+                    // if this is encountered it might indicate a race condition
+                    unreachable!("Client key not found in poller state");
+                }
+                // even if this is the last client session for the canister, do not remove the canister from the gateway state
+                // this will be done by the poller task
             }
-            // even if this is the last client session for the canister, do not remove the canister from the gateway state
-            // this will be done by the poller task
+            // if the poller status is 'Failed', the client has already been removed
         } else {
             // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
             // if this is encountered it might indicate a race condition
@@ -86,11 +91,14 @@ impl GatewayState {
     ) -> bool {
         // TODO: figure out if this is actually atomic
         if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
-            let poller_state = entry.get_mut();
-            // even if this is the last client session for the canister, do not remove the canister from the gateway state
-            // this will be done by the poller task
-            // returns true if the client was removed, false if there was no such client
-            poller_state.remove(&client_key).is_some()
+            if let PollerStatus::Active(poller_state) = entry.get_mut() {
+                // even if this is the last client session for the canister, do not remove the canister from the gateway state
+                // this will be done by the poller task
+                // returns true if the client was removed, false if there was no such client
+                return poller_state.remove(&client_key).is_some();
+            }
+            // if the poller status is 'Failed', the client has been implicitly removed already
+            true
         } else {
             // the gateway state must contain an entry for 'canister_id' of the canister which the client was connected to
             // if this is encountered it might indicate a race condition
@@ -101,12 +109,24 @@ impl GatewayState {
     pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> bool {
         // SAFETY:
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
-        // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller should not terminate
-        // if Some is returned, the poller state is empty and therefore the poller should terminate
+        // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate
+        // if Some is returned, the poller state is empty and therefore the poller shall terminate
         self.0
-            .remove_if(&canister_id, |_, poller_state| poller_state.is_empty())
+            .remove_if(&canister_id, |_, poller_status| {
+                if let PollerStatus::Active(poller_state) = poller_status {
+                    return poller_state.is_empty();
+                }
+                // if the poller status is 'Failed', the poller shall terminate
+                true
+            })
             .is_some()
     }
+}
+
+/// Status of the poller containing the poller state, if Active
+pub enum PollerStatus {
+    Active(PollerState),
+    Failed,
 }
 
 /// State of each poller consisting of the keys of the clients connected to the poller
