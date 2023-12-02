@@ -144,9 +144,7 @@ impl Manager {
         identity: BasicIdentity,
         analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
-        let fetch_ic_root_key = ic_network_url != "https://icp0.io";
-
-        let agent = canister_methods::get_new_agent(&ic_network_url, identity, fetch_ic_root_key)
+        let agent = canister_methods::get_new_agent(&ic_network_url, identity)
             .await
             .expect("could not get new agent");
         let agent = Arc::new(agent);

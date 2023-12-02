@@ -1,10 +1,11 @@
 use candid::{CandidType, Decode, Error, Principal};
+use ic_agent::agent::AgentBuilder;
 use ic_agent::AgentError;
-use ic_agent::{
-    agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
-};
+use ic_agent::{agent::http_transport::ReqwestTransport, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+static IC_MAINNET_URLS: [&str; 2] = ["https://icp0.io", "https://icp-api.io"];
 
 pub type ClientPrincipal = Principal;
 
@@ -138,17 +139,22 @@ pub struct CanisterOutputCertifiedMessages {
     pub is_end_of_queue: Option<bool>,
 }
 
+pub fn is_mainnet(ic_network_url: &str) -> bool {
+    IC_MAINNET_URLS.contains(&ic_network_url)
+}
+
 pub async fn get_new_agent(
-    url: &str,
+    ic_network_url: &str,
     identity: BasicIdentity,
-    fetch_key: bool,
 ) -> Result<Agent, AgentError> {
-    let transport = ReqwestHttpReplicaV2Transport::create(url.to_string())?;
+    let is_mainnet = is_mainnet(ic_network_url);
+    let transport = ReqwestTransport::create(ic_network_url.to_string())?;
     let agent = Agent::builder()
         .with_transport(transport)
         .with_identity(identity)
+        .with_verify_query_signatures(is_mainnet)
         .build()?;
-    if fetch_key {
+    if !is_mainnet {
         agent.fetch_root_key().await?;
     }
     Ok(agent)
