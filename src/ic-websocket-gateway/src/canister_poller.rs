@@ -9,8 +9,8 @@ use crate::{
 use candid::Principal;
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
-use tokio::{sync::mpsc::Sender, time::Instant};
-use tracing::{debug, error, info, span, trace, warn, Id, Instrument, Level, Span};
+use tokio::sync::mpsc::Sender;
+use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
 
 // OLD NOTE: 30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
 //           as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
@@ -117,7 +117,6 @@ impl CanisterPoller {
         let relay_messages_span =
             span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
 
-        let start_polling_instant: tokio::time::Instant = tokio::time::Instant::now();
         match self.poll_canister().await? {
             PollingStatus::NoMessagesPolled => {
                 // if no messages are returned, sleep for 'polling_interval_ms' before polling again
@@ -125,7 +124,6 @@ impl CanisterPoller {
                 Ok(())
             },
             PollingStatus::MessagesPolled(certified_canister_output) => {
-                self.update_nonce(&certified_canister_output)?;
                 let end_of_queue_reached = {
                     match certified_canister_output.is_end_of_queue {
                         Some(is_end_of_queue_reached) => is_end_of_queue_reached,
@@ -135,48 +133,30 @@ impl CanisterPoller {
                         None => true,
                     }
                 };
-                relay_messages(Arc::clone(&self.poller_state), certified_canister_output)
-                    .instrument(relay_messages_span)
-                    .await?;
-                let elapsed = get_elapsed(start_polling_instant);
-                let polling_interval = Duration::from_millis(self.polling_interval_ms);
-                // check if polling and relaying took longer than 'polling_interval'
-                // if yes, restart polling immediately
-                // check if the canister signaled that there are more messages in the queue
-                // if yes, restart polling immediately
-                // otherwise, sleep for the amount of time remaining to 'polling_interval'
-                if elapsed > polling_interval {
-                    warn!(
-                        "Polling and relaying of messages took too long: {:?}. Polling immediately",
-                        elapsed
-                    );
-                } else if !end_of_queue_reached {
+                self.update_nonce(&certified_canister_output)?;
+                // spawn a new task to relay the messages
+                let poller_state = Arc::clone(&self.poller_state);
+                tokio::spawn(async move {
+                    relay_messages(poller_state, certified_canister_output)
+                        .instrument(relay_messages_span)
+                        .await;
+                });
+                if !end_of_queue_reached {
                     warn!("Canister queue is not fully drained. Polling immediately");
                 } else {
-                    // SAFETY:
-                    // 'elapsed' is smaller than 'polling_interval'
-                    // therefore, the duration passed to 'sleep' is valid
-
-                    // 'elapsed' is >= 0
-                    // therefore, the next polling iteration is delayed by at most 'polling_interval'
-                    tokio::time::sleep(polling_interval - elapsed).await;
+                    tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
                 }
                 Ok(())
             },
             PollingStatus::MaxMessagesPolled(certified_canister_output) => {
                 self.update_nonce(&certified_canister_output)?;
-
-                relay_messages(Arc::clone(&self.poller_state), certified_canister_output)
-                    .instrument(relay_messages_span)
-                    .await?;
-                let elapsed = get_elapsed(start_polling_instant);
-                // if polling and relaying took longer than 'polling_interval', create a warning
-                if elapsed > Duration::from_millis(self.polling_interval_ms) {
-                    warn!(
-                        "Polling and relaying of messages took too long: {:?}",
-                        elapsed
-                    );
-                }
+                // spawn a new task to relay the messages
+                let poller_state = Arc::clone(&self.poller_state);
+                tokio::spawn(async move {
+                    relay_messages(poller_state, certified_canister_output)
+                        .instrument(relay_messages_span)
+                        .await;
+                });
                 // poll immediately as the maximum number of messages has beeen polled
                 warn!("Polled the maximum number of messages. Polling immediately");
                 Ok(())
@@ -184,6 +164,9 @@ impl CanisterPoller {
         }
     }
 
+    /// Updates the message nonce according to the last polled message
+    /// This is necessary to do before starting the next polling iteration
+    /// Returns an error if a nonce could not be parsed from a message
     fn update_nonce(
         &mut self,
         certified_canister_output: &CanisterOutputCertifiedMessages,
@@ -261,10 +244,7 @@ impl CanisterPoller {
     }
 }
 
-async fn relay_messages(
-    poller_state: PollerState,
-    msgs: CanisterOutputCertifiedMessages,
-) -> Result<(), String> {
+async fn relay_messages(poller_state: PollerState, msgs: CanisterOutputCertifiedMessages) {
     for canister_output_message in msgs.messages {
         let canister_to_client_message = CanisterToClientMessage {
             key: canister_output_message.key,
@@ -299,7 +279,6 @@ async fn relay_messages(
         }
     }
     trace!("Relayed messages to connection handlers");
-    Ok(())
 }
 
 async fn relay_message(
@@ -329,11 +308,7 @@ pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
     ))
 }
 
-fn get_elapsed(start: Instant) -> Duration {
-    let now = Instant::now();
-    now - start
-}
-
+/// Returns true if the error is caused by a replica which is either actively malicious or simply unavailable
 fn is_recoverable_error(e: &AgentError) -> bool {
     match e {
         // TODO: make sure that we include all the "recoverable" errors

@@ -1,5 +1,4 @@
 use candid::{CandidType, Decode, Error, Principal};
-use ic_agent::agent::AgentBuilder;
 use ic_agent::AgentError;
 use ic_agent::{agent::http_transport::ReqwestTransport, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
