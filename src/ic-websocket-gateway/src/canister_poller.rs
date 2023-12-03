@@ -115,25 +115,6 @@ impl CanisterPoller {
                 break;
             }
 
-            if self.polling_iteration == 200 {
-                error!("Error polling canister");
-                // set poller status to 'Failed' so that no other client connections are accepted and the existing client sessions are terminated
-                self.gateway_shared_state
-                    .set_poller_status_to_failed(self.canister_id);
-                // notify all the connected clients that they should terminate
-                for client_state in self.poller_state.iter() {
-                    self.relay_message(
-                        IcWsCanisterUpdate::Error(format!("Poller failed. Error")),
-                        &client_state.sender,
-                    )
-                    .await
-                }
-                // wait for all client sessions to terminate and then terminate the poller
-                while let PollerStatus::Running = self.check_poller_termination() {}
-                // the poller has been terminated
-                break;
-            }
-
             // counting all polling iterations (instead of only the ones that return at least one canister message)
             // this way we can tell for how many iterations the poller was "idle" before actually getting some messages from the canister
             // this can help us in the future understanding whether the poller is polling too frequently or not
