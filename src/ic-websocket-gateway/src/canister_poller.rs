@@ -12,16 +12,9 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
 
-// OLD NOTE: 30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
-//           as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
-// TODO: make sure this is always in sync with the CDK init parameter 'max_number_of_returned_messages'
-//       maybe get it once starting to poll the canister (?)
-const MAX_NUMBER_OF_RETURNED_MESSAGES: usize = 30;
-
 enum PollingStatus {
     NoMessagesPolled,
     MessagesPolled(CanisterOutputCertifiedMessages),
-    MaxMessagesPolled(CanisterOutputCertifiedMessages),
 }
 
 enum PollerStatus {
@@ -148,19 +141,6 @@ impl CanisterPoller {
                 }
                 Ok(())
             },
-            PollingStatus::MaxMessagesPolled(certified_canister_output) => {
-                self.update_nonce(&certified_canister_output)?;
-                // spawn a new task to relay the messages
-                let poller_state = Arc::clone(&self.poller_state);
-                tokio::spawn(async move {
-                    relay_messages(poller_state, certified_canister_output)
-                        .instrument(relay_messages_span)
-                        .await;
-                });
-                // poll immediately as the maximum number of messages has beeen polled
-                warn!("Polled the maximum number of messages. Polling immediately");
-                Ok(())
-            },
         }
     }
 
@@ -198,9 +178,6 @@ impl CanisterPoller {
                 if number_of_polled_messages == 0 {
                     trace!("No messages polled from canister");
                     Ok(PollingStatus::NoMessagesPolled)
-                } else if number_of_polled_messages >= MAX_NUMBER_OF_RETURNED_MESSAGES {
-                    trace!("Polled the maximum number of messages");
-                    Ok(PollingStatus::MaxMessagesPolled(certified_canister_output))
                 } else {
                     trace!(
                         "Polled {} messages from canister",
