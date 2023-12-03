@@ -86,9 +86,13 @@ impl ClientSessionHandler {
                     debug!("Client session initialized");
                 });
 
-                self.handle_client_session(client_session, client_channel_tx, client_session_span)
-                    .instrument(Span::current())
-                    .await?;
+                self.handle_client_session(
+                    client_session,
+                    Some(client_channel_tx),
+                    client_session_span,
+                )
+                .instrument(Span::current())
+                .await?;
                 Ok(())
             },
             Err(e) => {
@@ -102,7 +106,9 @@ impl ClientSessionHandler {
     async fn handle_client_session<S: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         mut client_session: ClientSession<S>,
-        client_channel_tx: Sender<IcWsCanisterUpdate>,
+        // passed in an option so that it can be taken once after session Setup without cloning it
+        // it is important not to clone it as otherwise the client session will not receive None in case of a poller error
+        mut client_channel_tx: Option<Sender<IcWsCanisterUpdate>>,
         client_session_span: Span,
     ) -> Result<(), String> {
         // keeps trying to update the client session state
@@ -138,12 +144,10 @@ impl ClientSessionHandler {
                                 .client_key
                                 .clone()
                                 .expect("must be set during Setup"),
-                            client_channel_tx.clone(),
+                            // important not to clone 'client_channel_tx' as otherwise the client session will not receive None in case of a poller error
+                            client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
-                        )
-                        // if the poller status is 'Failed', the client channel is not inserted and therefore there is no need to remove it
-                        // the client session handler returns the error and terminates
-                        ?;
+                        );
 
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
@@ -198,6 +202,11 @@ impl ClientSessionHandler {
                     continue;
                 },
                 Err(e) => {
+                    if let IcWsError::Poller(e) = e {
+                        // no need to remove the client as the whole poller state has already been removed by the poller task
+                        return Err(format!("Poller error: {:?}", e));
+                    }
+                    // if the error is not due to a a failed poller
                     // remove client from poller state, if it is present
                     // error might have happened before the client session was Setup
                     // if so, there is no need to remove the client as it is not yet in the poller state

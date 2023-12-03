@@ -95,23 +95,14 @@ impl CanisterPoller {
                 .await
             {
                 error!("Error polling canister: {:?}", e);
-                // set poller status to 'Failed' so that no other client connections are accepted and the existing client sessions are terminated
+                // upon poller error, remove the poller state from the gateway state and immediately terminate the poller
+                // client sessions will detect that the poller side of the channel has been dropped and therefore will also terminate
+                // as the poller state contains all the state of the clients sessions opened to the failed poller, removing the poller state
+                // will also remove all the corresponding clients' states
+                // therefore, there is no need to wait for the clients to remove their state before terminating the poller
                 self.gateway_shared_state
-                    .set_poller_status_to_failed(self.canister_id);
-                // notify all the connected clients that they should terminate
-                for client_state in self.poller_state.iter() {
-                    self.relay_message(
-                        IcWsCanisterUpdate::Error(format!("Poller failed. Error: {:?}", e)),
-                        &client_state.sender,
-                    )
-                    .await
-                }
-
+                    .remove_failed_canister(self.canister_id);
                 // TODO: notify the canister that it cannot be polled anymore
-
-                // wait for all client sessions to terminate and then terminate the poller
-                while let PollerStatus::Running = self.check_poller_termination() {}
-                // the poller has been terminated
                 break;
             }
 

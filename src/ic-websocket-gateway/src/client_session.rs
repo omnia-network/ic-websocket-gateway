@@ -131,9 +131,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             // however, if this is the case, the session shall have been closed in the previous call to 'update_state'
             // therefore, we can ignore None
             Some(client_update) = self.ws_read.next() => self.handle_client_update(client_update).await?,
-            // 'recv' returns None only if the channel is closed, however the poller shall not terminate before all client sessions have been closed
-            // therefore, we can ignore None
-            Some(canister_update) = self.client_channel_rx.recv() => self.handle_canister_update(canister_update).await?,
+            // in case of a poller error, the poller will terminate immediately, without waiting for the client session handler to cleanup its state and terminate
+            // in such a case, the sending side of the channel is dropped and therefore the client session shall return an error
+            canister_update = self.client_channel_rx.recv() => self.handle_canister_update(canister_update).await?,
         }
         // if the update resulted in a new session state, return it so that the session handler can act accordingly,
         if self.session_state != previous_session_state {
@@ -205,10 +205,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
     async fn handle_canister_update(
         &mut self,
-        canister_update: IcWsCanisterUpdate,
+        canister_update: Option<IcWsCanisterUpdate>,
     ) -> Result<(), IcWsError> {
         match canister_update {
-            IcWsCanisterUpdate::Message((canister_message, canister_message_span)) => {
+            Some(IcWsCanisterUpdate::Message((canister_message, canister_message_span))) => {
                 match self.session_state {
                     IcWsSessionState::Init => {
                         // no need to update the session state to Closed as getting to this state shall not be possible
@@ -243,7 +243,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     },
                 }
             },
-            IcWsCanisterUpdate::Error(e) => Err(IcWsError::Poller(e)),
+            Some(IcWsCanisterUpdate::Error(e)) => Err(IcWsError::Poller(e)),
+            None => {
+                warn!("Poller side of the channel has been dropped. Terminating the session.");
+                self.close_ws_session().await?;
+                Err(IcWsError::Poller(String::from(
+                    "Client session terminated due to poller failure",
+                )))
+            },
         }
     }
 
@@ -297,6 +304,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             },
             // in case of other errors, we report them and terminate the connection handler task
             Err(e) => {
+                self.close_ws_session().await?;
                 return Err(IcWsError::IcWsProtocol(format!(
                     "IC WS setup failed. Error: {:?}",
                     e
@@ -411,6 +419,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
     async fn send_ws_message_to_client(&mut self, message: Message) -> Result<(), IcWsError> {
         if let Err(e) = self.ws_write.send(message).await {
+            return Err(IcWsError::WebSocket(e.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn close_ws_session(&mut self) -> Result<(), IcWsError> {
+        if let Err(e) = self.ws_write.close().await {
             return Err(IcWsError::WebSocket(e.to_string()));
         }
         Ok(())
