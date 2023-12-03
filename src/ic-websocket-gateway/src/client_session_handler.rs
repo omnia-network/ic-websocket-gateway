@@ -1,5 +1,5 @@
 use crate::{
-    canister_poller::{CanisterPoller, IcWsCanisterUpdate},
+    canister_poller::{CanisterPoller, IcWsCanisterMessage},
     client_session::{ClientSession, IcWsError, IcWsSessionState},
     events_analyzer::Events,
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
@@ -63,8 +63,8 @@ impl ClientSessionHandler {
                 // channel used by the poller task to send canister updates from the poller to the client session handler task
                 // which will then forward it to the client via the WebSocket connection
                 let (client_channel_tx, client_channel_rx): (
-                    Sender<IcWsCanisterUpdate>,
-                    Receiver<IcWsCanisterUpdate>,
+                    Sender<IcWsCanisterMessage>,
+                    Receiver<IcWsCanisterMessage>,
                 ) = mpsc::channel(100);
 
                 let client_session_span =
@@ -108,7 +108,7 @@ impl ClientSessionHandler {
         mut client_session: ClientSession<S>,
         // passed in an option so that it can be taken once after session Setup without cloning it
         // it is important not to clone it as otherwise the client session will not receive None in case of a poller error
-        mut client_channel_tx: Option<Sender<IcWsCanisterUpdate>>,
+        mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
         // keeps trying to update the client session state

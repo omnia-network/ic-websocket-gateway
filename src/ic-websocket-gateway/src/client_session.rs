@@ -1,6 +1,6 @@
 use crate::{
     canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
-    canister_poller::IcWsCanisterUpdate,
+    canister_poller::IcWsCanisterMessage,
     manager::CanisterPrincipal,
 };
 use candid::{decode_args, Principal};
@@ -68,7 +68,7 @@ pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     /// Principal of the canister the client is connected to
     pub canister_id: Option<CanisterPrincipal>,
     /// Channel used to receive canister updates by the poller
-    client_channel_rx: Receiver<IcWsCanisterUpdate>,
+    client_channel_rx: Receiver<IcWsCanisterMessage>,
     /// Sending side of the WS connection with the client
     ws_write: SplitSink<WebSocketStream<S>, Message>,
     /// Receiving side of the WS connection with the client
@@ -83,7 +83,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
     pub async fn init(
         _client_id: u64,
         gateway_principal: Principal,
-        client_channel_rx: Receiver<IcWsCanisterUpdate>,
+        client_channel_rx: Receiver<IcWsCanisterMessage>,
         ws_write: SplitSink<WebSocketStream<S>, Message>,
         ws_read: SplitStream<WebSocketStream<S>>,
         agent: Arc<Agent>,
@@ -205,10 +205,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
     async fn handle_canister_update(
         &mut self,
-        canister_update: Option<IcWsCanisterUpdate>,
+        canister_update: Option<IcWsCanisterMessage>,
     ) -> Result<(), IcWsError> {
         match canister_update {
-            Some(IcWsCanisterUpdate::Message((canister_message, canister_message_span))) => {
+            Some((canister_message, canister_message_span)) => {
                 match self.session_state {
                     IcWsSessionState::Init => {
                         // no need to update the session state to Closed as getting to this state shall not be possible
@@ -243,7 +243,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                     },
                 }
             },
-            Some(IcWsCanisterUpdate::Error(e)) => Err(IcWsError::Poller(e)),
             None => {
                 warn!("Poller side of the channel has been dropped. Terminating the session.");
                 self.close_ws_session().await?;

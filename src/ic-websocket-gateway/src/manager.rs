@@ -9,7 +9,7 @@ use tracing::{info, warn, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
-    canister_poller::IcWsCanisterUpdate,
+    canister_poller::IcWsCanisterMessage,
     events_analyzer::Events,
     ws_listener::{TlsConfig, WsListener},
 };
@@ -26,7 +26,7 @@ impl GatewayState {
         &self,
         canister_id: CanisterPrincipal,
         client_key: ClientKey,
-        client_channel_tx: Sender<IcWsCanisterUpdate>,
+        client_channel_tx: Sender<IcWsCanisterMessage>,
         client_session_span: Span,
     ) -> Option<PollerState> {
         // TODO: figure out if this is actually atomic
@@ -127,7 +127,7 @@ pub type PollerState = Arc<DashMap<ClientKey, ClientSender>>;
 /// and the span associated to the client session
 #[derive(Debug)]
 pub struct ClientSender {
-    pub sender: Sender<IcWsCanisterUpdate>,
+    pub sender: Sender<IcWsCanisterMessage>,
     pub span: ClientSessionSpan,
 }
 

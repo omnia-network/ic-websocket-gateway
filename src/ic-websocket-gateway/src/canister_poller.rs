@@ -29,13 +29,8 @@ enum PollerStatus {
     Terminated,
 }
 
-/// updates the client connection handler on the IC WS connection state
-pub enum IcWsCanisterUpdate {
-    /// contains a new message to be realyed to the client
-    Message((CanisterToClientMessage, Span)),
-    /// lets the client connection hanlder know that an error occurred and the connection should be closed
-    Error(String),
-}
+/// Canister message to be relayed to the client, together with its span
+pub type IcWsCanisterMessage = (CanisterToClientMessage, Span);
 
 /// Poller which periodically queries a canister for new messages and relays them to the client
 pub struct CanisterPoller {
@@ -262,7 +257,7 @@ impl CanisterPoller {
                 canister_message_span.follows_from(Span::current().id());
                 let canister_update = canister_message_span.in_scope(|| {
                     trace!("Received message from canister",);
-                    IcWsCanisterUpdate::Message((canister_to_client_message, Span::current()))
+                    (canister_to_client_message, Span::current())
                 });
                 self.relay_message(canister_update, client_channel_tx)
                     .instrument(canister_message_span)
@@ -282,8 +277,8 @@ impl CanisterPoller {
 
     pub async fn relay_message(
         &self,
-        canister_update: IcWsCanisterUpdate,
-        client_channel_tx: &Sender<IcWsCanisterUpdate>,
+        canister_update: IcWsCanisterMessage,
+        client_channel_tx: &Sender<IcWsCanisterMessage>,
     ) {
         if let Err(e) = client_channel_tx.send(canister_update).await {
             // SAFETY:
