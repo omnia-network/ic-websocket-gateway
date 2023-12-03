@@ -125,6 +125,7 @@ impl CanisterPoller {
                 Ok(())
             },
             PollingStatus::MessagesPolled(certified_canister_output) => {
+                self.update_nonce(&certified_canister_output)?;
                 let end_of_queue_reached = {
                     match certified_canister_output.is_end_of_queue {
                         Some(is_end_of_queue_reached) => is_end_of_queue_reached,
@@ -134,7 +135,7 @@ impl CanisterPoller {
                         None => true,
                     }
                 };
-                self.relay_messages(certified_canister_output)
+                relay_messages(Arc::clone(&self.poller_state), certified_canister_output)
                     .instrument(relay_messages_span)
                     .await?;
                 let elapsed = get_elapsed(start_polling_instant);
@@ -163,7 +164,9 @@ impl CanisterPoller {
                 Ok(())
             },
             PollingStatus::MaxMessagesPolled(certified_canister_output) => {
-                self.relay_messages(certified_canister_output)
+                self.update_nonce(&certified_canister_output)?;
+
+                relay_messages(Arc::clone(&self.poller_state), certified_canister_output)
                     .instrument(relay_messages_span)
                     .await?;
                 let elapsed = get_elapsed(start_polling_instant);
@@ -179,6 +182,17 @@ impl CanisterPoller {
                 Ok(())
             },
         }
+    }
+
+    fn update_nonce(
+        &mut self,
+        certified_canister_output: &CanisterOutputCertifiedMessages,
+    ) -> Result<(), String> {
+        for canister_to_client_message in &certified_canister_output.messages {
+            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+            self.message_nonce = last_message_nonce + 1;
+        }
+        Ok(())
     }
 
     /// Polls the canister for messages
@@ -230,67 +244,6 @@ impl CanisterPoller {
         }
     }
 
-    pub async fn relay_messages(
-        &mut self,
-        msgs: CanisterOutputCertifiedMessages,
-    ) -> Result<(), String> {
-        for canister_output_message in msgs.messages {
-            let canister_to_client_message = CanisterToClientMessage {
-                key: canister_output_message.key,
-                content: canister_output_message.content,
-                cert: msgs.cert.clone(),
-                tree: msgs.tree.clone(),
-            };
-
-            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
-
-            // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
-            if let Some(ClientSender {
-                sender: client_channel_tx,
-                span: client_session_span,
-            }) = self
-                .poller_state
-                .get(&canister_output_message.client_key)
-                .as_deref()
-            {
-                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
-                canister_message_span.follows_from(Span::current().id());
-                let canister_update = canister_message_span.in_scope(|| {
-                    trace!("Received message from canister",);
-                    (canister_to_client_message, Span::current())
-                });
-                self.relay_message(canister_update, client_channel_tx)
-                    .instrument(canister_message_span)
-                    .await;
-            } else {
-                // SAFETY:
-                // messages received from a client key that is not in the poller state are ignored
-                // this is safe to do because we the client session handler relayes the messages to the IC
-                // only after updating the poller state
-                trace!("Polled message for a client that is not in the poller state anymore. Ignoring message");
-            }
-            self.message_nonce = last_message_nonce + 1;
-        }
-        trace!("Relayed messages to connection handlers");
-        Ok(())
-    }
-
-    pub async fn relay_message(
-        &self,
-        canister_update: IcWsCanisterMessage,
-        client_channel_tx: &Sender<IcWsCanisterMessage>,
-    ) {
-        if let Err(e) = client_channel_tx.send(canister_update).await {
-            // SAFETY:
-            // no need to panic here as the client session handler might have terminated
-            // after the poller got the client_chanel_tx
-            // the client session handler also updated the poller state so the poller can simply ignore this message
-            warn!("Client's session terminated: {}", e);
-        } else {
-            trace!("Message relayed to connection handler");
-        }
-    }
-
     fn check_poller_termination(&mut self) -> PollerStatus {
         // check if the poller should be terminated
         // the poller does not necessarily need to be terminated as soon as the last client disconnects
@@ -305,6 +258,62 @@ impl CanisterPoller {
             }
         }
         PollerStatus::Running
+    }
+}
+
+async fn relay_messages(
+    poller_state: PollerState,
+    msgs: CanisterOutputCertifiedMessages,
+) -> Result<(), String> {
+    for canister_output_message in msgs.messages {
+        let canister_to_client_message = CanisterToClientMessage {
+            key: canister_output_message.key,
+            content: canister_output_message.content,
+            cert: msgs.cert.clone(),
+            tree: msgs.tree.clone(),
+        };
+
+        // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
+        if let Some(ClientSender {
+            sender: client_channel_tx,
+            span: client_session_span,
+        }) = poller_state
+            .get(&canister_output_message.client_key)
+            .as_deref()
+        {
+            let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
+            canister_message_span.follows_from(Span::current().id());
+            let canister_update = canister_message_span.in_scope(|| {
+                trace!("Received message from canister",);
+                (canister_to_client_message, Span::current())
+            });
+            relay_message(canister_update, client_channel_tx)
+                .instrument(canister_message_span)
+                .await;
+        } else {
+            // SAFETY:
+            // messages received from a client key that is not in the poller state are ignored
+            // this is safe to do because we the client session handler relayes the messages to the IC
+            // only after updating the poller state
+            trace!("Polled message for a client that is not in the poller state anymore. Ignoring message");
+        }
+    }
+    trace!("Relayed messages to connection handlers");
+    Ok(())
+}
+
+async fn relay_message(
+    canister_update: IcWsCanisterMessage,
+    client_channel_tx: &Sender<IcWsCanisterMessage>,
+) {
+    if let Err(e) = client_channel_tx.send(canister_update).await {
+        // SAFETY:
+        // no need to panic here as the client session handler might have terminated
+        // after the poller got the client_chanel_tx
+        // the client session handler also updated the poller state so the poller can simply ignore this message
+        warn!("Client's session terminated: {}", e);
+    } else {
+        trace!("Message relayed to connection handler");
     }
 }
 
