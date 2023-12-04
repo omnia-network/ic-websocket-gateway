@@ -14,13 +14,9 @@ gateway_pid=$!
 echo "Waiting for gateway to start..."
 sleep 1
 
-echo "Obtaining gateway principal..."
-GATEWAY_PRINCIPAL=$(cargo run -q -p scripts --bin principal_from_key_pair "./data/key_pair")
-echo "Gateway principal: $GATEWAY_PRINCIPAL"
-
 echo "Deploying test canister..."
 cd tests
-dfx deploy test_canister_rs --no-wallet --argument "(opt \"$GATEWAY_PRINCIPAL\")"
+dfx deploy test_canister_rs --no-wallet
 # generate test_canister JS declarations
 npm run generate:test_canister_rs
 # source the canister id from the generated .env file

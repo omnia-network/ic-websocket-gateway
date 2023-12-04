@@ -109,7 +109,7 @@ docker compose --profile jaeger up -d
 making sure that you've set the `TELEMETRY_JAEGER_AGENT_ENDPOINT` variable in the `.env` file to:
 
 ```
-TELEMETRY_JAEGER_AGENT_ENDPOINT=jaeger:16686
+TELEMETRY_JAEGER_AGENT_ENDPOINT=jaeger:6831
 ```
 
 # Development
