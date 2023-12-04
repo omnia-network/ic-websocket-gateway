@@ -102,54 +102,42 @@ impl CanisterPoller {
     }
 
     async fn poll_and_relay(&mut self) -> Result<(), String> {
-        let relay_messages_span =
-            span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
+        let start_polling_instant = tokio::time::Instant::now();
 
-        match self.poll_canister().await? {
-            PollingStatus::NoMessagesPolled => {
-                // if no messages are returned, sleep for 'polling_interval_ms' before polling again
-                tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
-                Ok(())
-            },
-            PollingStatus::MessagesPolled(certified_canister_output) => {
-                let end_of_queue_reached = {
-                    match certified_canister_output.is_end_of_queue {
-                        Some(is_end_of_queue_reached) => is_end_of_queue_reached,
-                        // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
-                        // in this case, assume that the queue is fully drained and therefore will be polled again
-                        // after waiting for 'polling_interval_ms'
-                        None => true,
-                    }
-                };
-                self.update_nonce(&certified_canister_output)?;
-                // spawn a new task to relay the messages
-                let poller_state = Arc::clone(&self.poller_state);
-                tokio::spawn(async move {
-                    relay_messages(poller_state, certified_canister_output)
-                        .instrument(relay_messages_span)
-                        .await;
-                });
-                if !end_of_queue_reached {
-                    warn!("Canister queue is not fully drained. Polling immediately");
-                } else {
-                    tokio::time::sleep(Duration::from_millis(self.polling_interval_ms)).await;
+        if let PollingStatus::MessagesPolled(certified_canister_output) =
+            self.poll_canister().await?
+        {
+            let relay_messages_span =
+                span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
+            let end_of_queue_reached = {
+                match certified_canister_output.is_end_of_queue {
+                    Some(is_end_of_queue_reached) => is_end_of_queue_reached,
+                    // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
+                    // in this case, assume that the queue is fully drained and therefore will be polled again
+                    // after waiting for 'polling_interval_ms'
+                    None => true,
                 }
-                Ok(())
-            },
+            };
+            self.update_nonce(&certified_canister_output)?;
+            // spawn a new task to relay the messages
+            let poller_state = Arc::clone(&self.poller_state);
+            tokio::spawn(async move {
+                relay_messages(poller_state, certified_canister_output)
+                    .instrument(relay_messages_span)
+                    .await;
+            });
+            if !end_of_queue_reached {
+                // if the queue is not fully drained, return immediately so that the next polling iteration can be started
+                warn!("Canister queue is not fully drained. Polling immediately");
+                return Ok(());
+            }
         }
-    }
 
-    /// Updates the message nonce according to the last polled message
-    /// This is necessary to do before starting the next polling iteration
-    /// Returns an error if a nonce could not be parsed from a message
-    fn update_nonce(
-        &mut self,
-        certified_canister_output: &CanisterOutputCertifiedMessages,
-    ) -> Result<(), String> {
-        for canister_to_client_message in &certified_canister_output.messages {
-            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
-            self.message_nonce = last_message_nonce + 1;
-        }
+        // compute the amout of time to sleep for before polling again
+        let effective_polling_interval =
+            self.compute_effective_polling_interval(start_polling_instant);
+        // if no messages are returned or if the queue is fully draine, sleep for 'effective_polling_interval' before polling again
+        tokio::time::sleep(effective_polling_interval).await;
         Ok(())
     }
 
@@ -199,6 +187,51 @@ impl CanisterPoller {
         }
     }
 
+    /// Computes the effective polling interval based on the time it took to poll the canister
+    fn compute_effective_polling_interval(
+        &self,
+        start_polling_instant: tokio::time::Instant,
+    ) -> Duration {
+        let elapsed = tokio::time::Instant::now() - start_polling_instant;
+        let polling_interval = Duration::from_millis(self.polling_interval_ms);
+        // check if polling took longer than 'polling_interval'
+        // if yes, restart polling immediately
+        // check if the canister signaled that there are more messages in the queue
+        // if yes, restart polling immediately
+        // otherwise, sleep for the amount of time remaining to 'polling_interval'
+        if elapsed > polling_interval {
+            warn!(
+                "Polling messages took too long: {:?}. Polling immediately",
+                elapsed
+            );
+            Duration::from_millis(0)
+        } else {
+            // SAFETY:
+            // 'elapsed' is smaller than 'polling_interval'
+            // therefore, the duration passed to 'sleep' is valid
+
+            // 'elapsed' is >= 0
+            // therefore, the next polling iteration is delayed by at most 'polling_interval'
+            let effective_polling_interval = polling_interval - elapsed;
+            trace!("Polling again in: {:?}", effective_polling_interval);
+            effective_polling_interval
+        }
+    }
+
+    /// Updates the message nonce according to the last polled message
+    /// This is necessary to do before starting the next polling iteration
+    /// Returns an error if a nonce could not be parsed from a message
+    fn update_nonce(
+        &mut self,
+        certified_canister_output: &CanisterOutputCertifiedMessages,
+    ) -> Result<(), String> {
+        for canister_to_client_message in &certified_canister_output.messages {
+            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+            self.message_nonce = last_message_nonce + 1;
+        }
+        Ok(())
+    }
+
     fn check_poller_termination(&mut self) -> PollerStatus {
         // check if the poller should be terminated
         // the poller does not necessarily need to be terminated as soon as the last client disconnects
@@ -217,6 +250,8 @@ impl CanisterPoller {
 }
 
 async fn relay_messages(poller_state: PollerState, msgs: CanisterOutputCertifiedMessages) {
+    trace!("Started relaying messages");
+    let mut relayed_messages_count = 0;
     for canister_output_message in msgs.messages {
         let canister_to_client_message = CanisterToClientMessage {
             key: canister_output_message.key,
@@ -235,29 +270,31 @@ async fn relay_messages(poller_state: PollerState, msgs: CanisterOutputCertified
         {
             let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
             canister_message_span.follows_from(Span::current().id());
-            let canister_update = canister_message_span.in_scope(|| {
-                trace!("Received message from canister",);
+            let canister_message = canister_message_span.in_scope(|| {
+                trace!("Start relaying message",);
                 (canister_to_client_message, Span::current())
             });
-            relay_message(canister_update, client_channel_tx)
+            relay_message(canister_message, client_channel_tx)
                 .instrument(canister_message_span)
                 .await;
-        } else {
-            // SAFETY:
-            // messages received from a client key that is not in the poller state are ignored
-            // this is safe to do because we the client session handler relayes the messages to the IC
-            // only after updating the poller state
-            trace!("Polled message for a client that is not in the poller state anymore. Ignoring message");
+            relayed_messages_count += 1;
         }
+        // SAFETY:
+        // messages received from a client key that is not in the poller state are ignored
+        // this is safe to do because we the client session handler relayes the messages to the IC
+        // only after updating the poller state
     }
-    trace!("Relayed messages to connection handlers");
+    trace!(
+        "Relayed {} messages to connection handlers. The others were ignored",
+        relayed_messages_count
+    );
 }
 
 async fn relay_message(
-    canister_update: IcWsCanisterMessage,
+    canister_message: IcWsCanisterMessage,
     client_channel_tx: &Sender<IcWsCanisterMessage>,
 ) {
-    if let Err(e) = client_channel_tx.send(canister_update).await {
+    if let Err(e) = client_channel_tx.send(canister_message).await {
         // SAFETY:
         // no need to panic here as the client session handler might have terminated
         // after the poller got the client_chanel_tx
