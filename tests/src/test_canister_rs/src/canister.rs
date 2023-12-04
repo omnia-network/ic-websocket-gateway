@@ -7,9 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::CLIENTS_CONNECTED;
 
-pub const GATEWAY_PRINCIPAL: &str =
-    "sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae";
-
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct AppMessage {
     pub text: String,

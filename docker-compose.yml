@@ -13,8 +13,6 @@ services:
         "${IC_URL}",
         "--polling-interval",
         "${POLLING_INTERVAL}",
-        "--min-incoming-interval",
-        "${MIN_INCOMING_INTERVAL}",
         "--tls-certificate-pem-path",
         "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
         "--tls-certificate-key-pem-path",

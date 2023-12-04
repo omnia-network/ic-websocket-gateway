@@ -1,7 +1,7 @@
 use ic_cdk_macros::*;
 use std::{cell::RefCell, collections::HashSet};
 
-use canister::{on_close, on_message, on_open, AppMessage, GATEWAY_PRINCIPAL};
+use canister::{on_close, on_message, on_open, AppMessage};
 use ic_websocket_cdk::{
     CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
     CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
@@ -16,34 +16,21 @@ thread_local! {
 }
 
 #[init]
-fn init(gateway_principal: Option<String>) {
+fn init() {
     let handlers = WsHandlers {
         on_open: Some(on_open),
         on_message: Some(on_message),
         on_close: Some(on_close),
     };
 
-    let params = WsInitParams {
-        handlers,
-        gateway_principals: if let Some(gateway_principal) = gateway_principal {
-            vec![gateway_principal]
-        } else {
-            vec![GATEWAY_PRINCIPAL.to_string()]
-        },
-        send_ack_interval_ms: 10_000,
-        keep_alive_timeout_ms: 9_000,
-        // 30 seems to be a good value for polling interval 100 ms and incoming connection rate up to 10 per second
-        // as not so many polling iterations are idle and the effective polling interval (measured by PollerEventsMetrics) is mostly in [200, 300] ms
-        max_number_of_returned_messages: 30,
-        ..Default::default()
-    };
+    let params = WsInitParams::new(handlers);
 
     ic_websocket_cdk::init(params)
 }
 
 #[post_upgrade]
-fn post_upgrade(gateway_principal: Option<String>) {
-    init(gateway_principal);
+fn post_upgrade() {
+    init();
 }
 
 // method called by the WS Gateway after receiving open message from the client
