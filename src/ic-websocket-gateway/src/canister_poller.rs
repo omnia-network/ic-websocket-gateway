@@ -128,13 +128,13 @@ impl CanisterPoller {
                 }
             };
             self.update_nonce(&certified_canister_output)?;
-            // spawn a new task to relay the messages
-            let poller_state = Arc::clone(&self.poller_state);
-            tokio::spawn(async move {
-                relay_messages(poller_state, certified_canister_output)
-                    .instrument(relay_messages_span)
-                    .await;
-            });
+            // relaying of messages cannot be done in a separate task for each polling iteration
+            // as they might interleave and break the correct ordering of messages
+            // TODO: create a separate task dedicated to relaying messages which receives the messages from the poller via a queue
+            //       and relays them in FIFO order
+            self.relay_messages(certified_canister_output)
+                .instrument(relay_messages_span)
+                .await;
             if !end_of_queue_reached {
                 // if the queue is not fully drained, return immediately so that the next polling iteration can be started
                 warn!("Canister queue is not fully drained. Polling immediately");
@@ -145,7 +145,7 @@ impl CanisterPoller {
         // compute the amout of time to sleep for before polling again
         let effective_polling_interval =
             self.compute_effective_polling_interval(start_polling_instant);
-        // if no messages are returned or if the queue is fully draine, sleep for 'effective_polling_interval' before polling again
+        // if no messages are returned or if the queue is fully drained, sleep for 'effective_polling_interval' before polling again
         tokio::time::sleep(effective_polling_interval).await;
         Ok(())
     }
@@ -166,7 +166,6 @@ impl CanisterPoller {
         {
             Ok(certified_canister_output) => {
                 let number_of_polled_messages = certified_canister_output.messages.len();
-
                 if number_of_polled_messages == 0 {
                     trace!("No messages polled from canister");
                     Ok(PollingStatus::NoMessagesPolled)
@@ -194,6 +193,48 @@ impl CanisterPoller {
             Err(IcError::Candid(e)) => Err(format!("Unrecoverable candid error: {:?}", e)),
             Err(IcError::Cdk(e)) => Err(format!("Unrecoverable CDK error: {:?}", e)),
         }
+    }
+
+    async fn relay_messages(&self, msgs: CanisterOutputCertifiedMessages) {
+        trace!("Started relaying messages");
+        let mut relayed_messages_count = 0;
+        for canister_output_message in msgs.messages {
+            let canister_to_client_message = CanisterToClientMessage {
+                key: canister_output_message.key,
+                content: canister_output_message.content,
+                cert: msgs.cert.clone(),
+                tree: msgs.tree.clone(),
+            };
+
+            // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
+            if let Some(ClientSender {
+                sender: client_channel_tx,
+                span: client_session_span,
+            }) = self
+                .poller_state
+                .get(&canister_output_message.client_key)
+                .as_deref()
+            {
+                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
+                canister_message_span.follows_from(Span::current().id());
+                let canister_message = canister_message_span.in_scope(|| {
+                    trace!("Start relaying message",);
+                    (canister_to_client_message, Span::current())
+                });
+                relay_message(canister_message, client_channel_tx)
+                    .instrument(canister_message_span)
+                    .await;
+                relayed_messages_count += 1;
+            }
+            // SAFETY:
+            // messages received from a client key that is not in the poller state are ignored
+            // this is safe to do because we the client session handler relayes the messages to the IC
+            // only after updating the poller state
+        }
+        trace!(
+            "Relayed {} messages to connection handlers. The others were ignored",
+            relayed_messages_count
+        );
     }
 
     /// Computes the effective polling interval based on the time it took to poll the canister
@@ -256,47 +297,6 @@ impl CanisterPoller {
         }
         PollerStatus::Running
     }
-}
-
-async fn relay_messages(poller_state: PollerState, msgs: CanisterOutputCertifiedMessages) {
-    trace!("Started relaying messages");
-    let mut relayed_messages_count = 0;
-    for canister_output_message in msgs.messages {
-        let canister_to_client_message = CanisterToClientMessage {
-            key: canister_output_message.key,
-            content: canister_output_message.content,
-            cert: msgs.cert.clone(),
-            tree: msgs.tree.clone(),
-        };
-
-        // TODO: figure out if keeping references to a value in the poller state can cause deadlocks
-        if let Some(ClientSender {
-            sender: client_channel_tx,
-            span: client_session_span,
-        }) = poller_state
-            .get(&canister_output_message.client_key)
-            .as_deref()
-        {
-            let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
-            canister_message_span.follows_from(Span::current().id());
-            let canister_message = canister_message_span.in_scope(|| {
-                trace!("Start relaying message",);
-                (canister_to_client_message, Span::current())
-            });
-            relay_message(canister_message, client_channel_tx)
-                .instrument(canister_message_span)
-                .await;
-            relayed_messages_count += 1;
-        }
-        // SAFETY:
-        // messages received from a client key that is not in the poller state are ignored
-        // this is safe to do because we the client session handler relayes the messages to the IC
-        // only after updating the poller state
-    }
-    trace!(
-        "Relayed {} messages to connection handlers. The others were ignored",
-        relayed_messages_count
-    );
 }
 
 async fn relay_message(
