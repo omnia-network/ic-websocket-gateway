@@ -30,6 +30,7 @@ impl fmt::Display for ClientKey {
     }
 }
 
+#[derive(Debug)]
 pub enum IcError {
     Agent(AgentError),
     Candid(Error),
@@ -203,6 +204,5 @@ pub async fn mock_ws_get_messages(url: String) -> CanisterWsGetMessagesResultWit
         .await
         .expect("Failed to read HTTP response");
 
-    let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
-    res.map_err(|e| IcError::Cdk(e))
+    Decode!(&res, CanisterOutputCertifiedMessages).map_err(|e| IcError::Candid(e))
 }

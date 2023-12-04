@@ -1,5 +1,5 @@
 mod test {
-    use crate::canister_methods;
+    use crate::{canister_methods, canister_poller::get_nonce_from_message};
     use candid::{CandidType, Principal};
     use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ mod test {
         }
 
         fn mock_n(n: usize) -> Self {
-            let messages = (0..n).map(|_| CanisterOutputMessage::mock()).collect();
+            let messages = (0..n).map(|i| CanisterOutputMessage::mock(i)).collect();
             Self {
                 messages,
                 cert: Vec::default(),
@@ -45,10 +45,10 @@ mod test {
     }
 
     impl CanisterOutputMessage {
-        fn mock() -> Self {
+        fn mock(nonce: usize) -> Self {
             Self {
                 client_key: ClientKey::mock(),
-                key: String::default(),
+                key: format!("_{}", nonce),
                 content: Vec::default(),
             }
         }
@@ -72,11 +72,11 @@ mod test {
     type ClientPrincipal = Principal;
 
     #[tokio::test]
-    async fn test_canister_poller() {
+    async fn should_poll_and_relay() {
         let mut server = mockito::Server::new();
         let url = server.url();
 
-        let body = CanisterOutputCertifiedMessages::mock_n(1);
+        let body = CanisterOutputCertifiedMessages::mock_n(10);
         let body = candid::encode_one(&body).unwrap();
 
         let mock = server
@@ -84,7 +84,18 @@ mod test {
             .with_body(body)
             .create();
 
-        let _res = canister_methods::mock_ws_get_messages(url).await;
+        match canister_methods::mock_ws_get_messages(url).await {
+            Ok(res) => {
+                assert_eq!(res.messages.len(), 10);
+                for (i, msg) in res.messages.iter().enumerate() {
+                    assert_eq!(
+                        i,
+                        get_nonce_from_message(&msg.key).expect("Failed to get nonce") as usize
+                    )
+                }
+            },
+            Err(e) => panic!("Failed to poll: {:?}", e),
+        }
 
         mock.assert();
     }
