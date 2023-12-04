@@ -354,6 +354,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
     /// relays the client's request to the IC only if the content of the envelope is of the Call variant
     async fn relay_ws_message_to_ic(&self, message: Message) -> Result<(), IcWsError> {
+        trace!("Received client message");
         let client_request = get_client_request(message)?;
         if let EnvelopeContent::Call { .. } = *client_request.envelope.content {
             let serialized_envelope = serialize(client_request.envelope)?;
@@ -368,7 +369,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
-            trace!("Relayed serialized envelope to canister");
+            trace!("Relayed client message to canister");
             Ok(())
         } else {
             Err(IcWsError::IcWsProtocol(String::from(
