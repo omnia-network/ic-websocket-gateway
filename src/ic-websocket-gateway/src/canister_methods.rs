@@ -1,10 +1,10 @@
-use candid::{CandidType, Decode, Principal};
+use candid::{CandidType, Decode, Error, Principal};
 use ic_agent::AgentError;
-use ic_agent::{
-    agent::http_transport::ReqwestHttpReplicaV2Transport, identity::BasicIdentity, Agent,
-};
+use ic_agent::{agent::http_transport::ReqwestTransport, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+static IC_MAINNET_URLS: [&str; 2] = ["https://icp0.io", "https://icp-api.io"];
 
 pub type ClientPrincipal = Principal;
 
@@ -30,12 +30,20 @@ impl fmt::Display for ClientKey {
     }
 }
 
+pub enum IcError {
+    Agent(AgentError),
+    Candid(Error),
+    Cdk(String),
+}
+
 /// The result of [ws_close].
-pub type CanisterWsCloseResult = Result<(), String>;
+pub type _CanisterWsCloseResult = Result<(), String>;
 /// The result of [ws_get_messages].
+pub type CanisterWsGetMessagesResultWithIcError = Result<CanisterOutputCertifiedMessages, IcError>;
+/// The result of the canister method 'ws_get_messages'.
 pub type CanisterWsGetMessagesResult = Result<CanisterOutputCertifiedMessages, String>;
 
-/// The arguments for [ws_open].
+/// The arguments for the canister method 'ws_open'.
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug)]
 pub struct CanisterWsOpenArguments {
     pub client_nonce: u64,
@@ -116,32 +124,46 @@ pub enum CanisterServiceMessage {
 pub struct CanisterOutputCertifiedMessages {
     pub messages: Vec<CanisterOutputMessage>, // List of messages.
     #[serde(with = "serde_bytes")]
-    pub cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
+    /// cert+tree constitute the certificate for all returned messages
+    pub cert: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub tree: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
+    /// cert+tree constitute the certificate for all returned messages
+    pub tree: Vec<u8>,
+    /// Flag set by the canister CDK to indicate if the messages polled are the last in the queue
+    /// If true, the GW polls after waiting for 'polling_interval'
+    /// If false, the GW polls immediately
+    /// Wrapped in an Option because the canister CDK versions < 0.3.1 did not have this field
+    /// When interacting with the canister CDK versions < 0.3.1, 'is_end_of_queue' is 'None'
+    /// and the GW will apply the same logic as if it were 'Some(true)'
+    pub is_end_of_queue: Option<bool>,
+}
+
+pub fn is_mainnet(ic_network_url: &str) -> bool {
+    IC_MAINNET_URLS.contains(&ic_network_url)
 }
 
 pub async fn get_new_agent(
-    url: &str,
+    ic_network_url: &str,
     identity: BasicIdentity,
-    fetch_key: bool,
 ) -> Result<Agent, AgentError> {
-    let transport = ReqwestHttpReplicaV2Transport::create(url.to_string())?;
+    let is_mainnet = is_mainnet(ic_network_url);
+    let transport = ReqwestTransport::create(ic_network_url.to_string())?;
     let agent = Agent::builder()
         .with_transport(transport)
         .with_identity(identity)
+        .with_verify_query_signatures(is_mainnet)
         .build()?;
-    if fetch_key {
+    if !is_mainnet {
         agent.fetch_root_key().await?;
     }
     Ok(agent)
 }
 
-pub async fn ws_close(
+pub async fn _ws_close(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsCloseArguments,
-) -> CanisterWsCloseResult {
+) -> _CanisterWsCloseResult {
     let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
@@ -151,22 +173,23 @@ pub async fn ws_close(
         .await
         .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsCloseResult).map_err(|e| e.to_string())?
+    Decode!(&res, _CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsGetMessagesArguments,
-) -> CanisterWsGetMessagesResult {
-    let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
+) -> CanisterWsGetMessagesResultWithIcError {
+    let args = candid::encode_args((args,)).map_err(|e| IcError::Candid(e))?;
 
     let res = agent
         .query(canister_id, "ws_get_messages")
         .with_arg(args)
         .call()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| IcError::Agent(e))?;
 
-    Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| e.to_string())?
+    let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
+    res.map_err(|e| IcError::Cdk(e))
 }
