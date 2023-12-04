@@ -1,15 +1,20 @@
-import IcWebSocketCdk "mo:ic-websocket-cdk";
 import TrieSet "mo:base/TrieSet";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Debug "mo:base/Debug";
 import Nat64 "mo:base/Nat64";
 
+import IcWebSocketCdk "mo:ic-websocket-cdk";
+import IcWebSocketCdkState "mo:ic-websocket-cdk/State";
+import IcWebSocketCdkTypes "mo:ic-websocket-cdk/Types";
+
 actor class TestCanister() {
 
   Debug.print("TestCanister actor started");
 
-  let ws_state = IcWebSocketCdk.IcWebSocketState(["sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae"]);
+  let params = IcWebSocketCdkTypes.WsInitParams(null, null, null);
+
+  let ws_state = IcWebSocketCdkState.IcWebSocketState(params);
 
   type ClientPrincipal = IcWebSocketCdk.ClientPrincipal;
 
@@ -64,20 +69,13 @@ actor class TestCanister() {
     };
   };
 
-  let handlers = IcWebSocketCdk.WsHandlers(
+  let handlers = IcWebSocketCdkTypes.WsHandlers(
     ?on_open,
     ?on_message,
     ?on_close,
   );
 
-  let params = IcWebSocketCdk.WsInitParams(
-    handlers,
-    ?30,
-    ?Nat64.fromNat(10_000),
-    ?Nat64.fromNat(9_000),
-  );
-
-  let ws = IcWebSocketCdk.IcWebSocket(ws_state, params);
+  let ws = IcWebSocketCdk.IcWebSocket(ws_state, params, handlers);
 
   // method called by the WS Gateway after receiving FirstMessage from the client
   public shared ({ caller }) func ws_open(args : IcWebSocketCdk.CanisterWsOpenArguments) : async IcWebSocketCdk.CanisterWsOpenResult {

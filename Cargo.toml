@@ -18,7 +18,7 @@ license = "MIT"
 
 [workspace.dependencies]
 candid = "0.9.3"
-ic-agent = { git = "https://github.com/dfinity/agent-rs", rev = "7ca38f584da9756878aa635bcb74d18dfffae19c" }
+ic-agent = "0.30.2"
 ic-cdk = "0.10.0"
 ic-cdk-macros = "0.7.1"
 serde = "1.0.176"

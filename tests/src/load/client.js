@@ -20,7 +20,6 @@ async function connectClient(userContext, events, next) {
       canisterActor: test_canister_rs,
       networkUrl: IC_URL,
       identity: generateRandomIdentity(),
-      ackMessageTimeout: 19_000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
     const customWs = new IcWebsocket(WS_GATEWAY_URL, undefined, wsConfig);
 
