@@ -31,7 +31,7 @@ pub struct CanisterPoller {
     gateway_shared_state: GatewaySharedState,
     /// Nonce specified by the gateway during the query call to ws_get_messages,
     /// used by the CDK to determine which messages to respond with
-    message_nonce: u64,
+    pub message_nonce: u64,
     /// The number of polling iterations since the poller started
     /// reference of the PollerEvents
     polling_iteration: u64,
@@ -105,7 +105,7 @@ impl CanisterPoller {
         }
     }
 
-    async fn poll_and_relay(&mut self) -> Result<(), String> {
+    pub async fn poll_and_relay(&mut self) -> Result<(), String> {
         let start_polling_instant = tokio::time::Instant::now();
 
         if let PollingStatus::MessagesPolled(certified_canister_output) =

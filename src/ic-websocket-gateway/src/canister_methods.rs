@@ -177,6 +177,7 @@ pub async fn _ws_close(
     Decode!(&res, _CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
+#[cfg(not(test))]
 pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
@@ -196,8 +197,13 @@ pub async fn ws_get_messages(
 }
 
 #[cfg(test)]
-pub async fn mock_ws_get_messages(url: String) -> CanisterWsGetMessagesResultWithIcError {
-    let res = reqwest::get(&format!("{}/ws_get_messages", url))
+pub async fn ws_get_messages(
+    _agent: &Agent,
+    _canister_id: &Principal,
+    args: CanisterWsGetMessagesArguments,
+) -> CanisterWsGetMessagesResultWithIcError {
+    let url = format!("http://127.0.0.1:{}/ws_get_messages", args.nonce);
+    let res = reqwest::get(&url)
         .await
         .expect("Failed to make HTTP request")
         .bytes()
