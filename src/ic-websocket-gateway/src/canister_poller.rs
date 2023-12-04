@@ -9,16 +9,11 @@ use candid::Principal;
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
-use tracing::{error, info, span, trace, warn, Instrument, Level, Span};
+use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
 enum PollingStatus {
     NoMessagesPolled,
     MessagesPolled(CanisterOutputCertifiedMessages),
-}
-
-enum PollerStatus {
-    Running,
-    Terminated,
 }
 
 /// Canister message to be relayed to the client, together with its span
@@ -97,7 +92,7 @@ impl CanisterPoller {
                 break;
             }
 
-            if let PollerStatus::Terminated = self.check_poller_termination() {
+            if self.poller_should_terminate() {
                 // the poller has been terminated
                 break;
             }
@@ -282,20 +277,16 @@ impl CanisterPoller {
         Ok(())
     }
 
-    fn check_poller_termination(&mut self) -> PollerStatus {
+    fn poller_should_terminate(&mut self) -> bool {
         // check if the poller should be terminated
         // the poller does not necessarily need to be terminated as soon as the last client disconnects
         // therefore, we do not need to check if the poller state is empty in every single polling iteration
         if self.polling_iteration % 100 == 0 {
-            if self
+            return self
                 .gateway_shared_state
-                .remove_canister_if_empty(self.canister_id)
-            {
-                info!("Terminating poller");
-                return PollerStatus::Terminated;
-            }
+                .remove_canister_if_empty(self.canister_id);
         }
-        PollerStatus::Running
+        false
     }
 }
 
