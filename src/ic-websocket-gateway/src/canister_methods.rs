@@ -37,7 +37,7 @@ pub enum IcError {
 }
 
 /// The result of [ws_close].
-pub type CanisterWsCloseResult = Result<(), String>;
+pub type _CanisterWsCloseResult = Result<(), String>;
 /// The result of [ws_get_messages].
 pub type CanisterWsGetMessagesResultWithIcError = Result<CanisterOutputCertifiedMessages, IcError>;
 /// The result of the canister method 'ws_get_messages'.
@@ -159,11 +159,11 @@ pub async fn get_new_agent(
     Ok(agent)
 }
 
-pub async fn ws_close(
+pub async fn _ws_close(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsCloseArguments,
-) -> CanisterWsCloseResult {
+) -> _CanisterWsCloseResult {
     let args = candid::encode_args((args,)).map_err(|e| e.to_string())?;
 
     let res = agent
@@ -173,7 +173,7 @@ pub async fn ws_close(
         .await
         .map_err(|e| e.to_string())?;
 
-    Decode!(&res, CanisterWsCloseResult).map_err(|e| e.to_string())?
+    Decode!(&res, _CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
 pub async fn ws_get_messages(

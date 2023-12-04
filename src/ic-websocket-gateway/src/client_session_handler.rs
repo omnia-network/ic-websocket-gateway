@@ -1,7 +1,6 @@
 use crate::{
     canister_poller::{CanisterPoller, IcWsCanisterMessage},
     client_session::{ClientSession, IcWsError, IcWsSessionState},
-    events_analyzer::Events,
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
     ws_listener::ClientId,
 };
@@ -13,7 +12,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_tungstenite::accept_async;
-use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
+use tracing::{debug, info, span, Instrument, Level, Span};
 
 /// Handler of a client IC WS session
 pub struct ClientSessionHandler {
@@ -23,8 +22,6 @@ pub struct ClientSessionHandler {
     agent: Arc<Agent>,
     /// State of the gateway
     gateway_shared_state: GatewaySharedState,
-    /// Sender side of the channel used to send events from different components to the events analyzer
-    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     /// Polling interval in milliseconds
     polling_interval_ms: u64,
 }
@@ -34,14 +31,12 @@ impl ClientSessionHandler {
         id: ClientId,
         agent: Arc<Agent>,
         gateway_shared_state: GatewaySharedState,
-        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_shared_state,
-            analyzer_channel_tx,
             polling_interval_ms,
         }
     }
@@ -235,7 +230,6 @@ impl ClientSessionHandler {
         // spawn new canister poller task
         let agent = Arc::clone(&self.agent);
         let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
-        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         let polling_interval_ms = self.polling_interval_ms;
         tokio::spawn(async move {
             // we pass both the whole gateway state and the poller state for the specific canister
@@ -250,7 +244,6 @@ impl ClientSessionHandler {
                 poller_state,
                 gateway_shared_state,
                 polling_interval_ms,
-                analyzer_channel_tx,
             );
             poller.run_polling().await;
             info!("Poller terminated");

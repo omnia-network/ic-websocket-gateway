@@ -24,7 +24,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message},
     WebSocketStream,
 };
-use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
+use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
 /// Message sent by the WS Gateway upon open the (traditional) WebSocket connection
 #[derive(Serialize, Deserialize)]

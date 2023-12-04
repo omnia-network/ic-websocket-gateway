@@ -1,12 +1,6 @@
-use crate::{
-    client_session_handler::ClientSessionHandler,
-    events_analyzer::{Events, EventsCollectionType, EventsReference},
-    manager::GatewaySharedState,
-    metrics::ws_listener_metrics::{ListenerEvents, ListenerEventsMetrics},
-};
+use crate::{client_session_handler::ClientSessionHandler, manager::GatewaySharedState};
 use ic_agent::Agent;
 use native_tls::Identity;
-use rand::Rng;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -34,23 +28,12 @@ type TlsAcceptorTimeout = Duration;
 /// Identifier of the client connection
 pub type ClientId = u64;
 
-/// Status of the rate limiting
-#[derive(Clone)]
-pub enum LimitingRateStatus {
-    /// Rate limiting is enabled and the only a percentage of incoming connections are accepted
-    Enabled(f64),
-    /// Rate limiting is disabled
-    Disabled,
-}
-
 /// Contains the information of an accepted connection needed to start a client session handler
 pub struct AcceptedConnection {
     /// Identifier of the client connection
     pub client_id: ClientId,
     /// TCP stream
     pub stream: CustomStream,
-    /// Events related to the connection
-    pub listener_events: ListenerEvents,
     /// Tracing span of the connection
     pub span: AcceptedConnectionSpan,
 }
@@ -67,16 +50,10 @@ pub struct WsListener {
     agent: Arc<Agent>,
     /// State of the gateway
     gateway_shared_state: GatewaySharedState,
-    /// Sender side of the channel used to send events from different components to the events analyzer
-    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
-    // Receiver side of the channel used to send the current limiting rate to be applied to incoming connections
-    rate_limiting_channel_rx: Receiver<Option<f64>>,
     // Polling interval in milliseconds
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
     next_client_id: ClientId,
-    // Status of the rate limiting
-    limiting_rate_status: LimitingRateStatus,
 }
 
 impl WsListener {
@@ -84,8 +61,6 @@ impl WsListener {
         gateway_address: &str,
         agent: Arc<Agent>,
         gateway_shared_state: GatewaySharedState,
-        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
-        rate_limiting_channel_rx: Receiver<Option<f64>>,
         polling_interval_ms: u64,
         tls_config: Option<TlsConfig>,
     ) -> Self {
@@ -117,17 +92,14 @@ impl WsListener {
             tls_acceptor,
             agent,
             gateway_shared_state,
-            analyzer_channel_tx,
-            rate_limiting_channel_rx,
             polling_interval_ms,
             next_client_id: 0,
-            limiting_rate_status: LimitingRateStatus::Disabled,
         }
     }
 
     /// Accepts incoming connections
     pub async fn listen_for_incoming_requests(&mut self) {
-        // [ws listener task]        [tls acceptor task]
+        // [ws listener task]                [tls acceptor task]
         // tls_acceptor_channel_rx    <----- tls_acceptor_channel_tx
 
         // channel used by the tls acceptor task to let the ws listener task know when the handshake is complete
@@ -138,64 +110,26 @@ impl WsListener {
 
         loop {
             select! {
-                Some(rate) = self.rate_limiting_channel_rx.recv() => {
-                    match rate {
-                        Some(rate) => {
-                            warn!("Rate limiting {}% of incoming connections", rate*100.0);
-                            self.limiting_rate_status = LimitingRateStatus::Enabled(rate);
-                        },
-                        None => {
-                            warn!("No rate limiting applied");
-                            self.limiting_rate_status = LimitingRateStatus::Disabled;
-                        }
-                    }
-                }
                 Ok((stream, client_addr)) = self.listener.accept() => {
-                    if !self.must_rate_limit() {
-                        self.accept_connection(
-                            client_addr,
-                            stream,
-                            tls_acceptor_channel_tx.clone(),
-                        );
-                        self.next_client_id += 1;
-                    } else {
-                        warn!("Ignoring incoming connection due to rate limiting policy");
-                    }
+                    self.accept_connection(
+                        client_addr,
+                        stream,
+                        tls_acceptor_channel_tx.clone(),
+                    );
+                    self.next_client_id += 1;
                 },
                 Some(AcceptedConnection {
                     client_id,
                     stream,
-                    mut listener_events,
                     span: accept_client_connection_span
                 }) = tls_acceptor_channel_rx.recv() => {
                     accept_client_connection_span.in_scope(|| {
                         // the client connection has been accepted and therefore the connection handler has to be started
                         self.start_session_handler(client_id, stream);
                     });
-                    listener_events.metrics.set_started_handler();
-                    self.analyzer_channel_tx.send(Box::new(listener_events)).await.expect("analyzer's side of the channel dropped");
                 }
             }
         }
-    }
-
-    fn must_rate_limit(&self) -> bool {
-        if let LimitingRateStatus::Enabled(limiting_rate) = self.limiting_rate_status {
-            if limiting_rate < 0.0 || limiting_rate > 1.0 {
-                error!(
-                    "Received invalid limiting rate: {:?}. Ignoring incoming connection...",
-                    limiting_rate
-                );
-                return true;
-            }
-            // receives 'limiting_rate' within [0, 1]
-            // returns 'true' with probability 'limiting_rate'
-            let mut rng = rand::thread_rng();
-            let random_value: f64 = rng.gen(); // generate a random f64 between 0 and 1
-
-            return random_value < limiting_rate;
-        }
-        false
     }
 
     /// Performs the TLS handshake in a separate task
@@ -217,13 +151,6 @@ impl WsListener {
         let tls_acceptor = self.tls_acceptor.clone();
         tokio::spawn(
             async move {
-                let mut listener_events = ListenerEvents::new(
-                    Some(EventsReference::ClientId(client_id)),
-                    EventsCollectionType::NewClientConnection,
-                    ListenerEventsMetrics::default(),
-                );
-                listener_events.metrics.set_received_request();
-
                 let custom_stream = match tls_acceptor {
                     Some(ref acceptor) => {
                         match timeout(TlsAcceptorTimeout::from_secs(10), acceptor.accept(stream))
@@ -231,7 +158,6 @@ impl WsListener {
                         {
                             Ok(Ok(tls_stream)) => {
                                 debug!("Accepted TLS connection");
-                                listener_events.metrics.set_accepted_with_tls();
                                 Ok(CustomStream::TcpWithTls(tls_stream))
                             },
                             Ok(Err(e)) => Err(format!("TLS handshake failed: {:?}", e)),
@@ -239,7 +165,6 @@ impl WsListener {
                         }
                     },
                     None => {
-                        listener_events.metrics.set_accepted_without_tls();
                         debug!("Accepted connection without TLS");
                         Ok(CustomStream::Tcp(stream))
                     },
@@ -250,7 +175,6 @@ impl WsListener {
                             .send(AcceptedConnection {
                                 client_id,
                                 stream: custom_stream,
-                                listener_events,
                                 span: Span::current(),
                             })
                             .await
@@ -273,7 +197,6 @@ impl WsListener {
 
         let agent = Arc::clone(&self.agent);
         let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
-        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
         tokio::spawn(
@@ -282,7 +205,6 @@ impl WsListener {
                     client_id,
                     agent,
                     gateway_shared_state,
-                    analyzer_channel_tx,
                     polling_interval_ms,
                 );
                 debug!("Started client session handler task");

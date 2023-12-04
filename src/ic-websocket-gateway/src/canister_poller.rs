@@ -3,14 +3,13 @@ use crate::{
         self, CanisterOutputCertifiedMessages, CanisterToClientMessage,
         CanisterWsGetMessagesArguments, IcError,
     },
-    events_analyzer::Events,
     manager::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState},
 };
 use candid::Principal;
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, error, info, span, trace, warn, Instrument, Level, Span};
+use tracing::{error, info, span, trace, warn, Instrument, Level, Span};
 
 enum PollingStatus {
     NoMessagesPolled,
@@ -43,8 +42,6 @@ pub struct CanisterPoller {
     polling_iteration: u64,
     /// Polling interval in milliseconds
     polling_interval_ms: u64,
-    /// Sender side of the channel used to send events to the analyzer
-    _analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
 }
 
 impl CanisterPoller {
@@ -54,7 +51,6 @@ impl CanisterPoller {
         poller_state: PollerState,
         gateway_shared_state: GatewaySharedState,
         polling_interval_ms: u64,
-        _analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         Self {
             agent,
@@ -69,7 +65,6 @@ impl CanisterPoller {
             message_nonce: 0,
             polling_iteration: 0,
             polling_interval_ms,
-            _analyzer_channel_tx,
         }
     }
 

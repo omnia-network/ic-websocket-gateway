@@ -1,16 +1,12 @@
 use dashmap::{mapref::entry::Entry, DashMap};
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use std::sync::Arc;
-use tokio::{
-    sync::mpsc::{Receiver, Sender},
-    task::JoinHandle,
-};
-use tracing::{info, warn, Span};
+use tokio::{sync::mpsc::Sender, task::JoinHandle};
+use tracing::{info, Span};
 
 use crate::{
     canister_methods::{self, ClientKey},
     canister_poller::IcWsCanisterMessage,
-    events_analyzer::Events,
     ws_listener::{TlsConfig, WsListener},
 };
 
@@ -141,8 +137,6 @@ pub struct Manager {
     agent: Arc<Agent>,
     /// Gateway  address
     address: String,
-    /// Sender side of the channel used to send events from different components to the events analyzer
-    analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     /// State of the WS Gateway
     state: GatewaySharedState,
 }
@@ -152,7 +146,6 @@ impl Manager {
         gateway_address: String,
         ic_network_url: String,
         identity: BasicIdentity,
-        analyzer_channel_tx: Sender<Box<dyn Events + Send>>,
     ) -> Self {
         let agent = canister_methods::get_new_agent(&ic_network_url, identity)
             .await
@@ -171,7 +164,6 @@ impl Manager {
         return Self {
             agent,
             address: gateway_address,
-            analyzer_channel_tx,
             state,
         };
     }
@@ -180,21 +172,17 @@ impl Manager {
     pub fn start_accepting_incoming_connections(
         &self,
         tls_config: Option<TlsConfig>,
-        rate_limiting_channel_rx: Receiver<Option<f64>>,
         polling_interval: u64,
     ) -> JoinHandle<()> {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
         let gateway_shared_state = Arc::clone(&self.state);
-        let analyzer_channel_tx = self.analyzer_channel_tx.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
                 gateway_shared_state,
-                analyzer_channel_tx,
-                rate_limiting_channel_rx,
                 polling_interval,
                 tls_config,
             )
