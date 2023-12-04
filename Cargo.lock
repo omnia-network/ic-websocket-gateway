@@ -1236,7 +1236,7 @@ checksum = "576c539151d4769fb4d1a0c25c4108dd18facd04c5695b02cf2d226ab4e43aa5"
 
 [[package]]
 name = "ic_websocket_gateway"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "candid",
