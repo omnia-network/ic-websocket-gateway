@@ -14,6 +14,10 @@ mod gateway_tracing;
 mod manager;
 mod ws_listener;
 
+mod tests {
+    mod canister_poller;
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {

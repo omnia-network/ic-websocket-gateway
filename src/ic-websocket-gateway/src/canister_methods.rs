@@ -193,3 +193,22 @@ pub async fn ws_get_messages(
     let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
     res.map_err(|e| IcError::Cdk(e))
 }
+
+#[cfg(test)]
+pub async fn mock_ws_get_messages(
+    url: String,
+    // args: CanisterWsGetMessagesArguments,
+) -> Result<(), IcError> {
+    // let _args = candid::encode_args((args,)).map_err(|e| IcError::Candid(e))?;
+
+    let res = reqwest::get(&format!("{}/ws_get_messages", url))
+        .await
+        .expect("Failed to make HTTP request")
+        .text()
+        .await;
+
+    println!("res: {:?}", res);
+    Ok(())
+    // let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
+    // res.map_err(|e| IcError::Cdk(e))
+}
