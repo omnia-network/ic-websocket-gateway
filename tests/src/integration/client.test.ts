@@ -54,7 +54,6 @@ describe("WS client", () => {
       canisterActor: test_canister_rs,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
-      ackMessageTimeout: 450000, // the ack interval is set to 10 seconds on the CDK and the keep alive timeout is set to 9 second
     });
 
     ws = new IcWebSocket(gatewayAddress, undefined, wsConfig);

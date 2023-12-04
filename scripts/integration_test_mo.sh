@@ -5,17 +5,13 @@ echo "Building gateway"
 cargo build
 
 echo "Starting gateway in the background"
-RUST_LOG=ic_websocket_gateway=debug cargo run > scripts/gateway_test.log &
+RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run > scripts/gateway_test.log &
 pid=$!
-
-echo "Obtaining gateway principal..."
-GATEWAY_PRINCIPAL=$(cargo run -q -p scripts --bin principal_from_key_pair "./data/key_pair")
-echo "Gateway principal: $GATEWAY_PRINCIPAL"
 
 echo "Deploying Motoko test canister"
 cd tests
 npm run generate:test_canister_mo
-dfx deploy test_canister_mo --no-wallet --argument "(opt \"$GATEWAY_PRINCIPAL\")"
+dfx deploy test_canister_mo --no-wallet
 
 echo "Running integration test"
 npm run integration:test
