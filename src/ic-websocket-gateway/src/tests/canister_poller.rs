@@ -63,9 +63,18 @@ mod test {
     }
 
     #[cfg(test)]
-    fn start_mock_server(body: Vec<u8>, path: &str, port: u64) -> (mockito::Server, mockito::Mock) {
+    async fn start_mock_server(
+        body: Vec<u8>,
+        path: &str,
+        port: u64,
+    ) -> (mockito::Server, mockito::Mock) {
         let mut server = mockito::Server::new_with_port(port as u16);
-        let mock = server.mock("GET", path).with_body(body).create();
+        let mock = server
+            .mock("GET", path)
+            .with_body(body)
+            .create_async()
+            .await;
+
         (server, mock)
     }
 
@@ -105,7 +114,7 @@ mod test {
         let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port);
+        let (_server, mock) = start_mock_server(body, path, port).await;
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
@@ -136,7 +145,7 @@ mod test {
         let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port);
+        let (_server, mock) = start_mock_server(body, path, port).await;
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
@@ -171,7 +180,7 @@ mod test {
         let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port);
+        let (_server, mock) = start_mock_server(body, path, port).await;
 
         let polling_interval_ms = 100;
         let (client_channel_tx, mut client_channel_rx): (
