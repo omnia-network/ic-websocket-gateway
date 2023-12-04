@@ -1,18 +1,11 @@
 mod test {
-    use crate::{canister_methods, canister_poller::get_nonce_from_message};
-    use candid::{CandidType, Principal};
-    use serde::{Deserialize, Serialize};
-
-    /// List of messages returned to the WS Gateway after polling.
-    #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-    struct CanisterOutputCertifiedMessages {
-        messages: Vec<CanisterOutputMessage>, // List of messages.
-        #[serde(with = "serde_bytes")]
-        cert: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
-        #[serde(with = "serde_bytes")]
-        tree: Vec<u8>, // cert+tree constitute the certificate for all returned messages.
-        is_end_of_queue: bool, // Whether the end of the messages queue has been reached.
-    }
+    use crate::{
+        canister_methods::{
+            self, CanisterOutputCertifiedMessages, CanisterOutputMessage, ClientKey,
+        },
+        canister_poller::get_nonce_from_message,
+    };
+    use candid::Principal;
 
     impl CanisterOutputCertifiedMessages {
         fn empty() -> Self {
@@ -20,7 +13,7 @@ mod test {
                 messages: Vec::default(),
                 cert: Vec::default(),
                 tree: Vec::default(),
-                is_end_of_queue: false,
+                is_end_of_queue: Some(false),
             }
         }
 
@@ -30,18 +23,9 @@ mod test {
                 messages,
                 cert: Vec::default(),
                 tree: Vec::default(),
-                is_end_of_queue: false,
+                is_end_of_queue: Some(false),
             }
         }
-    }
-
-    /// Element of the list of messages returned to the WS Gateway after polling.
-    #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
-    struct CanisterOutputMessage {
-        pub(crate) client_key: ClientKey, // The client that the gateway will forward the message to or that sent the message.
-        pub(crate) key: String,           // Key for certificate verification.
-        #[serde(with = "serde_bytes")]
-        pub(crate) content: Vec<u8>, // The message to be relayed, that contains the application message.
     }
 
     impl CanisterOutputMessage {
@@ -54,12 +38,6 @@ mod test {
         }
     }
 
-    #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]
-    struct ClientKey {
-        pub(crate) client_principal: ClientPrincipal,
-        pub(crate) client_nonce: u64,
-    }
-
     impl ClientKey {
         fn mock() -> Self {
             Self {
@@ -69,10 +47,8 @@ mod test {
         }
     }
 
-    type ClientPrincipal = Principal;
-
     #[tokio::test]
-    async fn should_poll_and_relay() {
+    async fn should_poll_and_validate_nonces() {
         let mut server = mockito::Server::new();
         let url = server.url();
 
