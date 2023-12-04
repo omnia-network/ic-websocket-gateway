@@ -36,8 +36,6 @@ There are some command line arguments that you can set when running the gateway:
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
 | `--ic-network-url` | The URL of the IC network to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
-| `--min-incoming-interval` | The minimum interval (in **milliseconds**) between incoming messages. If below this threshold, the gateway starts rate limiting. | `100` |
-| `--compute-averages-threshold` | The threshold after which the metrics analyzer computes the averages of the intervals/latencies. | `10` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--telemetry-jaeger-agent-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
