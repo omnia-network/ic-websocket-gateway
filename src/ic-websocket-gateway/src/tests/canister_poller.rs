@@ -9,6 +9,7 @@ mod test {
         manager::{GatewaySharedState, GatewayState},
     };
     use candid::Principal;
+    use futures_util::join;
     use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
     use lazy_static::lazy_static;
     use std::{
@@ -25,7 +26,7 @@ mod test {
                 messages,
                 cert: Vec::default(),
                 tree: Vec::default(),
-                is_end_of_queue: Some(false),
+                is_end_of_queue: Some(true),
             }
         }
 
@@ -194,10 +195,11 @@ mod test {
 
         let mut poller = create_poller(polling_interval_ms, client_channel_tx);
         let start_polling_instant = tokio::time::Instant::now();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             poller.poll_and_relay().await.expect("Failed to poll");
             let end_polling_instant = tokio::time::Instant::now();
             let elapsed = end_polling_instant - start_polling_instant;
+            // run 'cargo test -- --nocapture' to see the elapsed time
             println!("Elapsed: {:?}", elapsed);
             assert!(
                 elapsed > Duration::from_millis(polling_interval_ms)
@@ -212,6 +214,9 @@ mod test {
             i += 1;
         }
         assert_eq!(i as usize, msg_count);
+
+        // needed to make sure that the test fails in case the task panics
+        join!(handle).0.expect("task panicked");
 
         mock.assert();
     }
