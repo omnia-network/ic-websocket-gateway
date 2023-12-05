@@ -20,6 +20,10 @@ mod test {
     use tracing::Span;
 
     impl CanisterOutputCertifiedMessages {
+        fn serialize(&self) -> Vec<u8> {
+            candid::encode_one(self).unwrap()
+        }
+
         fn mock_n(n: usize) -> Self {
             let messages = (0..n).map(|i| CanisterOutputMessage::mock(i)).collect();
             Self {
@@ -116,8 +120,7 @@ mod test {
     async fn should_poll_and_validate_nonces() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
-        let body = candid::encode_one(&body).unwrap();
+        let body = CanisterOutputCertifiedMessages::mock_n(msg_count).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -150,8 +153,7 @@ mod test {
     async fn should_poll_and_fail_to_validate_last_nonce() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count);
-        let body = candid::encode_one(&body).unwrap();
+        let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -186,8 +188,7 @@ mod test {
     async fn should_sleep_after_relaying() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
-        let body = candid::encode_one(&body).unwrap();
+        let body = CanisterOutputCertifiedMessages::mock_n(msg_count).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -231,8 +232,8 @@ mod test {
     async fn should_not_sleep_after_relaying() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count);
-        let body = candid::encode_one(&body).unwrap();
+        let body =
+            CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response

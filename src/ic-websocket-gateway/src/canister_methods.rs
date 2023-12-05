@@ -202,6 +202,7 @@ pub async fn ws_get_messages(
     _canister_id: &Principal,
     _args: CanisterWsGetMessagesArguments,
 ) -> CanisterWsGetMessagesResultWithIcError {
+    // port must be set according to the one specified in MOCK_SERVER of tests/canister_poller.rs
     let res = reqwest::get("http://127.0.0.1:51558/ws_get_messages")
         .await
         .expect("Failed to make HTTP request")
