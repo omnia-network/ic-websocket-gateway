@@ -147,6 +147,8 @@ mod test {
         }
 
         mock.assert();
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
     }
 
     #[tokio::test]
@@ -182,6 +184,8 @@ mod test {
         }
 
         mock.assert();
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
     }
 
     #[tokio::test]
@@ -226,6 +230,8 @@ mod test {
         join!(handle).0.expect("task panicked");
 
         mock.assert();
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
     }
 
     #[tokio::test]
@@ -269,5 +275,7 @@ mod test {
         join!(handle).0.expect("task panicked");
 
         mock.assert();
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
     }
 }
