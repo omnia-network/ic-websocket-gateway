@@ -12,7 +12,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_tungstenite::accept_async;
-use tracing::{debug, info, span, Instrument, Level, Span};
+use tracing::{debug, info, span, warn, Instrument, Level, Span};
 
 /// Handler of a client IC WS session
 pub struct ClientSessionHandler {
@@ -245,8 +245,11 @@ impl ClientSessionHandler {
                 gateway_shared_state,
                 polling_interval_ms,
             );
-            poller.run_polling().await;
-            info!("Poller terminated");
+            if let Err(e) = poller.run_polling().await {
+                warn!("Poller terminated with error: {:?}", e);
+            } else {
+                info!("Poller terminated");
+            }
             // the poller takes care of notifying the session handlers when an error is detected
             // and removing its corresponding entry from the gateway state
             // therefore, this task can simply terminate without doing anything

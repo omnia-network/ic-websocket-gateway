@@ -59,7 +59,7 @@ impl CanisterPoller {
     }
 
     /// Periodically polls the canister for updates to be relayed to clients
-    pub async fn run_polling(&mut self) {
+    pub async fn run_polling(&mut self) -> Result<(), String> {
         // keeps track of the previous polling iteration span in order to create a follow from relationship
         // initially set to None as the first iteration will not have a previous span
         let mut previous_polling_iteration_span: Option<Span> = None;
@@ -84,12 +84,12 @@ impl CanisterPoller {
                 self.gateway_shared_state
                     .remove_failed_canister(self.canister_id);
                 // TODO: notify the canister that it cannot be polled anymore
-                break;
+                return Err(e);
             }
 
             if self.poller_should_terminate() {
                 // the poller has been terminated
-                break;
+                return Ok(());
             }
 
             // counting all polling iterations (instead of only the ones that return at least one canister message)
