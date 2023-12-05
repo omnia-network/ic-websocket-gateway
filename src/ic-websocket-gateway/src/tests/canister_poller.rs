@@ -1,7 +1,5 @@
 #[cfg(test)]
 mod test {
-    use std::{sync::Arc, time::Duration};
-
     use crate::{
         canister_methods::{
             self, CanisterOutputCertifiedMessages, CanisterOutputMessage,
@@ -12,6 +10,11 @@ mod test {
     };
     use candid::Principal;
     use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
+    use lazy_static::lazy_static;
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
     use tokio::sync::mpsc::{self, Receiver, Sender};
     use tracing::Span;
 
@@ -62,20 +65,15 @@ mod test {
         }
     }
 
-    #[cfg(test)]
-    async fn start_mock_server(
-        body: Vec<u8>,
-        path: &str,
-        port: u64,
-    ) -> (mockito::Server, mockito::Mock) {
-        let mut server = mockito::Server::new_with_port(port as u16);
-        let mock = server
-            .mock("GET", path)
-            .with_body(body)
-            .create_async()
-            .await;
-
-        (server, mock)
+    lazy_static! {
+        // mockito::Server is behind a SYNC mutex so that only one test at the same time can access it
+        // otherwise, as async tests are run on multiple threads, the mock response of one test might overwrite
+        // the mock response of another, causing the test to fail
+        // acquiring the mutex and the beginning of each test and dropping the guard only at the end,
+        // ensures that only one test at the time can set the mock response
+        // this enables running the tests without specifying each time "-- --test-threads=1"
+        static ref MOCK_SERVER: Arc<Mutex<mockito::Server>> =
+            Arc::new(Mutex::new(mockito::Server::new_with_port(51558)));
     }
 
     fn create_poller(
@@ -109,20 +107,23 @@ mod test {
 
     #[tokio::test]
     async fn should_poll_and_validate_nonces() {
-        let port = 51558;
+        let server = &*MOCK_SERVER;
         let msg_count = 10;
         let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port).await;
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
             .build()
             .unwrap();
-        let args = CanisterWsGetMessagesArguments { nonce: port };
+        let args = CanisterWsGetMessagesArguments { nonce: 0 };
 
-        match canister_methods::ws_get_messages(&agent, &Principal::anonymous(), args).await {
+        match canister_methods::ws_get_messages(&agent, &Principal::anonymous(), args.clone()).await
+        {
             Ok(res) => {
                 assert_eq!(res.messages.len(), msg_count);
                 for (i, msg) in res.messages.iter().enumerate() {
@@ -140,30 +141,31 @@ mod test {
 
     #[tokio::test]
     async fn should_poll_and_fail_to_validate_last_nonce() {
-        let port = 51559;
+        let server = &*MOCK_SERVER;
         let msg_count = 10;
         let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port).await;
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
             .build()
             .unwrap();
-        let args = CanisterWsGetMessagesArguments { nonce: port };
+        let args = CanisterWsGetMessagesArguments { nonce: 0 };
 
         match canister_methods::ws_get_messages(&agent, &Principal::anonymous(), args).await {
             Ok(res) => {
-                assert_eq!(res.messages.len(), msg_count);
                 for (i, msg) in res.messages.iter().enumerate() {
-                    if i != msg_count - 1 {
+                    if i == msg_count - 1 {
+                        assert!(get_nonce_from_message(&msg.key).is_err());
+                    } else {
                         assert_eq!(
                             i,
                             get_nonce_from_message(&msg.key).expect("Failed to get nonce") as usize
                         )
-                    } else {
-                        assert!(get_nonce_from_message(&msg.key).is_err());
                     }
                 }
             },
@@ -175,12 +177,14 @@ mod test {
 
     #[tokio::test]
     async fn should_sleep_after_relaying() {
-        let port = 51560;
+        let server = &*MOCK_SERVER;
         let msg_count = 10;
         let body = CanisterOutputCertifiedMessages::mock_n(msg_count);
         let body = candid::encode_one(&body).unwrap();
         let path = "/ws_get_messages";
-        let (_server, mock) = start_mock_server(body, path, port).await;
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
 
         let polling_interval_ms = 100;
         let (client_channel_tx, mut client_channel_rx): (
@@ -189,7 +193,6 @@ mod test {
         ) = mpsc::channel(100);
 
         let mut poller = create_poller(polling_interval_ms, client_channel_tx);
-        poller.message_nonce = port;
         let start_polling_instant = tokio::time::Instant::now();
         tokio::spawn(async move {
             poller.poll_and_relay().await.expect("Failed to poll");
@@ -208,6 +211,7 @@ mod test {
             assert_eq!(i, get_nonce_from_message(&msg.key).unwrap());
             i += 1;
         }
+        assert_eq!(i as usize, msg_count);
 
         mock.assert();
     }

@@ -31,7 +31,7 @@ pub struct CanisterPoller {
     gateway_shared_state: GatewaySharedState,
     /// Nonce specified by the gateway during the query call to ws_get_messages,
     /// used by the CDK to determine which messages to respond with
-    pub message_nonce: u64,
+    message_nonce: u64,
     /// The number of polling iterations since the poller started
     /// reference of the PollerEvents
     polling_iteration: u64,

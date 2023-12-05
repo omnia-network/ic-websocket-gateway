@@ -1267,6 +1267,7 @@ dependencies = [
  "ic-cdk",
  "ic-cdk-macros",
  "ic-identity",
+ "lazy_static",
  "mockito",
  "native-tls",
  "opentelemetry",

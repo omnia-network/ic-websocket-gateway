@@ -200,10 +200,9 @@ pub async fn ws_get_messages(
 pub async fn ws_get_messages(
     _agent: &Agent,
     _canister_id: &Principal,
-    args: CanisterWsGetMessagesArguments,
+    _args: CanisterWsGetMessagesArguments,
 ) -> CanisterWsGetMessagesResultWithIcError {
-    let url = format!("http://127.0.0.1:{}/ws_get_messages", args.nonce);
-    let res = reqwest::get(&url)
+    let res = reqwest::get("http://127.0.0.1:51558/ws_get_messages")
         .await
         .expect("Failed to make HTTP request")
         .bytes()
