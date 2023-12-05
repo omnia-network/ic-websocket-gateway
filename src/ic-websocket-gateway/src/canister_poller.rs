@@ -241,8 +241,6 @@ impl CanisterPoller {
         let polling_interval = Duration::from_millis(self.polling_interval_ms);
         // check if polling took longer than 'polling_interval'
         // if yes, restart polling immediately
-        // check if the canister signaled that there are more messages in the queue
-        // if yes, restart polling immediately
         // otherwise, sleep for the amount of time remaining to 'polling_interval'
         if elapsed > polling_interval {
             warn!(
