@@ -37,6 +37,12 @@ mod test {
                 .push(CanisterOutputMessage::mock_with_key_error());
             canister_msgs
         }
+
+        fn mock_n_with_not_end_of_queue(n: usize) -> Self {
+            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n);
+            canister_msgs.is_end_of_queue = Some(false);
+            canister_msgs
+        }
     }
 
     impl CanisterOutputMessage {
@@ -205,6 +211,49 @@ mod test {
                 elapsed > Duration::from_millis(polling_interval_ms)
                     && elapsed
                         < Duration::from_millis((1.1 * polling_interval_ms as f64).round() as u64)
+            );
+        });
+
+        let mut i = 0;
+        while let Some((msg, _)) = client_channel_rx.recv().await {
+            assert_eq!(i, get_nonce_from_message(&msg.key).unwrap());
+            i += 1;
+        }
+        assert_eq!(i as usize, msg_count);
+
+        // needed to make sure that the test fails in case the task panics
+        join!(handle).0.expect("task panicked");
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn should_not_sleep_after_relaying() {
+        let server = &*MOCK_SERVER;
+        let msg_count = 10;
+        let body = CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count);
+        let body = candid::encode_one(&body).unwrap();
+        let path = "/ws_get_messages";
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
+
+        let polling_interval_ms = 100;
+        let (client_channel_tx, mut client_channel_rx): (
+            Sender<IcWsCanisterMessage>,
+            Receiver<IcWsCanisterMessage>,
+        ) = mpsc::channel(100);
+
+        let mut poller = create_poller(polling_interval_ms, client_channel_tx);
+        let start_polling_instant = tokio::time::Instant::now();
+        let handle = tokio::spawn(async move {
+            poller.poll_and_relay().await.expect("Failed to poll");
+            let end_polling_instant = tokio::time::Instant::now();
+            let elapsed = end_polling_instant - start_polling_instant;
+            println!("Elapsed: {:?}", elapsed);
+            assert!(
+                // assuming relaying a message takes at most 0.5 ms
+                elapsed < Duration::from_millis((msg_count / 2) as u64)
             );
         });
 
