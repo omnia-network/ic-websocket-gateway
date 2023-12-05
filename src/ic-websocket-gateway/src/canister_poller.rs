@@ -31,7 +31,7 @@ pub struct CanisterPoller {
     gateway_shared_state: GatewaySharedState,
     /// Nonce specified by the gateway during the query call to ws_get_messages,
     /// used by the CDK to determine which messages to respond with
-    message_nonce: u64,
+    next_message_nonce: u64,
     /// The number of polling iterations since the poller started
     /// reference of the PollerEvents
     polling_iteration: u64,
@@ -52,19 +52,14 @@ impl CanisterPoller {
             canister_id,
             poller_state,
             gateway_shared_state,
-            // once the poller starts running, it requests messages from nonce 0.
-            // if the canister already has some messages in the queue and receives the nonce 0, it knows that the poller restarted
-            // therefore, it sends the last X messages to the gateway. From these, the gateway has to determine the response corresponding to the client's ws_open request
-            // TODO: change the CDK so that in this case it returns all the messages in the queue
-            //       the poller relays only the ones that are in the poller state at the time of receiving them
-            message_nonce: 0,
+            next_message_nonce: 0,
             polling_iteration: 0,
             polling_interval_ms,
         }
     }
 
     /// Periodically polls the canister for updates to be relayed to clients
-    pub async fn run_polling(&mut self) {
+    pub async fn run_polling(&mut self) -> Result<(), String> {
         // keeps track of the previous polling iteration span in order to create a follow from relationship
         // initially set to None as the first iteration will not have a previous span
         let mut previous_polling_iteration_span: Option<Span> = None;
@@ -89,12 +84,12 @@ impl CanisterPoller {
                 self.gateway_shared_state
                     .remove_failed_canister(self.canister_id);
                 // TODO: notify the canister that it cannot be polled anymore
-                break;
+                return Err(e);
             }
 
             if self.poller_should_terminate() {
                 // the poller has been terminated
-                break;
+                return Ok(());
             }
 
             // counting all polling iterations (instead of only the ones that return at least one canister message)
@@ -105,7 +100,7 @@ impl CanisterPoller {
         }
     }
 
-    async fn poll_and_relay(&mut self) -> Result<(), String> {
+    pub async fn poll_and_relay(&mut self) -> Result<(), String> {
         let start_polling_instant = tokio::time::Instant::now();
 
         if let PollingStatus::MessagesPolled(certified_canister_output) =
@@ -154,7 +149,7 @@ impl CanisterPoller {
             &self.agent,
             &self.canister_id,
             CanisterWsGetMessagesArguments {
-                nonce: self.message_nonce,
+                nonce: self.next_message_nonce,
             },
         )
         .await
@@ -241,8 +236,6 @@ impl CanisterPoller {
         let polling_interval = Duration::from_millis(self.polling_interval_ms);
         // check if polling took longer than 'polling_interval'
         // if yes, restart polling immediately
-        // check if the canister signaled that there are more messages in the queue
-        // if yes, restart polling immediately
         // otherwise, sleep for the amount of time remaining to 'polling_interval'
         if elapsed > polling_interval {
             warn!(
@@ -266,13 +259,24 @@ impl CanisterPoller {
     /// Updates the message nonce according to the last polled message
     /// This is necessary to do before starting the next polling iteration
     /// Returns an error if a nonce could not be parsed from a message
+    /// or if the polled nonces are not consecutive
     fn update_nonce(
         &mut self,
         certified_canister_output: &CanisterOutputCertifiedMessages,
     ) -> Result<(), String> {
         for canister_to_client_message in &certified_canister_output.messages {
-            let last_message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
-            self.message_nonce = last_message_nonce + 1;
+            let message_nonce = get_nonce_from_message(&canister_to_client_message.key)?;
+            // the first time the poller is started 'self.next_message_nonce' is 0
+            // however, the canister might have already deleted messages that were relayed by previous pollers
+            // therefore, if 'self.next_message_nonce' is 0 we can ignore the possible mismatch with the nonce of the first message received from the canister
+            // all the other messages, instead shall arrive in the expected order (monotonically increasing and each adjacent to the next)
+            if self.next_message_nonce != 0 && message_nonce != self.next_message_nonce {
+                return Err(format!(
+                    "Non consecutive nonce: expected {}, got {}",
+                    self.next_message_nonce, message_nonce
+                ));
+            }
+            self.next_message_nonce = message_nonce + 1;
         }
         Ok(())
     }

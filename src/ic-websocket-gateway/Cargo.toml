@@ -41,3 +41,6 @@ dashmap = "5.5.3"
 
 [dev-dependencies]
 websocket = "0.26.5"
+mockito = "1.2.0"
+lazy_static = "1.4.0"
+
