@@ -1,3 +1,4 @@
+use candid::Principal;
 use opentelemetry_sdk::trace;
 use std::{
     fs::{self, File},
@@ -15,6 +16,7 @@ pub struct InitTracingResult {
 
 pub fn init_tracing(
     telemetry_jaeger_agent_endpoint: Option<String>,
+    gateway_principal: Principal,
 ) -> Result<InitTracingResult, String> {
     if !Path::new("./data/traces").is_dir() {
         fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
@@ -61,7 +63,9 @@ pub fn init_tracing(
                 );
 
                 let tracer = opentelemetry_jaeger::new_agent_pipeline()
-                    .with_service_name("ic-ws-gw")
+                    .with_service_name(
+                        "ic-ws-gw-".to_string() + &gateway_principal.to_string()[..5],
+                    )
                     .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
                     .with_endpoint(telemetry_jaeger_agent_endpoint)
                     .with_auto_split_batch(true)
