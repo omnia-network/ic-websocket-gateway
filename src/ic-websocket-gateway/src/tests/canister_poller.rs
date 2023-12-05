@@ -300,4 +300,58 @@ mod test {
         // just to make it explicit that the guard should be kept for the whole duration of the test
         drop(guard);
     }
+
+    #[tokio::test]
+    async fn should_terminate_polling_with_error() {
+        let server = &*MOCK_SERVER;
+        let msg_count = 15;
+        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
+        let path = "/ws_get_messages";
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard
+            .mock("GET", path)
+            .with_body(body)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let polling_interval_ms = 100;
+        let (client_channel_tx, mut client_channel_rx): (
+            Sender<IcWsCanisterMessage>,
+            Receiver<IcWsCanisterMessage>,
+        ) = mpsc::channel(100);
+
+        let mut poller = create_poller(polling_interval_ms, client_channel_tx);
+        let handle = tokio::spawn(async move { poller.run_polling().await });
+
+        let mut i = 0;
+        while let Some((msg, _)) = client_channel_rx.recv().await {
+            println!(
+                "Got message: {:?}",
+                get_nonce_from_message(&msg.key).unwrap()
+            );
+            assert_eq!(i, get_nonce_from_message(&msg.key).unwrap());
+            i += 1;
+        }
+        // when starting the second polling iteration, the poller terminates with an error
+        // therefore, 'client_channel_rx' receives 'None' and 'i' should be equal to 'msg_count'
+        // as the poller processed only the messages of the first polling iteration
+        assert_eq!(i as usize, msg_count);
+
+        // the poller should return an error as in the first iteration it polls the messages from 0 to 'msg_count - 1'
+        // in the second iteration it polls the messages which start again from 0 (as the mock server retruns the same messages)
+        // and therefore it returns an error as the poller was expecting the nonce to be equal to 'msg_count'
+        assert_eq!(
+            Err(format!(
+                "Non consecutive nonce: expected {}, got 0",
+                msg_count
+            )),
+            join!(handle).0.unwrap()
+        );
+
+        mock.assert_async().await;
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
+    }
 }
