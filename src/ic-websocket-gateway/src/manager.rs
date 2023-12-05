@@ -18,6 +18,12 @@ pub type GatewaySharedState = Arc<GatewayState>;
 pub struct GatewayState(DashMap<CanisterPrincipal, PollerState>);
 
 impl GatewayState {
+    pub fn new() -> Self {
+        Self(DashMap::with_capacity_and_shard_amount(32, 32))
+    }
+}
+
+impl GatewayState {
     pub fn insert_client_channel_and_get_new_poller_state(
         &self,
         canister_id: CanisterPrincipal,
@@ -151,21 +157,19 @@ impl Manager {
             .await
             .expect("could not get new agent");
         let agent = Arc::new(agent);
-        info!(
-            "Gateway Agent principal: {}",
-            agent.get_principal().expect("Principal should be set")
-        );
 
         // creates a concurrent hashmap with capacity of 32 divided in shards so that each entry can be accessed concurrently without locking the whole state
-        let state: GatewaySharedState = Arc::new(GatewayState(
-            DashMap::with_capacity_and_shard_amount(32, 32),
-        ));
+        let state: GatewaySharedState = Arc::new(GatewayState::new());
 
         return Self {
             agent,
             address: gateway_address,
             state,
         };
+    }
+
+    pub fn get_agent_principal(&self) -> Principal {
+        self.agent.get_principal().expect("Principal should be set")
     }
 
     /// Keeps accepting incoming connections

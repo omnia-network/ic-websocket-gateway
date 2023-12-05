@@ -14,6 +14,10 @@ mod gateway_tracing;
 mod manager;
 mod ws_listener;
 
+mod tests {
+    mod canister_poller;
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
@@ -55,27 +59,31 @@ fn create_data_dir() -> Result<(), String> {
 #[tokio::main]
 async fn main() -> Result<(), String> {
     create_data_dir()?;
-
-    let deployment_info = DeploymentInfo::from_args();
-
-    let InitTracingResult {
-        guards: _guards,
-        is_telemetry_enabled,
-    } = init_tracing(deployment_info.telemetry_jaeger_agent_endpoint.to_owned())
-        .expect("could not init tracing");
-
-    // must be printed after initializing tracing
-    info!("Deployment info: {:?}", deployment_info);
-
     let key_pair = load_key_pair("./data/key_pair")?;
     let identity = get_identity_from_key_pair(key_pair);
 
+    let deployment_info = DeploymentInfo::from_args();
+
     let manager = Manager::new(
-        deployment_info.gateway_address,
-        deployment_info.ic_network_url,
+        deployment_info.gateway_address.clone(),
+        deployment_info.ic_network_url.clone(),
         identity,
     )
     .await;
+
+    let gateway_principal = manager.get_agent_principal();
+    let InitTracingResult {
+        guards: _guards,
+        is_telemetry_enabled,
+    } = init_tracing(
+        deployment_info.telemetry_jaeger_agent_endpoint.to_owned(),
+        gateway_principal,
+    )
+    .expect("could not init tracing");
+
+    // must be printed after initializing tracing to ensure that the info are captured
+    info!("Deployment info: {:?}", deployment_info);
+    info!("Gateway Agent principal: {}", gateway_principal);
 
     let tls_config = if deployment_info.tls_certificate_pem_path.is_some()
         && deployment_info.tls_certificate_key_pem_path.is_some()

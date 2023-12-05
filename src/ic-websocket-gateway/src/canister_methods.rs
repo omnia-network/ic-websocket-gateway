@@ -10,8 +10,8 @@ pub type ClientPrincipal = Principal;
 
 #[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq, Debug, Hash)]
 pub struct ClientKey {
-    client_principal: ClientPrincipal,
-    client_nonce: u64,
+    pub client_principal: ClientPrincipal,
+    pub client_nonce: u64,
 }
 
 impl ClientKey {
@@ -30,6 +30,7 @@ impl fmt::Display for ClientKey {
     }
 }
 
+#[derive(Debug)]
 pub enum IcError {
     Agent(AgentError),
     Candid(Error),
@@ -159,7 +160,7 @@ pub async fn get_new_agent(
     Ok(agent)
 }
 
-pub async fn _ws_close(
+pub async fn ws_close(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsCloseArguments,
@@ -176,6 +177,7 @@ pub async fn _ws_close(
     Decode!(&res, _CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
+#[cfg(not(test))]
 pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
@@ -192,4 +194,21 @@ pub async fn ws_get_messages(
 
     let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
     res.map_err(|e| IcError::Cdk(e))
+}
+
+#[cfg(test)]
+pub async fn ws_get_messages(
+    _agent: &Agent,
+    _canister_id: &Principal,
+    _args: CanisterWsGetMessagesArguments,
+) -> CanisterWsGetMessagesResultWithIcError {
+    // port must be set according to the one specified in MOCK_SERVER of tests/canister_poller.rs
+    let res = reqwest::get("http://127.0.0.1:51558/ws_get_messages")
+        .await
+        .expect("Failed to make HTTP request")
+        .bytes()
+        .await
+        .expect("Failed to read HTTP response");
+
+    Decode!(&res, CanisterOutputCertifiedMessages).map_err(|e| IcError::Candid(e))
 }

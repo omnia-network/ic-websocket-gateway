@@ -1,4 +1,5 @@
 use crate::{
+    canister_methods::{self, CanisterWsCloseArguments},
     canister_poller::{CanisterPoller, IcWsCanisterMessage},
     client_session::{ClientSession, IcWsError, IcWsSessionState},
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
@@ -12,7 +13,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_tungstenite::accept_async;
-use tracing::{debug, info, span, Instrument, Level, Span};
+use tracing::{debug, info, span, warn, Instrument, Level, Span};
 
 /// Handler of a client IC WS session
 pub struct ClientSessionHandler {
@@ -179,16 +180,32 @@ impl ClientSessionHandler {
                         debug!("Client session closed");
                     });
 
+                    let canister_id = client_session
+                        .canister_id
+                        .expect("must be set during Setup");
+                    let client_key = client_session
+                        .client_key
+                        .clone()
+                        .expect("must be set during Setup");
                     // remove client from poller state
-                    self.gateway_shared_state.remove_client(
-                        client_session
-                            .canister_id
-                            .expect("must be set during Setup"),
-                        client_session
-                            .client_key
-                            .clone()
-                            .expect("must be set during Setup"),
-                    );
+                    self.gateway_shared_state
+                        .remove_client(canister_id, client_key.clone());
+
+                    // call ws_close so that the client is removed from the canister
+                    if let Err(e) = canister_methods::ws_close(
+                        &self.agent,
+                        &canister_id,
+                        CanisterWsCloseArguments { client_key },
+                    )
+                    .await
+                    {
+                        // this might happen when the canister has already remove the client from its state
+                        // due to an out of order client message, keep alive timeout or due to the dapp logic
+                        warn!("Calling ws_close on canister failed: {}", e);
+                    } else {
+                        debug!("Canister closed connection with client");
+                    }
+
                     // return Ok as the session was closed correctly
                     return Ok(());
                 },
@@ -245,8 +262,11 @@ impl ClientSessionHandler {
                 gateway_shared_state,
                 polling_interval_ms,
             );
-            poller.run_polling().await;
-            info!("Poller terminated");
+            if let Err(e) = poller.run_polling().await {
+                warn!("Poller terminated with error: {:?}", e);
+            } else {
+                info!("Poller terminated");
+            }
             // the poller takes care of notifying the session handlers when an error is detected
             // and removing its corresponding entry from the gateway state
             // therefore, this task can simply terminate without doing anything
