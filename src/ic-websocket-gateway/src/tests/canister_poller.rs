@@ -24,8 +24,10 @@ mod test {
             candid::encode_one(self).unwrap()
         }
 
-        fn mock_n(n: usize) -> Self {
-            let messages = (0..n).map(|i| CanisterOutputMessage::mock(i)).collect();
+        fn mock_n(n: usize, base_nonce: usize) -> Self {
+            let messages = (0..n)
+                .map(|off_nonce| CanisterOutputMessage::mock(base_nonce + off_nonce))
+                .collect();
             Self {
                 messages,
                 cert: Vec::default(),
@@ -34,16 +36,16 @@ mod test {
             }
         }
 
-        fn mock_n_with_key_error(n: usize) -> Self {
-            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n - 1);
+        fn mock_n_with_key_error(n: usize, base_nonce: usize) -> Self {
+            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n - 1, base_nonce);
             canister_msgs
                 .messages
                 .push(CanisterOutputMessage::mock_with_key_error());
             canister_msgs
         }
 
-        fn mock_n_with_not_end_of_queue(n: usize) -> Self {
-            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n);
+        fn mock_n_with_not_end_of_queue(n: usize, base_nonce: usize) -> Self {
+            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n, base_nonce);
             canister_msgs.is_end_of_queue = Some(false);
             canister_msgs
         }
@@ -120,11 +122,16 @@ mod test {
     async fn should_poll_and_validate_nonces() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count).serialize();
+        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
-        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
+        let mock = guard
+            .mock("GET", path)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
@@ -146,7 +153,7 @@ mod test {
             Err(e) => panic!("Failed to poll: {:?}", e),
         }
 
-        mock.assert();
+        mock.assert_async().await;
         // just to make it explicit that the guard should be kept for the whole duration of the test
         drop(guard);
     }
@@ -155,11 +162,16 @@ mod test {
     async fn should_poll_and_fail_to_validate_last_nonce() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count).serialize();
+        let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count, 0).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
-        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
+        let mock = guard
+            .mock("GET", path)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
 
         let agent = Agent::builder()
             .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
@@ -183,7 +195,7 @@ mod test {
             Err(e) => panic!("Failed to poll: {:?}", e),
         }
 
-        mock.assert();
+        mock.assert_async().await;
         // just to make it explicit that the guard should be kept for the whole duration of the test
         drop(guard);
     }
@@ -192,11 +204,16 @@ mod test {
     async fn should_sleep_after_relaying() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count).serialize();
+        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
-        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
+        let mock = guard
+            .mock("GET", path)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
 
         let polling_interval_ms = 100;
         let (client_channel_tx, mut client_channel_rx): (
@@ -229,7 +246,7 @@ mod test {
         // needed to make sure that the test fails in case the task panics
         join!(handle).0.expect("task panicked");
 
-        mock.assert();
+        mock.assert_async().await;
         // just to make it explicit that the guard should be kept for the whole duration of the test
         drop(guard);
     }
@@ -239,11 +256,16 @@ mod test {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
         let body =
-            CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count).serialize();
+            CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count, 0).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
-        let mock = guard.mock("GET", path).with_body(body).expect(1).create();
+        let mock = guard
+            .mock("GET", path)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
 
         let polling_interval_ms = 100;
         let (client_channel_tx, mut client_channel_rx): (
@@ -274,7 +296,7 @@ mod test {
         // needed to make sure that the test fails in case the task panics
         join!(handle).0.expect("task panicked");
 
-        mock.assert();
+        mock.assert_async().await;
         // just to make it explicit that the guard should be kept for the whole duration of the test
         drop(guard);
     }
