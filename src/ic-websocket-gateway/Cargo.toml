@@ -1,6 +1,6 @@
 [package]
 name = "ic_websocket_gateway"
-version = "1.2.0"
+version = "1.2.1"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -43,4 +43,3 @@ dashmap = "5.5.3"
 websocket = "0.26.5"
 mockito = "1.2.0"
 lazy_static = "1.4.0"
-
