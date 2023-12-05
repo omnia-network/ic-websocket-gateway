@@ -231,6 +231,11 @@ mod test {
             println!("Elapsed: {:?}", elapsed);
             assert!(
                 elapsed > Duration::from_millis(polling_interval_ms)
+                // Reasonable to expect that the time it takes to sleep
+                // in `poll_and_relay` is not more than 1.1 times the `polling_interval_ms`
+                // as it doesn't involve any http requests nor messages relaying.
+                // If the test is failing anyway, 1.1 might be too low
+                // and you should consider increasing it to 1.2 or so.
                     && elapsed
                         < Duration::from_millis((1.1 * polling_interval_ms as f64).round() as u64)
             );
@@ -281,8 +286,11 @@ mod test {
             let elapsed = end_polling_instant - start_polling_instant;
             println!("Elapsed: {:?}", elapsed);
             assert!(
-                // assuming relaying a message takes at most 0.5 ms
-                elapsed < Duration::from_millis((msg_count / 2) as u64)
+                // The `poll_and_relay` function should not sleep for `polling_interval_ms`
+                // if the queue is not empty.
+                // This is not so robust because, for example, another sleep that is less than `polling_interval_ms`
+                // might be introduced "by mistake" inside `poll_and_relay` and the test would still pass.
+                elapsed < Duration::from_millis(polling_interval_ms)
             );
         });
 
