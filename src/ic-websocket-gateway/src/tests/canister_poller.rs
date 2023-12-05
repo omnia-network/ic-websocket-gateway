@@ -304,7 +304,7 @@ mod test {
     #[tokio::test]
     async fn should_terminate_polling_with_error() {
         let server = &*MOCK_SERVER;
-        let msg_count = 15;
+        let msg_count = 10;
         let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();

@@ -160,7 +160,7 @@ pub async fn get_new_agent(
     Ok(agent)
 }
 
-pub async fn _ws_close(
+pub async fn ws_close(
     agent: &Agent,
     canister_id: &Principal,
     args: CanisterWsCloseArguments,

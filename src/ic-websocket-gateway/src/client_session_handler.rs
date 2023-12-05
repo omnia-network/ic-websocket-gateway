@@ -1,4 +1,5 @@
 use crate::{
+    canister_methods::{self, CanisterWsCloseArguments},
     canister_poller::{CanisterPoller, IcWsCanisterMessage},
     client_session::{ClientSession, IcWsError, IcWsSessionState},
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
@@ -179,16 +180,32 @@ impl ClientSessionHandler {
                         debug!("Client session closed");
                     });
 
+                    let canister_id = client_session
+                        .canister_id
+                        .expect("must be set during Setup");
+                    let client_key = client_session
+                        .client_key
+                        .clone()
+                        .expect("must be set during Setup");
                     // remove client from poller state
-                    self.gateway_shared_state.remove_client(
-                        client_session
-                            .canister_id
-                            .expect("must be set during Setup"),
-                        client_session
-                            .client_key
-                            .clone()
-                            .expect("must be set during Setup"),
-                    );
+                    self.gateway_shared_state
+                        .remove_client(canister_id, client_key.clone());
+
+                    // call ws_close so that the client is removed from the canister
+                    if let Err(e) = canister_methods::ws_close(
+                        &self.agent,
+                        &canister_id,
+                        CanisterWsCloseArguments { client_key },
+                    )
+                    .await
+                    {
+                        // this might happen when the canister has already remove the client from its state
+                        // due to an out of order client message, keep alive timeout or due to the dapp logic
+                        warn!("Calling ws_close on canister failed: {}", e);
+                    } else {
+                        debug!("Canister closed connection with client");
+                    }
+
                     // return Ok as the session was closed correctly
                     return Ok(());
                 },
