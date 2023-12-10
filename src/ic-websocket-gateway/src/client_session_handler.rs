@@ -1,5 +1,5 @@
 use crate::{
-    canister_methods::{self, CanisterWsCloseArguments},
+    canister_methods::{self, CanisterWsCloseArguments, ClientKey},
     canister_poller::{CanisterPoller, IcWsCanisterMessage},
     client_session::{ClientSession, IcWsError, IcWsSessionState},
     manager::{CanisterPrincipal, GatewaySharedState, PollerState},
@@ -130,16 +130,13 @@ impl ClientSessionHandler {
                     // the message cannot be relayed before doing so because if a poller is already running,
                     // it might poll a response for the connecting client before it gets the sending side of the channel
 
+                    let canister_id = self.get_canister_id(&client_session);
+                    let client_key = self.get_client_key(&client_session);
                     let new_poller_state = self
                         .gateway_shared_state
                         .insert_client_channel_and_get_new_poller_state(
-                            client_session
-                                .canister_id
-                                .expect("must be set during Setup"),
-                            client_session
-                                .client_key
-                                .clone()
-                                .expect("must be set during Setup"),
+                            canister_id,
+                            client_key,
                             // important not to clone 'client_channel_tx' as otherwise the client session will not receive None in case of a poller error
                             client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
@@ -180,31 +177,13 @@ impl ClientSessionHandler {
                         debug!("Client session closed");
                     });
 
-                    let canister_id = client_session
-                        .canister_id
-                        .expect("must be set during Setup");
-                    let client_key = client_session
-                        .client_key
-                        .clone()
-                        .expect("must be set during Setup");
+                    let canister_id = self.get_canister_id(&client_session);
+                    let client_key = self.get_client_key(&client_session);
                     // remove client from poller state
                     self.gateway_shared_state
                         .remove_client(canister_id, client_key.clone());
 
-                    // call ws_close so that the client is removed from the canister
-                    if let Err(e) = canister_methods::ws_close(
-                        &self.agent,
-                        &canister_id,
-                        CanisterWsCloseArguments { client_key },
-                    )
-                    .await
-                    {
-                        // this might happen when the canister has already remove the client from its state
-                        // due to an out of order client message, keep alive timeout or due to the dapp logic
-                        warn!("Calling ws_close on canister failed: {}", e);
-                    } else {
-                        debug!("Canister closed connection with client");
-                    }
+                    self.call_ws_close(&canister_id, client_key).await;
 
                     // return Ok as the session was closed correctly
                     return Ok(());
@@ -218,25 +197,60 @@ impl ClientSessionHandler {
                         // no need to remove the client as the whole poller state has already been removed by the poller task
                         return Err(format!("Poller error: {:?}", e));
                     }
+                    let canister_id = self.get_canister_id(&client_session);
+                    let client_key = self.get_client_key(&client_session);
                     // if the error is not due to a a failed poller
                     // remove client from poller state, if it is present
                     // error might have happened before the client session was Setup
                     // if so, there is no need to remove the client as it is not yet in the poller state
-                    if self.gateway_shared_state.remove_client_if_exists(
-                        client_session
-                            .canister_id
-                            .expect("must be set during Setup"),
-                        client_session
-                            .client_key
-                            .clone()
-                            .expect("must be set during Setup"),
-                    ) {
+                    if self
+                        .gateway_shared_state
+                        .remove_client_if_exists(canister_id, client_key.clone())
+                    {
+                        self.call_ws_close(&canister_id, client_key).await;
+
                         // return Err as the session had an error and cannot be updated anymore
                         return Err(format!("Client session error: {:?}", e));
                     }
                     return Err(format!("Client error before session Setup: {:?}", e));
                 },
             }
+        }
+    }
+
+    fn get_canister_id<S: AsyncRead + AsyncWrite + Unpin>(
+        &self,
+        client_session: &ClientSession<S>,
+    ) -> CanisterPrincipal {
+        client_session
+            .canister_id
+            .expect("must be set during Setup")
+    }
+
+    fn get_client_key<S: AsyncRead + AsyncWrite + Unpin>(
+        &self,
+        client_session: &ClientSession<S>,
+    ) -> ClientKey {
+        client_session
+            .client_key
+            .clone()
+            .expect("must be set during Setup")
+    }
+
+    async fn call_ws_close(&self, canister_id: &CanisterPrincipal, client_key: ClientKey) {
+        // call ws_close so that the client is removed from the canister
+        if let Err(e) = canister_methods::ws_close(
+            &self.agent,
+            &canister_id,
+            CanisterWsCloseArguments { client_key },
+        )
+        .await
+        {
+            // this might happen when the canister has already removed the client from its state
+            // due to an out of order client message, keep alive timeout or due to the dapp logic
+            warn!("Calling ws_close on canister failed: {}", e);
+        } else {
+            debug!("Canister closed connection with client");
         }
     }
 
