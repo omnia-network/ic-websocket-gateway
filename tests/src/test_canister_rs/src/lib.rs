@@ -3,9 +3,9 @@ use std::{cell::RefCell, collections::HashSet};
 
 use canister::{on_close, on_message, on_open, AppMessage};
 use ic_websocket_cdk::{
-    CanisterWsCloseArguments, CanisterWsCloseResult, CanisterWsGetMessagesArguments,
-    CanisterWsGetMessagesResult, CanisterWsMessageArguments, CanisterWsMessageResult,
-    CanisterWsOpenArguments, CanisterWsOpenResult, CanisterWsSendResult, ClientPrincipal,
+    CanisterSendResult, CanisterWsCloseArguments, CanisterWsCloseResult,
+    CanisterWsGetMessagesArguments, CanisterWsGetMessagesResult, CanisterWsMessageArguments,
+    CanisterWsMessageResult, CanisterWsOpenArguments, CanisterWsOpenResult, ClientPrincipal,
     WsHandlers, WsInitParams,
 };
 
@@ -63,6 +63,6 @@ fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessage
 //// Debug/tests methods
 // send a message to the client, usually called by the canister itself
 #[update]
-fn ws_send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterWsSendResult {
-    ic_websocket_cdk::ws_send(client_key, msg_bytes)
+fn send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterSendResult {
+    ic_websocket_cdk::send(client_key, msg_bytes)
 }

@@ -12,7 +12,7 @@ actor class TestCanister() {
 
   Debug.print("TestCanister actor started");
 
-  let params = IcWebSocketCdkTypes.WsInitParams(null, null, null);
+  let params = IcWebSocketCdkTypes.WsInitParams(null, null);
 
   let ws_state = IcWebSocketCdkState.IcWebSocketState(params);
 
@@ -59,7 +59,7 @@ actor class TestCanister() {
 
   func send_app_message(to_principal : Principal, msg : AppMessage) : async () {
     let msg_bytes = to_candid (msg);
-    switch (await IcWebSocketCdk.ws_send(ws_state, to_principal, msg_bytes)) {
+    switch (await IcWebSocketCdk.send(ws_state, to_principal, msg_bytes)) {
       case (#Err(err)) {
         Debug.print("ECould not send message: " # debug_show (err));
       };
@@ -99,7 +99,7 @@ actor class TestCanister() {
 
   //// Debug/tests methods
   // send a message to the client, usually called by the canister itself
-  public shared func ws_send(client_principal : IcWebSocketCdk.ClientPrincipal, msg_bytes : Blob) : async IcWebSocketCdk.CanisterWsSendResult {
-    await IcWebSocketCdk.ws_send(ws_state, client_principal, msg_bytes);
+  public shared func send(client_principal : IcWebSocketCdk.ClientPrincipal, msg_bytes : Blob) : async IcWebSocketCdk.CanisterSendResult {
+    await IcWebSocketCdk.send(ws_state, client_principal, msg_bytes);
   };
 };
