@@ -1,7 +1,7 @@
 use candid::{decode_one, encode_one, CandidType};
 use ic_cdk::{api::time, print};
 use ic_websocket_cdk::{
-    ws_send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
+    send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,7 @@ pub fn on_message(args: OnMessageCallbackArgs) {
 
 fn send_app_message(client_key: ClientPrincipal, msg: AppMessage) {
     print(format!("Sending message"));
-    if let Err(e) = ws_send(client_key, msg.candid_serialize()) {
+    if let Err(e) = send(client_key, msg.candid_serialize()) {
         print(format!("Could not send message: {}", e));
     }
     print(format!("Message sent"));

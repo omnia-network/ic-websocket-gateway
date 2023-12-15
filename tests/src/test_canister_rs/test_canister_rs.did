@@ -68,7 +68,7 @@ type AppMessage = record {
   timestamp : nat64;
 };
 
-type CanisterWsSendResult = variant {
+type CanisterSendResult = variant {
   Ok : null;
   Err : text;
 };
@@ -79,5 +79,5 @@ service : {
   "ws_message" : (CanisterWsMessageArguments, opt AppMessage) -> (CanisterWsMessageResult);
   "ws_get_messages" : (CanisterWsGetMessagesArguments) -> (CanisterWsGetMessagesResult) query;
 
-  "ws_send" : (ClientPrincipal, blob) -> (CanisterWsSendResult);
+  "send" : (ClientPrincipal, blob) -> (CanisterSendResult);
 };
