@@ -283,14 +283,19 @@ impl CanisterPoller {
 
     fn poller_should_terminate(&mut self) -> bool {
         // check if the poller should be terminated
-        // the poller does not necessarily need to be terminated as soon as the last client disconnects
-        // therefore, we do not need to check if the poller state is empty in every single polling iteration
-        if self.polling_iteration % 100 == 0 {
-            return self
-                .gateway_shared_state
-                .remove_canister_if_empty(self.canister_id);
-        }
-        false
+        // the poller needs to be terminated as soon as there are no more clients connected to the canister
+        // this is necessary because the canister state might be cleaned immediately after the last client disconnects
+        // if the poller state is not removed, a new client might connect to the poller before it is cleaned up and therefore
+        // the poller would continue to poll from the current nonce
+        // however, the canister state has been cleaned up and re-initialized after the client connected and so the new messages
+        // will have a nonce starting from 0
+        // this might cause the poller to not be able to poll the messages from the canister until they reach the current nonce
+        // this is not acceptable as it results in messages being lost
+        // therefore, check if the poller should be terminated after each polling iteration
+        // TODO: find a more efficient way to do this, e.g. when the last client disconnects
+        return self
+            .gateway_shared_state
+            .remove_canister_if_empty(self.canister_id);
     }
 }
 
