@@ -6,24 +6,18 @@ use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
 /// State of the WS Gateway that can be shared between threads
-pub type GatewaySharedState = Arc<GatewayState>;
-
-/// State of the WS Gateway consisting of the principal of each canister being polled
-/// and the state of each poller
-pub struct GatewayState(
-    // the guard returned when locking a dashmap is 'Send', therefore it is critical
-    // that it is not held accross .await points
-    // more info: https://draft.ryhl.io/blog/shared-mutable-state/
-    DashMap<CanisterPrincipal, PollerState>,
-);
-
-impl GatewayState {
-    pub fn new() -> Self {
-        Self(DashMap::with_capacity_and_shard_amount(32, 32))
-    }
+#[derive(Clone)]
+pub struct GatewayState {
+    inner: Arc<GatewayStateInner>,
 }
 
 impl GatewayState {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(GatewayStateInner::new()),
+        }
+    }
+
     pub fn insert_client_channel_and_get_new_poller_state(
         &self,
         canister_id: CanisterPrincipal,
@@ -32,7 +26,7 @@ impl GatewayState {
         client_session_span: Span,
     ) -> Option<PollerState> {
         // TODO: figure out if this is actually atomic
-        match self.0.entry(canister_id) {
+        match self.inner.data.entry(canister_id) {
             Entry::Occupied(mut entry) => {
                 // the poller has already been started
                 // if the poller is active, add client key and sender end of the channel to the poller state
@@ -67,7 +61,7 @@ impl GatewayState {
 
     pub fn remove_client(&self, canister_id: CanisterPrincipal, client_key: ClientKey) {
         // TODO: figure out if this is actually atomic
-        if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
+        if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
             if poller_state.remove(&client_key).is_none() {
                 // as the client was connected, the poller state must contain an entry for 'client_key'
@@ -89,7 +83,7 @@ impl GatewayState {
         client_key: ClientKey,
     ) -> bool {
         // TODO: figure out if this is actually atomic
-        if let Entry::Occupied(mut entry) = self.0.entry(canister_id) {
+        if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
 
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
@@ -109,14 +103,32 @@ impl GatewayState {
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
         // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate
         // if Some is returned, the poller state is empty and therefore the poller shall terminate
-        self.0
+        self.inner
+            .data
             .remove_if(&canister_id, |_, poller_state| poller_state.is_empty())
             .is_some()
     }
 
     pub fn remove_failed_canister(&self, canister_id: CanisterPrincipal) {
-        if let None = self.0.remove(&canister_id) {
+        if let None = self.inner.data.remove(&canister_id) {
             unreachable!("failed canister not found in gateway state");
+        }
+    }
+}
+
+/// State of the WS Gateway consisting of the principal of each canister being polled
+/// and the state of each poller
+struct GatewayStateInner {
+    // the guard returned when locking a dashmap is 'Send', therefore it is critical
+    // that it is not held accross .await points
+    // more info: https://draft.ryhl.io/blog/shared-mutable-state/
+    data: DashMap<CanisterPrincipal, PollerState>,
+}
+
+impl GatewayStateInner {
+    fn new() -> Self {
+        Self {
+            data: DashMap::with_capacity_and_shard_amount(32, 32),
         }
     }
 }

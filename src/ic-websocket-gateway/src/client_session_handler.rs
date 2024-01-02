@@ -4,7 +4,7 @@ use crate::{
     ws_listener::ClientId,
 };
 use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanisterMessage};
-use concurrent_map::{CanisterPrincipal, GatewaySharedState, PollerState};
+use concurrent_map::{CanisterPrincipal, GatewayState, PollerState};
 use futures_util::StreamExt;
 use ic_agent::Agent;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ pub struct ClientSessionHandler {
     /// Agent used to interact with the IC
     agent: Arc<Agent>,
     /// State of the gateway
-    gateway_shared_state: GatewaySharedState,
+    gateway_state: GatewayState,
     /// Polling interval in milliseconds
     polling_interval_ms: u64,
 }
@@ -31,13 +31,13 @@ impl ClientSessionHandler {
     pub fn new(
         id: ClientId,
         agent: Arc<Agent>,
-        gateway_shared_state: GatewaySharedState,
+        gateway_state: GatewayState,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
             id,
             agent,
-            gateway_shared_state,
+            gateway_state,
             polling_interval_ms,
         }
     }
@@ -133,7 +133,7 @@ impl ClientSessionHandler {
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
                     let new_poller_state = self
-                        .gateway_shared_state
+                        .gateway_state
                         .insert_client_channel_and_get_new_poller_state(
                             canister_id,
                             client_key,
@@ -180,7 +180,7 @@ impl ClientSessionHandler {
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
                     // remove client from poller state
-                    self.gateway_shared_state
+                    self.gateway_state
                         .remove_client(canister_id, client_key.clone());
 
                     self.call_ws_close(&canister_id, client_key).await;
@@ -204,7 +204,7 @@ impl ClientSessionHandler {
                     // error might have happened before the client session was Setup
                     // if so, there is no need to remove the client as it is not yet in the poller state
                     if self
-                        .gateway_shared_state
+                        .gateway_state
                         .remove_client_if_exists(canister_id, client_key.clone())
                     {
                         self.call_ws_close(&canister_id, client_key).await;
@@ -260,7 +260,7 @@ impl ClientSessionHandler {
 
         // spawn new canister poller task
         let agent = Arc::clone(&self.agent);
-        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
+        let gateway_state = self.gateway_state.clone();
         let polling_interval_ms = self.polling_interval_ms;
         tokio::spawn(async move {
             // we pass both the whole gateway state and the poller state for the specific canister
@@ -273,7 +273,7 @@ impl ClientSessionHandler {
                 agent,
                 canister_id,
                 poller_state,
-                gateway_shared_state,
+                gateway_state,
                 polling_interval_ms,
             );
             if let Err(e) = poller.run_polling().await {

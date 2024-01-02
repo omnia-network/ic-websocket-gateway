@@ -1,6 +1,6 @@
 use crate::ws_listener::{TlsConfig, WsListener};
 use canister_utils::get_new_agent;
-use concurrent_map::{GatewaySharedState, GatewayState};
+use concurrent_map::GatewayState;
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -13,7 +13,7 @@ pub struct Manager {
     /// Gateway  address
     address: String,
     /// State of the WS Gateway
-    state: GatewaySharedState,
+    state: GatewayState,
 }
 
 impl Manager {
@@ -28,7 +28,7 @@ impl Manager {
         let agent = Arc::new(agent);
 
         // creates a concurrent hashmap with capacity of 32 divided in shards so that each entry can be accessed concurrently without locking the whole state
-        let state: GatewaySharedState = Arc::new(GatewayState::new());
+        let state: GatewayState = GatewayState::new();
 
         return Self {
             agent,
@@ -50,12 +50,12 @@ impl Manager {
         // spawn a task which keeps listening for incoming client connections
         let gateway_address = self.address.clone();
         let agent = Arc::clone(&self.agent);
-        let gateway_shared_state = Arc::clone(&self.state);
+        let gateway_state = self.state.clone();
         tokio::spawn(async move {
             let mut ws_listener = WsListener::new(
                 &gateway_address,
                 agent,
-                gateway_shared_state,
+                gateway_state,
                 polling_interval,
                 tls_config,
             )

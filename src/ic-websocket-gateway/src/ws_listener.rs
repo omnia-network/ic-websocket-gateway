@@ -1,5 +1,5 @@
 use crate::client_session_handler::ClientSessionHandler;
-use concurrent_map::GatewaySharedState;
+use concurrent_map::GatewayState;
 use ic_agent::Agent;
 use native_tls::Identity;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
@@ -50,7 +50,7 @@ pub struct WsListener {
     /// Agent used to interact with the IC
     agent: Arc<Agent>,
     /// State of the gateway
-    gateway_shared_state: GatewaySharedState,
+    gateway_state: GatewayState,
     // Polling interval in milliseconds
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
@@ -61,7 +61,7 @@ impl WsListener {
     pub async fn new(
         gateway_address: &str,
         agent: Arc<Agent>,
-        gateway_shared_state: GatewaySharedState,
+        gateway_state: GatewayState,
         polling_interval_ms: u64,
         tls_config: Option<TlsConfig>,
     ) -> Self {
@@ -92,7 +92,7 @@ impl WsListener {
             listener,
             tls_acceptor,
             agent,
-            gateway_shared_state,
+            gateway_state,
             polling_interval_ms,
             next_client_id: 0,
         }
@@ -197,17 +197,13 @@ impl WsListener {
             span!(parent: &Span::current(),Level::DEBUG, "Client Session Handler", client_id);
 
         let agent = Arc::clone(&self.agent);
-        let gateway_shared_state = Arc::clone(&self.gateway_shared_state);
+        let gateway_state = self.gateway_state.clone();
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
         tokio::spawn(
             async move {
-                let mut client_session_handler = ClientSessionHandler::new(
-                    client_id,
-                    agent,
-                    gateway_shared_state,
-                    polling_interval_ms,
-                );
+                let mut client_session_handler =
+                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms);
                 debug!("Started client session handler task");
 
                 if let Err(e) = {

@@ -5,7 +5,7 @@ mod test {
         ws_get_messages, CanisterOutputCertifiedMessages, CanisterOutputMessage,
         CanisterWsGetMessagesArguments, ClientKey, IcWsCanisterMessage,
     };
-    use concurrent_map::{GatewaySharedState, GatewayState};
+    use concurrent_map::GatewayState;
     use futures_util::join;
     use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
     use lazy_static::lazy_static;
@@ -97,9 +97,9 @@ mod test {
         polling_interval_ms: u64,
         client_channel_tx: Sender<IcWsCanisterMessage>,
     ) -> CanisterPoller {
-        let gateway_shared_state: GatewaySharedState = Arc::new(GatewayState::new());
+        let gateway_state: GatewayState = GatewayState::new();
 
-        let poller_state = gateway_shared_state
+        let poller_state = gateway_state
             .insert_client_channel_and_get_new_poller_state(
                 Principal::anonymous(),
                 MockClientKey::mock(),
@@ -117,7 +117,7 @@ mod test {
             ),
             Principal::anonymous(),
             poller_state,
-            gateway_shared_state,
+            gateway_state,
             polling_interval_ms,
         )
     }

@@ -3,7 +3,7 @@ use canister_utils::{
     ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
-use concurrent_map::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState};
+use concurrent_map::{CanisterPrincipal, ClientSender, GatewayState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
@@ -23,7 +23,7 @@ pub struct CanisterPoller {
     /// State of the poller
     poller_state: PollerState,
     /// State of the gateway
-    gateway_shared_state: GatewaySharedState,
+    gateway_state: GatewayState,
     /// Nonce specified by the gateway during the query call to ws_get_messages,
     /// used by the CDK to determine which messages to respond with
     next_message_nonce: u64,
@@ -39,14 +39,14 @@ impl CanisterPoller {
         agent: Arc<Agent>,
         canister_id: Principal,
         poller_state: PollerState,
-        gateway_shared_state: GatewaySharedState,
+        gateway_state: GatewayState,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
             agent,
             canister_id,
             poller_state,
-            gateway_shared_state,
+            gateway_state,
             next_message_nonce: 0,
             polling_iteration: 0,
             polling_interval_ms,
@@ -76,8 +76,7 @@ impl CanisterPoller {
                 // as the poller state contains all the state of the clients sessions opened to the failed poller, removing the poller state
                 // will also remove all the corresponding clients' states
                 // therefore, there is no need to wait for the clients to remove their state before terminating the poller
-                self.gateway_shared_state
-                    .remove_failed_canister(self.canister_id);
+                self.gateway_state.remove_failed_canister(self.canister_id);
                 // TODO: notify the canister that it cannot be polled anymore
                 return Err(e);
             }
@@ -289,7 +288,7 @@ impl CanisterPoller {
         // therefore, check if the poller should be terminated after each polling iteration
         // TODO: find a more efficient way to do this, e.g. when the last client disconnects
         return self
-            .gateway_shared_state
+            .gateway_state
             .remove_canister_if_empty(self.canister_id);
     }
 }
