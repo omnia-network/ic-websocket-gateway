@@ -350,6 +350,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "canister-utils"
+version = "1.0.0"
+dependencies = [
+ "candid",
+ "ic-agent",
+ "reqwest",
+ "serde",
+ "serde_bytes",
+ "tracing",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -413,6 +425,17 @@ dependencies = [
  "is-terminal",
  "lazy_static",
  "windows-sys",
+]
+
+[[package]]
+name = "concurrent-map"
+version = "1.0.0"
+dependencies = [
+ "canister-utils",
+ "dashmap",
+ "ic-agent",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1261,7 +1284,8 @@ version = "1.2.3"
 dependencies = [
  "async-trait",
  "candid",
- "dashmap",
+ "canister-utils",
+ "concurrent-map",
  "futures-util",
  "ic-agent",
  "ic-cdk",
@@ -1274,7 +1298,6 @@ dependencies = [
  "opentelemetry-jaeger",
  "opentelemetry_sdk",
  "rand 0.8.5",
- "reqwest",
  "serde",
  "serde_bytes",
  "serde_cbor",

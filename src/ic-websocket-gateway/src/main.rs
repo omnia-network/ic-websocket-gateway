@@ -1,12 +1,13 @@
-use crate::gateway_tracing::{init_tracing, InitTracingResult};
-use crate::manager::Manager;
-use crate::ws_listener::TlsConfig;
+use crate::{
+    gateway_tracing::{init_tracing, InitTracingResult},
+    manager::Manager,
+    ws_listener::TlsConfig,
+};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{fs, path::Path};
 use structopt::StructOpt;
 use tracing::info;
 
-mod canister_methods;
 mod canister_poller;
 mod client_session;
 mod client_session_handler;

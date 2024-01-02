@@ -1,11 +1,9 @@
-use crate::{
-    canister_methods::{
-        self, CanisterOutputCertifiedMessages, CanisterToClientMessage,
-        CanisterWsGetMessagesArguments, IcError,
-    },
-    manager::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState},
-};
 use candid::Principal;
+use canister_utils::{
+    ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
+    CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
+};
+use concurrent_map::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
@@ -15,9 +13,6 @@ enum PollingStatus {
     NoMessagesPolled,
     MessagesPolled(CanisterOutputCertifiedMessages),
 }
-
-/// Canister message to be relayed to the client, together with its span
-pub type IcWsCanisterMessage = (CanisterToClientMessage, Span);
 
 /// Poller which periodically queries a canister for new messages and relays them to the client
 pub struct CanisterPoller {
@@ -145,7 +140,7 @@ impl CanisterPoller {
         trace!("Started polling iteration");
 
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        match canister_methods::ws_get_messages(
+        match ws_get_messages(
             &self.agent,
             &self.canister_id,
             CanisterWsGetMessagesArguments {
@@ -211,7 +206,7 @@ impl CanisterPoller {
                     trace!("Start relaying message",);
                     (canister_to_client_message, Span::current())
                 });
-                relay_message(canister_message, client_channel_tx)
+                relay_message(canister_message, &client_channel_tx)
                     .instrument(canister_message_span)
                     .await;
                 relayed_messages_count += 1;

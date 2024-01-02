@@ -1,10 +1,10 @@
 use crate::{
-    canister_methods::{self, CanisterWsCloseArguments, ClientKey},
-    canister_poller::{CanisterPoller, IcWsCanisterMessage},
+    canister_poller::CanisterPoller,
     client_session::{ClientSession, IcWsError, IcWsSessionState},
-    manager::{CanisterPrincipal, GatewaySharedState, PollerState},
     ws_listener::ClientId,
 };
+use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanisterMessage};
+use concurrent_map::{CanisterPrincipal, GatewaySharedState, PollerState};
 use futures_util::StreamExt;
 use ic_agent::Agent;
 use std::sync::Arc;
@@ -239,7 +239,7 @@ impl ClientSessionHandler {
 
     async fn call_ws_close(&self, canister_id: &CanisterPrincipal, client_key: ClientKey) {
         // call ws_close so that the client is removed from the canister
-        if let Err(e) = canister_methods::ws_close(
+        if let Err(e) = ws_close(
             &self.agent,
             &canister_id,
             CanisterWsCloseArguments { client_key },

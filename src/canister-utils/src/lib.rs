@@ -3,6 +3,7 @@ use ic_agent::AgentError;
 use ic_agent::{agent::http_transport::ReqwestTransport, identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use tracing::Span;
 
 static IC_MAINNET_URLS: [&str; 2] = ["https://icp0.io", "https://icp-api.io"];
 
@@ -139,6 +140,9 @@ pub struct CanisterOutputCertifiedMessages {
     pub is_end_of_queue: Option<bool>,
 }
 
+/// Canister message to be relayed to the client, together with its span
+pub type IcWsCanisterMessage = (CanisterToClientMessage, Span);
+
 pub fn is_mainnet(ic_network_url: &str) -> bool {
     IC_MAINNET_URLS.contains(&ic_network_url)
 }
@@ -177,7 +181,7 @@ pub async fn ws_close(
     Decode!(&res, _CanisterWsCloseResult).map_err(|e| e.to_string())?
 }
 
-#[cfg(not(test))]
+#[cfg(not(feature = "mock-server"))]
 pub async fn ws_get_messages(
     agent: &Agent,
     canister_id: &Principal,
@@ -196,7 +200,10 @@ pub async fn ws_get_messages(
     res.map_err(|e| IcError::Cdk(e))
 }
 
-#[cfg(test)]
+/// In order to call the mock server during testing, make sure that the 'mock-server'
+/// feature is enabled when importing this crate as a dev-dependecy
+/// e.g. canister-utils = { path = "../canister-utils", features = ["mock-server"] }
+#[cfg(feature = "mock-server")]
 pub async fn ws_get_messages(
     _agent: &Agent,
     _canister_id: &Principal,

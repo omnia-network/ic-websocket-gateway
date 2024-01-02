@@ -1,4 +1,5 @@
-use crate::{client_session_handler::ClientSessionHandler, manager::GatewaySharedState};
+use crate::client_session_handler::ClientSessionHandler;
+use concurrent_map::GatewaySharedState;
 use ic_agent::Agent;
 use native_tls::Identity;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
