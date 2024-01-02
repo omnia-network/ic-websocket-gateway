@@ -148,3 +148,51 @@ pub struct ClientSender {
 pub type ClientSessionSpan = Span;
 
 pub type CanisterPrincipal = Principal;
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc::{self, Receiver};
+
+    use super::*;
+    use std::thread;
+
+    #[tokio::test]
+    async fn should_insert_new_client_channels_and_get_new_poller_state_once() {
+        let clients_count = 1000;
+        let gateway_state = GatewayState::new();
+        let canister_id = Principal::from_text("aaaaa-aa").unwrap();
+        thread::scope(|s| {
+            let mut handles = Vec::new();
+            for i in 0..clients_count {
+                let client_key = ClientKey::new(Principal::anonymous(), i);
+                let handle = s.spawn(|| {
+                    let (client_channel_tx, _): (
+                        Sender<IcWsCanisterMessage>,
+                        Receiver<IcWsCanisterMessage>,
+                    ) = mpsc::channel(100);
+
+                    gateway_state.insert_client_channel_and_get_new_poller_state(
+                        canister_id,
+                        client_key,
+                        client_channel_tx,
+                        Span::current(),
+                    )
+                });
+                handles.push(handle);
+            }
+            let mut count = 0;
+            let mut poller_state: Option<Arc<DashMap<ClientKey, ClientSender>>> = None;
+            for h in handles.into_iter() {
+                if let Some(state) = h.join().unwrap() {
+                    poller_state = Some(state.clone());
+                    count += 1;
+                }
+            }
+            assert_eq!(count, 1);
+            assert_eq!(
+                poller_state.expect("must be some").len(),
+                clients_count as usize
+            );
+        });
+    }
+}
