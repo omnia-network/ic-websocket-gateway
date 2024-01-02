@@ -229,31 +229,39 @@ mod tests {
             for h in handles {
                 tot += h.join().unwrap();
             }
-            println!("Average for insertion: {:?}", tot / clients_count as u32);
+            println!(
+                "Average for 'insert_client_channel_and_get_new_poller_state' from {} different threads: {:?}",
+                clients_count,
+                tot / clients_count as u32
+            );
         });
     }
 
     #[tokio::test]
     async fn benchmark_insertions_while_check_if_empty() {
-        let tot = 100_000;
+        let iterations = 10_000;
         let gateway_state = GatewayState::new();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
 
         let start = Instant::now();
-        for i in 0..tot {
+        let mut tot = Duration::from_secs(0);
+        for i in 0..iterations {
             let client_key = ClientKey::new(Principal::anonymous(), i);
             let (client_channel_tx, _): (
                 Sender<IcWsCanisterMessage>,
                 Receiver<IcWsCanisterMessage>,
             ) = mpsc::channel(100);
 
+            let start = Instant::now();
             gateway_state.insert_client_channel_and_get_new_poller_state(
                 canister_id,
                 client_key,
                 client_channel_tx,
                 Span::current(),
             );
+            tot += Instant::now() - start;
         }
+        let average_idle = tot / iterations as u32;
         let elapsed_idle = Instant::now() - start;
 
         {
@@ -265,43 +273,57 @@ mod tests {
         }
 
         let start = Instant::now();
-        for i in 0..tot {
+        let mut tot = Duration::from_secs(0);
+        for i in 0..iterations {
             let client_key = ClientKey::new(Principal::anonymous(), i);
             let (client_channel_tx, _): (
                 Sender<IcWsCanisterMessage>,
                 Receiver<IcWsCanisterMessage>,
             ) = mpsc::channel(100);
 
+            let start = Instant::now();
             gateway_state.insert_client_channel_and_get_new_poller_state(
                 canister_id,
                 client_key,
                 client_channel_tx,
                 Span::current(),
             );
+            tot += Instant::now() - start;
         }
+        let average_busy = tot / iterations as u32;
         let elapsed_busy = Instant::now() - start;
         println!(
-            "Elapsed for {} of 'insert_client_channel_and_get_new_poller_state' while:
+            "Run {} iterations of 'insert_client_channel_and_get_new_poller_state' on the same thread\nElapsed while:
+            idle: {:?}
+            busy: {:?}
+            deterioration: {:?}\nAverage while:
             idle: {:?}
             busy: {:?}
             deterioration: {:?}",
-            tot,
+            iterations,
             elapsed_idle,
             elapsed_busy,
-            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64()
+            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64(),
+            average_idle,
+            average_busy,
+            average_busy.as_secs_f64() / average_idle.as_secs_f64(),
         );
     }
 
     #[tokio::test]
     async fn benchmark_check_if_empty_while_insertions() {
-        let tot = 100_000;
+        let iterations = 10_000;
         let gateway_state = GatewayState::new();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
 
         let start = Instant::now();
-        for _ in 0..tot {
+        let mut tot = Duration::from_secs(0);
+        for _ in 0..iterations {
+            let start = Instant::now();
             gateway_state.remove_canister_if_empty(canister_id);
+            tot += Instant::now() - start;
         }
+        let average_idle = tot / iterations as u32;
         let elapsed_idle = Instant::now() - start;
 
         {
@@ -326,20 +348,30 @@ mod tests {
         }
 
         let start = Instant::now();
-        for _ in 0..tot {
+        let mut tot = Duration::from_secs(0);
+        for _ in 0..iterations {
+            let start = Instant::now();
             gateway_state.remove_canister_if_empty(canister_id);
+            tot += Instant::now() - start;
         }
+        let average_busy = tot / iterations as u32;
         let elapsed_busy = Instant::now() - start;
 
         println!(
-            "Elapsed for {} of 'insert_client_channel_and_get_new_poller_state' while:
+            "Run {} iterations of 'remove_canister_if_empty' on the same thread\nElapsed while:
+            idle: {:?}
+            busy: {:?}
+            deterioration: {:?}\nAverage while:
             idle: {:?}
             busy: {:?}
             deterioration: {:?}",
-            tot,
+            iterations,
             elapsed_idle,
             elapsed_busy,
-            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64()
+            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64(),
+            average_idle,
+            average_busy,
+            average_busy.as_secs_f64() / average_idle.as_secs_f64(),
         );
     }
 }
