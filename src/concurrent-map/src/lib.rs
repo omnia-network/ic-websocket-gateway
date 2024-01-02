@@ -374,4 +374,50 @@ mod tests {
             average_busy.as_secs_f64() / average_idle.as_secs_f64(),
         );
     }
+
+    #[tokio::test]
+    async fn simulate_ic_ws() {
+        let iterations = 100;
+        let gateway_state = GatewayState::new();
+        let canister_id = Principal::from_text("aaaaa-aa").unwrap();
+
+        {
+            let gateway_state = gateway_state.clone();
+            let canister_id = canister_id.clone();
+            thread::spawn(move || {
+                for i in 0.. {
+                    let client_key = ClientKey::new(Principal::anonymous(), i);
+                    let (client_channel_tx, _): (
+                        Sender<IcWsCanisterMessage>,
+                        Receiver<IcWsCanisterMessage>,
+                    ) = mpsc::channel(100);
+
+                    gateway_state.insert_client_channel_and_get_new_poller_state(
+                        canister_id,
+                        client_key,
+                        client_channel_tx,
+                        Span::current(),
+                    );
+                    // simulates 10 clients connecting each second
+                    thread::sleep(Duration::from_millis(100));
+                }
+            });
+        }
+
+        let mut tot = Duration::from_secs(0);
+        for _ in 0..iterations {
+            let start = Instant::now();
+            gateway_state.remove_canister_if_empty(canister_id);
+            tot += Instant::now() - start;
+            // simulates a polling iteration of 10 ms
+            thread::sleep(Duration::from_millis(10));
+        }
+        let average = tot / iterations as u32;
+
+        println!(
+            "Run {} iterations of 'remove_canister_if_empty' on the same thread while simulating 10 clients connecting each second.
+            Average time: {:?}",
+            iterations, average,
+        );
+    }
 }
