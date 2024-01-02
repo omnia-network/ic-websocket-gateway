@@ -200,7 +200,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn benchmark_insertion_only() {
+    async fn benchmark_insertions_only() {
         let clients_count = 1000;
         let gateway_state = GatewayState::new();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
@@ -229,7 +229,117 @@ mod tests {
             for h in handles {
                 tot += h.join().unwrap();
             }
-            println!("Average: {:?}", tot / clients_count as u32);
+            println!("Average for insertion: {:?}", tot / clients_count as u32);
         });
+    }
+
+    #[tokio::test]
+    async fn benchmark_insertions_while_check_if_empty() {
+        let tot = 100_000;
+        let gateway_state = GatewayState::new();
+        let canister_id = Principal::from_text("aaaaa-aa").unwrap();
+
+        let start = Instant::now();
+        for i in 0..tot {
+            let client_key = ClientKey::new(Principal::anonymous(), i);
+            let (client_channel_tx, _): (
+                Sender<IcWsCanisterMessage>,
+                Receiver<IcWsCanisterMessage>,
+            ) = mpsc::channel(100);
+
+            gateway_state.insert_client_channel_and_get_new_poller_state(
+                canister_id,
+                client_key,
+                client_channel_tx,
+                Span::current(),
+            );
+        }
+        let elapsed_idle = Instant::now() - start;
+
+        {
+            let gateway_state = gateway_state.clone();
+            let canister_id = canister_id.clone();
+            thread::spawn(move || loop {
+                gateway_state.remove_canister_if_empty(canister_id);
+            });
+        }
+
+        let start = Instant::now();
+        for i in 0..tot {
+            let client_key = ClientKey::new(Principal::anonymous(), i);
+            let (client_channel_tx, _): (
+                Sender<IcWsCanisterMessage>,
+                Receiver<IcWsCanisterMessage>,
+            ) = mpsc::channel(100);
+
+            gateway_state.insert_client_channel_and_get_new_poller_state(
+                canister_id,
+                client_key,
+                client_channel_tx,
+                Span::current(),
+            );
+        }
+        let elapsed_busy = Instant::now() - start;
+        println!(
+            "Elapsed for {} of 'insert_client_channel_and_get_new_poller_state' while:
+            idle: {:?}
+            busy: {:?}
+            deterioration: {:?}",
+            tot,
+            elapsed_idle,
+            elapsed_busy,
+            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64()
+        );
+    }
+
+    #[tokio::test]
+    async fn benchmark_check_if_empty_while_insertions() {
+        let tot = 100_000;
+        let gateway_state = GatewayState::new();
+        let canister_id = Principal::from_text("aaaaa-aa").unwrap();
+
+        let start = Instant::now();
+        for _ in 0..tot {
+            gateway_state.remove_canister_if_empty(canister_id);
+        }
+        let elapsed_idle = Instant::now() - start;
+
+        {
+            let gateway_state = gateway_state.clone();
+            let canister_id = canister_id.clone();
+            thread::spawn(move || {
+                for i in 0.. {
+                    let client_key = ClientKey::new(Principal::anonymous(), i);
+                    let (client_channel_tx, _): (
+                        Sender<IcWsCanisterMessage>,
+                        Receiver<IcWsCanisterMessage>,
+                    ) = mpsc::channel(100);
+
+                    gateway_state.insert_client_channel_and_get_new_poller_state(
+                        canister_id,
+                        client_key,
+                        client_channel_tx,
+                        Span::current(),
+                    );
+                }
+            });
+        }
+
+        let start = Instant::now();
+        for _ in 0..tot {
+            gateway_state.remove_canister_if_empty(canister_id);
+        }
+        let elapsed_busy = Instant::now() - start;
+
+        println!(
+            "Elapsed for {} of 'insert_client_channel_and_get_new_poller_state' while:
+            idle: {:?}
+            busy: {:?}
+            deterioration: {:?}",
+            tot,
+            elapsed_idle,
+            elapsed_busy,
+            elapsed_busy.as_secs_f64() / elapsed_idle.as_secs_f64()
+        );
     }
 }
