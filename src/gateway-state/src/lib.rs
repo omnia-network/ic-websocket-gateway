@@ -18,7 +18,6 @@ impl GatewayState {
         }
     }
 
-    /// ### `insert_client_channel_and_get_new_poller_state`
     /// SAFETY:
     ///
     /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
