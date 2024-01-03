@@ -2,11 +2,11 @@ use candid::{decode_args, Principal};
 use canister_utils::{
     CanisterToClientMessage, CanisterWsOpenArguments, ClientKey, IcWsCanisterMessage,
 };
-use concurrent_map::CanisterPrincipal;
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+use gateway_state::CanisterPrincipal;
 use ic_agent::{
     agent::{Envelope, EnvelopeContent},
     Agent, AgentError,

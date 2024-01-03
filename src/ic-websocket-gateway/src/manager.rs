@@ -1,6 +1,6 @@
 use crate::ws_listener::{TlsConfig, WsListener};
 use canister_utils::get_new_agent;
-use concurrent_map::GatewayState;
+use gateway_state::GatewayState;
 use ic_agent::{export::Principal, identity::BasicIdentity, Agent};
 use std::sync::Arc;
 use tokio::task::JoinHandle;

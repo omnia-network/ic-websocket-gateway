@@ -4,8 +4,8 @@ use crate::{
     ws_listener::ClientId,
 };
 use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanisterMessage};
-use concurrent_map::{CanisterPrincipal, ClientEntry, GatewayState, PollerState};
 use futures_util::StreamExt;
+use gateway_state::{CanisterPrincipal, ClientEntry, GatewayState, PollerState};
 use ic_agent::Agent;
 use std::sync::Arc;
 use tokio::{

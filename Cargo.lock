@@ -428,17 +428,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "concurrent-map"
-version = "1.0.0"
-dependencies = [
- "canister-utils",
- "dashmap",
- "ic-agent",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -872,6 +861,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-state"
+version = "1.0.0"
+dependencies = [
+ "canister-utils",
+ "dashmap",
+ "ic-agent",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1285,8 +1285,8 @@ dependencies = [
  "async-trait",
  "candid",
  "canister-utils",
- "concurrent-map",
  "futures-util",
+ "gateway-state",
  "ic-agent",
  "ic-cdk",
  "ic-cdk-macros",

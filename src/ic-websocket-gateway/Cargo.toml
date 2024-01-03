@@ -31,7 +31,7 @@ tracing-subscriber = { version = "0.3.17", features = [
 ] }
 tracing-appender = "0.2"
 ic-identity = { path = "../ic-identity" }
-concurrent-map = { path = "../concurrent-map" }
+gateway-state = { path = "../gateway-state" }
 canister-utils = { path = "../canister-utils" }
 rand = "0.8"
 opentelemetry = { version = "0.20" }

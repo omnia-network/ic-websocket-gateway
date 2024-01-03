@@ -3,7 +3,7 @@ use canister_utils::{
     ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
-use concurrent_map::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
+use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;

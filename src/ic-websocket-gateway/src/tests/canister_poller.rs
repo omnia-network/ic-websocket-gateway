@@ -5,8 +5,8 @@ mod test {
         ws_get_messages, CanisterOutputCertifiedMessages, CanisterOutputMessage,
         CanisterWsGetMessagesArguments, ClientKey, IcWsCanisterMessage,
     };
-    use concurrent_map::GatewayState;
     use futures_util::join;
+    use gateway_state::GatewayState;
     use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
     use lazy_static::lazy_static;
     use std::{

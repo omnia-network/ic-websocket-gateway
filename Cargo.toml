@@ -3,7 +3,7 @@ members = [
     "src/ic-websocket-gateway",
     "src/ic-identity",
     "src/scripts",
-    "src/concurrent-map",
+    "src/gateway-state",
     "tests/src/test_canister_rs",
 ]
 default-members = ["src/ic-websocket-gateway"]
