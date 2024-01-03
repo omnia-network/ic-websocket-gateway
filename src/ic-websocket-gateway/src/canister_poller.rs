@@ -3,7 +3,7 @@ use canister_utils::{
     ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
-use concurrent_map::{CanisterPrincipal, ClientSender, GatewayState, PollerState};
+use concurrent_map::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
@@ -287,9 +287,13 @@ impl CanisterPoller {
         // this is not acceptable as it results in messages being lost
         // therefore, check if the poller should be terminated after each polling iteration
         // TODO: find a more efficient way to do this, e.g. when the last client disconnects
-        return self
+        match self
             .gateway_state
-            .remove_canister_if_empty(self.canister_id);
+            .remove_canister_if_empty(self.canister_id)
+        {
+            CanisterEntry::RemovedEmpty => true,
+            CanisterEntry::NotEmpty => false,
+        }
     }
 }
 

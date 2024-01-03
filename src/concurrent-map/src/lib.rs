@@ -128,23 +128,28 @@ impl GatewayState {
         &self,
         canister_id: CanisterPrincipal,
         client_key: ClientKey,
-    ) -> bool {
+    ) -> ClientEntry {
         // START OF THE CRITICAL SECTION
         if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
 
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
-            // returns true if the client was removed, false if there was no such client
-            return poller_state.remove(&client_key).is_some();
+            // returns 'ClientEntry::Removed' if the client was removed, 'ClientEntry::Vacant' if there was no such client
+            return {
+                match poller_state.remove(&client_key) {
+                    Some(_) => ClientEntry::Removed(client_key),
+                    None => ClientEntry::Vacant,
+                }
+            };
         }
         // END OF THE CRITICAL SECTION
 
         // this can happen when the poller has failed and the poller state has already been removed
         // indeed, a client session might get an error before the poller side of the channel has been dropped - but after the poller state has been removed -
-        // in such a case, the client state as already been removed by the poller, together with the whole poller state
-        // therefore there is no need to do anything else here
-        false
+        // in such a case, the client state has already been removed by the poller, together with the whole poller state
+        // therefore there is no need to do anything else here and we pretend that there is no such entry
+        ClientEntry::Vacant
     }
 
     /// SAFETY:
@@ -156,14 +161,18 @@ impl GatewayState {
     /// Therefore, this function is executed atomically.
     ///
     /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
-    pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> bool {
+    pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> CanisterEntry {
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
-        // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate
-        // if Some is returned, the poller state is empty and therefore the poller shall terminate
-        self.inner
+        // if Some, the poller state is empty and therefore the poller shall terminate - return 'CanisterEntry::RemovedEmpty'
+        // if None, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate - return 'CanisterEntry::NotEmpty'
+        match self
+            .inner
             .data
             .remove_if(&canister_id, |_, poller_state| poller_state.is_empty())
-            .is_some()
+        {
+            Some(_) => CanisterEntry::RemovedEmpty,
+            None => CanisterEntry::NotEmpty,
+        }
     }
 
     /// SAFETY:
@@ -202,6 +211,16 @@ impl GatewayStateInner {
 /// State of each poller consisting of the keys of the clients connected to the poller
 /// and the state associated to each client
 pub type PollerState = Arc<DashMap<ClientKey, ClientSender>>;
+
+pub enum ClientEntry {
+    Removed(ClientKey),
+    Vacant,
+}
+
+pub enum CanisterEntry {
+    RemovedEmpty,
+    NotEmpty,
+}
 
 /// State of each client consisting of the sender side of the channel used to send canister updates to the client
 /// and the span associated to the client session
@@ -464,8 +483,8 @@ mod tests {
                         client_channel_tx,
                         Span::current(),
                     );
-                    // simulates 10 clients connecting each second
-                    thread::sleep(Duration::from_millis(100));
+                    // simulates 100 clients connecting each second
+                    thread::sleep(Duration::from_millis(10));
                 }
             });
         }
@@ -475,13 +494,13 @@ mod tests {
             let start = Instant::now();
             gateway_state.remove_canister_if_empty(canister_id);
             tot += Instant::now() - start;
-            // simulates a polling iteration of 10 ms
-            thread::sleep(Duration::from_millis(10));
+            // simulates a polling iteration of 1 ms
+            thread::sleep(Duration::from_millis(1));
         }
         let average = tot / iterations as u32;
 
         println!(
-            "Run {} iterations of 'remove_canister_if_empty' on the same thread while simulating 10 clients connecting each second.
+            "Run {} iterations of 'remove_canister_if_empty' on the same thread while simulating 100 clients connecting each second.
             Average time: {:?}",
             iterations, average,
         );
