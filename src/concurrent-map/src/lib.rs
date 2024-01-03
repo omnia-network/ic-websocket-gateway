@@ -18,6 +18,22 @@ impl GatewayState {
         }
     }
 
+    /// ### `insert_client_channel_and_get_new_poller_state`
+    /// SAFETY:
+    ///
+    /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
+    ///
+    /// The lock is moved into either the [OccupiedEntry](https://docs.rs/dashmap/5.5.3/src/dashmap/mapref/entry.rs.html#175-179) or the
+    /// [VacantEntry](https://docs.rs/dashmap/5.5.3/src/dashmap/mapref/entry.rs.html#117-120) when they are instantiated and
+    /// is released when they go out of scope at the end of this function.
+    ///
+    /// Therefore, this function is executed atomically.
+    ///
+    /// Holding a lock accross an '.await' may cause a deadlock.
+    /// To prevent deadlocks, this function shall NEVER be async.
+    /// This is sufficient to prevent the function from yielding while holding the lock.
+    ///
+    /// In order to not starve other tasks, make sure to keep the critical section as short as possible.
     pub fn insert_client_channel_and_get_new_poller_state(
         &self,
         canister_id: CanisterPrincipal,
@@ -25,7 +41,7 @@ impl GatewayState {
         client_channel_tx: Sender<IcWsCanisterMessage>,
         client_session_span: Span,
     ) -> Option<PollerState> {
-        // TODO: figure out if this is actually atomic
+        // START OF THE CRITICAL SECTION
         match self.inner.data.entry(canister_id) {
             Entry::Occupied(mut entry) => {
                 // the poller has already been started
@@ -57,10 +73,25 @@ impl GatewayState {
                 Some(poller_state)
             },
         }
+        // END OF THE CRITICAL SECTION
     }
 
+    /// SAFETY:
+    ///
+    /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
+    ///
+    /// The lock is moved into the [OccupiedEntry](https://docs.rs/dashmap/5.5.3/src/dashmap/mapref/entry.rs.html#175-179) when it is instantiated and
+    /// is released when it goes out of scope at the end of this function.
+    ///
+    /// Therefore, this function is executed atomically.
+    ///
+    /// Holding a lock accross an '.await' may cause a deadlock.
+    /// To prevent deadlocks, this function shall NEVER be async.
+    /// This is sufficient to prevent the function from yielding while holding the lock.
+    ///
+    /// In order to not starve other tasks, make sure to keep the critical section as short as possible.
     pub fn remove_client(&self, canister_id: CanisterPrincipal, client_key: ClientKey) {
-        // TODO: figure out if this is actually atomic
+        // START OF THE CRITICAL SECTION
         if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
             if poller_state.remove(&client_key).is_none() {
@@ -71,18 +102,34 @@ impl GatewayState {
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
         }
+        // END OF THE CRITICAL SECTION
+
         // this can happen when the poller has failed and the poller state has already been removed
         // indeed, a client session might enter the Close state before the poller side of the channel has been dropped - but after the poller state has been removed -
         // in such a case, the client state as already been removed by the poller, together with the whole poller state
         // therefore there is no need to do anything else here
     }
 
+    /// SAFETY:
+    ///
+    /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
+    ///
+    /// The lock is moved into the [OccupiedEntry](https://docs.rs/dashmap/5.5.3/src/dashmap/mapref/entry.rs.html#175-179) when it is instantiated and
+    /// is released when it goes out of scope at the end of this function.
+    ///
+    /// Therefore, this function is executed atomically.
+    ///
+    /// Holding a lock accross an '.await' may cause a deadlock.
+    /// To prevent deadlocks, this function shall NEVER be async.
+    /// This is sufficient to prevent the function from yielding while holding the lock.
+    ///
+    /// In order to not starve other tasks, make sure to keep the critical section as short as possible.
     pub fn remove_client_if_exists(
         &self,
         canister_id: CanisterPrincipal,
         client_key: ClientKey,
     ) -> bool {
-        // TODO: figure out if this is actually atomic
+        // START OF THE CRITICAL SECTION
         if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
 
@@ -91,6 +138,8 @@ impl GatewayState {
             // returns true if the client was removed, false if there was no such client
             return poller_state.remove(&client_key).is_some();
         }
+        // END OF THE CRITICAL SECTION
+
         // this can happen when the poller has failed and the poller state has already been removed
         // indeed, a client session might get an error before the poller side of the channel has been dropped - but after the poller state has been removed -
         // in such a case, the client state as already been removed by the poller, together with the whole poller state
@@ -98,8 +147,16 @@ impl GatewayState {
         false
     }
 
+    /// SAFETY:
+    ///
+    /// The [Dashmap::remove_if](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#944-969) method gets a write lock on the whole shard in which the entry is.
+    ///
+    /// The lock is held while checking the condition and removing the entry if the condition is met.
+    ///
+    /// Therefore, this function is executed atomically.
+    ///
+    /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
     pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> bool {
-        // SAFETY:
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
         // if None is returned, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate
         // if Some is returned, the poller state is empty and therefore the poller shall terminate
@@ -109,6 +166,15 @@ impl GatewayState {
             .is_some()
     }
 
+    /// SAFETY:
+    ///
+    /// The [Dashmap::remove](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#930-942) method gets a write lock on the whole shard in which the entry is.
+    ///
+    /// The lock is held while removing the entry.
+    ///
+    /// Therefore, this function is executed atomically.
+    ///
+    /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
     pub fn remove_failed_canister(&self, canister_id: CanisterPrincipal) {
         if let None = self.inner.data.remove(&canister_id) {
             unreachable!("failed canister not found in gateway state");
