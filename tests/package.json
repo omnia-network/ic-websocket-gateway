@@ -45,7 +45,7 @@
     "webpack-cli": "^5.1.4"
   },
   "engines": {
-    "node": "^12 || ^14 || ^16 || ^18"
+    "node": "^14 || ^16 || >=17"
   },
   "browserslist": [
     "last 2 chrome version",
@@ -59,7 +59,7 @@
     "@dfinity/identity-secp256k1": "^0.20.1",
     "@dfinity/principal": "^0.20.1",
     "bufferutil": "^4.0.8",
-    "ic-websocket-js": "^0.3.2",
+    "ic-websocket-js": "^0.3.3",
     "utf-8-validate": "^5.0.10"
   }
 }

@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: "npm"
           cache-dependency-path: "tests/package-lock.json"
       - uses: actions-rs/toolchain@v1
@@ -29,7 +29,7 @@ jobs:
           toolchain: "stable"
       - uses: aviate-labs/setup-dfx@v0.2.6
         with:
-          dfx-version: 0.15.2
+          dfx-version: 0.15.3
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: "true"
