@@ -1288,8 +1288,6 @@ dependencies = [
  "futures-util",
  "gateway-state",
  "ic-agent",
- "ic-cdk",
- "ic-cdk-macros",
  "ic-identity",
  "lazy_static",
  "mockito",

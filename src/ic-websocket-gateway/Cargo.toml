@@ -10,8 +10,6 @@ license.workspace = true
 async-trait = "0.1.72"
 candid = { workspace = true }
 ic-agent = { workspace = true }
-ic-cdk = { workspace = true }
-ic-cdk-macros = { workspace = true }
 serde = { workspace = true }
 serde_cbor = "0.11.2"
 tokio = { workspace = true }
@@ -28,6 +26,7 @@ tracing-subscriber = { version = "0.3.17", features = [
   "std",
   "json",
   "env-filter",
+  "registry",
 ] }
 tracing-appender = "0.2"
 ic-identity = { path = "../ic-identity" }

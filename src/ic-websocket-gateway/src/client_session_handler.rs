@@ -256,7 +256,7 @@ impl ClientSessionHandler {
 
     /// Starts a new canister poller
     fn start_poller(&self, canister_id: CanisterPrincipal, poller_state: PollerState) {
-        info!("Starting poller");
+        info!("Starting poller for canister: {}", canister_id);
 
         // spawn new canister poller task
         let agent = Arc::clone(&self.agent);
@@ -277,9 +277,12 @@ impl ClientSessionHandler {
                 polling_interval_ms,
             );
             if let Err(e) = poller.run_polling().await {
-                warn!("Poller terminated with error: {:?}", e);
+                warn!(
+                    "Poller for canister {} terminated with error: {:?}",
+                    canister_id, e
+                );
             } else {
-                info!("Poller terminated");
+                info!("Poller for canister {} terminated", canister_id);
             }
             // the poller takes care of notifying the session handlers when an error is detected
             // and removing its corresponding entry from the gateway state
