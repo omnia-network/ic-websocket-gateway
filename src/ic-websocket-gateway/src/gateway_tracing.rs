@@ -1,5 +1,7 @@
 use candid::Principal;
-use opentelemetry_sdk::trace;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use std::{
     fs::{self, File},
     path::Path,
@@ -15,7 +17,7 @@ pub struct InitTracingResult {
 }
 
 pub fn init_tracing(
-    telemetry_jaeger_agent_endpoint: Option<String>,
+    opentelemetry_collector_endpoint: Option<String>,
     gateway_principal: Principal,
 ) -> Result<InitTracingResult, String> {
     if !Path::new("./data/traces").is_dir() {
@@ -54,32 +56,36 @@ pub fn init_tracing(
         .with_filter(env_filter_stdout);
 
     let is_telemetry_enabled =
-        match telemetry_jaeger_agent_endpoint
+        match opentelemetry_collector_endpoint
             .and_then(|s| if s.is_empty() { None } else { Some(s) })
         {
-            Some(telemetry_jaeger_agent_endpoint) => {
-                opentelemetry::global::set_text_map_propagator(
-                    opentelemetry_jaeger::Propagator::new(),
-                );
+            Some(opentelemetry_collector_endpoint) => {
+                let otlp_exporter = opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_endpoint(opentelemetry_collector_endpoint);
 
-                let tracer = opentelemetry_jaeger::new_agent_pipeline()
-                    .with_service_name(
-                        "ic-ws-gw-".to_string() + &gateway_principal.to_string()[..5],
-                    )
-                    .with_max_packet_size(9216) // on MacOS 9216 is the max amount of bytes that can be sent in a single UDP packet
-                    .with_endpoint(telemetry_jaeger_agent_endpoint)
-                    .with_auto_split_batch(true)
-                    .with_trace_config(
-                        trace::config().with_sampler(trace::Sampler::TraceIdRatioBased(1.0)),
-                    )
+                let otlp_config =
+                    opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![
+                        KeyValue::new(
+                            "service.name",
+                            "ic-ws-gw-".to_string() + &gateway_principal.to_string()[..5],
+                        ),
+                    ]));
+
+                let otlp_tracer = opentelemetry_otlp::new_pipeline()
+                    .tracing()
+                    .with_exporter(otlp_exporter)
+                    .with_trace_config(otlp_config)
                     .install_batch(opentelemetry_sdk::runtime::Tokio)
-                    .expect("should set up machinery to export data");
+                    .expect("failed to install");
+
                 let env_filter_telemetry = EnvFilter::builder()
                     .with_env_var("RUST_LOG_TELEMETRY")
                     .try_from_env()
                     .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
+
                 let opentelemetry = tracing_opentelemetry::layer()
-                    .with_tracer(tracer)
+                    .with_tracer(otlp_tracer)
                     .with_filter(env_filter_telemetry);
 
                 let subscriber = tracing_subscriber::registry()

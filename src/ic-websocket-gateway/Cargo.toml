@@ -29,14 +29,14 @@ tracing-subscriber = { version = "0.3.17", features = [
   "registry",
 ] }
 tracing-appender = "0.2"
+tracing-opentelemetry = "0.22.0"
+opentelemetry = { version = "0.21" }
+opentelemetry-otlp = { version = "0.14.0" }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 ic-identity = { path = "../ic-identity" }
 gateway-state = { path = "../gateway-state" }
 canister-utils = { path = "../canister-utils" }
 rand = "0.8"
-opentelemetry = { version = "0.20" }
-tracing-opentelemetry = "0.20"
-opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
 
 [dev-dependencies]
 websocket = "0.26.5"
