@@ -36,6 +36,9 @@ services:
       - telemetry
     ports:
       - 4317:4317
+    environment:
+      - GRAFANA_TEMPO_ENDPOINT=${GRAFANA_TEMPO_ENDPOINT}
+      - GRAFANA_ACCESS_TOKEN=${GRAFANA_ACCESS_TOKEN}
     volumes:
       - ./telemetry/otel-config.yaml:/etc/otelcol/config.yaml
     networks:

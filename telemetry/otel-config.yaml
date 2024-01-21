@@ -9,9 +9,9 @@ processors:
 
 exporters:
   otlp:
-    endpoint: <grafana-tempo-endpoint>
+    endpoint: ${GRAFANA_TEMPO_ENDPOINT}
     headers:
-      authorization: Basic <grafana-access-token>
+      authorization: Basic ${GRAFANA_ACCESS_TOKEN}
 
 service:
   pipelines:
