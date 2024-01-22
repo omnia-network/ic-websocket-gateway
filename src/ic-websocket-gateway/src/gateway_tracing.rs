@@ -1,6 +1,6 @@
 use candid::Principal;
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use std::{
     fs::{self, File},
@@ -62,7 +62,8 @@ pub fn init_tracing(
             Some(opentelemetry_collector_endpoint) => {
                 let otlp_exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
-                    .with_endpoint(opentelemetry_collector_endpoint);
+                    .with_endpoint(opentelemetry_collector_endpoint)
+                    .with_protocol(Protocol::Grpc);
 
                 let otlp_config =
                     opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![

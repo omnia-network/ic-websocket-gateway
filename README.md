@@ -103,7 +103,7 @@ The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [G
 If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run both an opentelemetry collector and grafana together with the gateway by simply running:
 
 ```
-docker compose --profile telemetry up -d
+docker compose --profile telemetry-local up -d
 ```
 
 making sure that you've set the `OPENTELEMETRY_COLLECTOR_ENDPOINT` variable in the `.env` file to:

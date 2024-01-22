@@ -2,7 +2,6 @@ receivers:
   otlp:
     protocols:
       grpc:
-      http:
 
 processors:
   batch:
@@ -10,8 +9,10 @@ processors:
 exporters:
   otlp:
     endpoint: ${GRAFANA_TEMPO_ENDPOINT}
-    headers:
-      authorization: Basic ${GRAFANA_ACCESS_TOKEN}
+    # headers:
+    #   authorization: Basic ${GRAFANA_ACCESS_TOKEN}
+    tls:
+      insecure: true
 
 service:
   pipelines:
