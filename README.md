@@ -100,17 +100,38 @@ The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [G
 -   set the `--opentelemetry-collector-endpoint` argument to point to the opentelemetry collector endpoint (leaving it empty or unset will disable tracing telemetry);
 -   optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
 
-If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run both an opentelemetry collector and grafana together with the gateway by simply running:
+If you're deploying the gateway locally for testing from the [docker-compose.yml](./docker-compose.yml) file, you can run both an opentelemetry collector and grafana together with the gateway by:
 
 ```
 docker compose --profile telemetry-local up -d
 ```
 
-making sure that you've set the `OPENTELEMETRY_COLLECTOR_ENDPOINT` variable in the `.env` file to:
+Before you do so, make sure you set the following varibales in the `.env` file:
 
 ```
-OPENTELEMETRY_COLLECTOR_ENDPOINT=otlp_collector:4317
+OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
+GRAFANA_TEMPO_ENDPOINT=tempo:4318
+GRAFANA_TEMPO_LOCAL=true
 ```
+
+If you are deploying the gateway in production and want to send the telemetry traces to Grafana Cloud, you only need to deploy the OTLP collector. To do so, run:
+
+```
+docker compose --profile telemetry-prod up -d
+```
+
+Before you do so, make sure you set the following varibales in the `.env` file:
+
+```
+OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
+GRAFANA_TEMPO_ENDPOINT=your-grafana-cloud-tempo-endpoint
+GRAFANA_TEMPO_ACCESS_TOKEN=your-grafana-cloud-tempo-basic-auth-token
+GRAFANA_TEMPO_LOCAL=false
+```
+
+You can find the Tempo endpoint and create a token, by following [this](https://grafana.com/blog/2021/04/13/how-to-send-traces-to-grafana-clouds-tempo-service-with-opentelemetry-collector/) guide.
+
+For more information about how to configure the env variables properly, checkout the [.env.example](./.env.example).
 
 # Development
 
