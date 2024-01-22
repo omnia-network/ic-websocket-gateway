@@ -12,7 +12,7 @@ exporters:
     headers:
       authorization: Basic ${GRAFANA_ACCESS_TOKEN}
     tls:
-      insecure: true
+      insecure: ${GRAFANA_TEMPO_LOCAL}
 
 service:
   pipelines:
