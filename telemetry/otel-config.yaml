@@ -9,8 +9,8 @@ processors:
 exporters:
   otlp:
     endpoint: ${GRAFANA_TEMPO_ENDPOINT}
-    # headers:
-    #   authorization: Basic ${GRAFANA_ACCESS_TOKEN}
+    headers:
+      authorization: Basic ${GRAFANA_ACCESS_TOKEN}
     tls:
       insecure: true
 

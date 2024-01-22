@@ -40,7 +40,7 @@ services:
       - 4317:4317 # otlp grpc receiver
     environment:
       - GRAFANA_TEMPO_ENDPOINT=${GRAFANA_TEMPO_ENDPOINT}
-      # - GRAFANA_ACCESS_TOKEN=${GRAFANA_ACCESS_TOKEN}
+      - GRAFANA_ACCESS_TOKEN=${GRAFANA_ACCESS_TOKEN}
     volumes:
       - ./telemetry/otel-config.yaml:/etc/otelcol/config.yaml
     networks:
@@ -61,6 +61,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana-storage:/var/lib/grafana
+      - ./telemetry/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
     networks:
       - ic-ws-gateway-network
     depends_on:
