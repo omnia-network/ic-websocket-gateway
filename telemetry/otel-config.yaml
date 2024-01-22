@@ -10,7 +10,7 @@ exporters:
   otlp:
     endpoint: ${GRAFANA_TEMPO_ENDPOINT}
     headers:
-      authorization: Basic ${GRAFANA_ACCESS_TOKEN}
+      authorization: Basic ${GRAFANA_TEMPO_ACCESS_TOKEN}
     tls:
       insecure: ${GRAFANA_TEMPO_LOCAL}
 

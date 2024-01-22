@@ -40,7 +40,7 @@ services:
       - 4317:4317 # otlp grpc receiver
     environment:
       - GRAFANA_TEMPO_ENDPOINT=${GRAFANA_TEMPO_ENDPOINT}
-      - GRAFANA_ACCESS_TOKEN=${GRAFANA_ACCESS_TOKEN:-}
+      - GRAFANA_TEMPO_ACCESS_TOKEN=${GRAFANA_TEMPO_ACCESS_TOKEN:-}
       - GRAFANA_TEMPO_LOCAL=${GRAFANA_TEMPO_LOCAL:-false}
     volumes:
       - ./telemetry/otel-config.yaml:/etc/otelcol/config.yaml
