@@ -61,6 +61,8 @@ services:
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./telemetry/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./telemetry/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./telemetry/dashboards:/etc/dashboards
     networks:
       - ic-ws-gateway-network
     depends_on:
