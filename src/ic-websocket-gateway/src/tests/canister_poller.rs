@@ -1,15 +1,12 @@
 #[cfg(test)]
 mod test {
-    use crate::{
-        canister_methods::{
-            self, CanisterOutputCertifiedMessages, CanisterOutputMessage,
-            CanisterWsGetMessagesArguments, ClientKey,
-        },
-        canister_poller::{get_nonce_from_message, CanisterPoller, IcWsCanisterMessage},
-        manager::{GatewaySharedState, GatewayState},
-    };
     use candid::Principal;
+    use canister_utils::{
+        ws_get_messages, CanisterOutputCertifiedMessages, CanisterOutputMessage,
+        CanisterWsGetMessagesArguments, ClientKey, IcWsCanisterMessage,
+    };
     use futures_util::join;
+    use gateway_state::GatewayState;
     use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
     use lazy_static::lazy_static;
     use std::{
@@ -19,16 +16,16 @@ mod test {
     use tokio::sync::mpsc::{self, Receiver, Sender};
     use tracing::Span;
 
-    impl CanisterOutputCertifiedMessages {
-        fn serialize(&self) -> Vec<u8> {
-            candid::encode_one(self).unwrap()
-        }
+    use crate::canister_poller::{get_nonce_from_message, CanisterPoller};
 
-        fn mock_n(n: usize, base_nonce: usize) -> Self {
+    struct MockCanisterOutputCertifiedMessages(CanisterOutputCertifiedMessages);
+
+    impl MockCanisterOutputCertifiedMessages {
+        fn mock_n(n: usize, base_nonce: usize) -> CanisterOutputCertifiedMessages {
             let messages = (0..n)
-                .map(|off_nonce| CanisterOutputMessage::mock(base_nonce + off_nonce))
+                .map(|off_nonce| MockCanisterOutputMessage::mock(base_nonce + off_nonce))
                 .collect();
-            Self {
+            CanisterOutputCertifiedMessages {
                 messages,
                 cert: Vec::default(),
                 tree: Vec::default(),
@@ -36,42 +33,49 @@ mod test {
             }
         }
 
-        fn mock_n_with_key_error(n: usize, base_nonce: usize) -> Self {
-            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n - 1, base_nonce);
+        fn mock_n_with_key_error(n: usize, base_nonce: usize) -> CanisterOutputCertifiedMessages {
+            let mut canister_msgs = MockCanisterOutputCertifiedMessages::mock_n(n - 1, base_nonce);
             canister_msgs
                 .messages
-                .push(CanisterOutputMessage::mock_with_key_error());
+                .push(MockCanisterOutputMessage::mock_with_key_error());
             canister_msgs
         }
 
-        fn mock_n_with_not_end_of_queue(n: usize, base_nonce: usize) -> Self {
-            let mut canister_msgs = CanisterOutputCertifiedMessages::mock_n(n, base_nonce);
+        fn mock_n_with_not_end_of_queue(
+            n: usize,
+            base_nonce: usize,
+        ) -> CanisterOutputCertifiedMessages {
+            let mut canister_msgs = MockCanisterOutputCertifiedMessages::mock_n(n, base_nonce);
             canister_msgs.is_end_of_queue = Some(false);
             canister_msgs
         }
     }
 
-    impl CanisterOutputMessage {
-        fn mock(nonce: usize) -> Self {
-            Self {
-                client_key: ClientKey::mock(),
+    struct MockCanisterOutputMessage(CanisterOutputMessage);
+
+    impl MockCanisterOutputMessage {
+        fn mock(nonce: usize) -> CanisterOutputMessage {
+            CanisterOutputMessage {
+                client_key: MockClientKey::mock(),
                 key: format!("_{}", nonce),
                 content: Vec::default(),
             }
         }
 
-        fn mock_with_key_error() -> Self {
-            Self {
-                client_key: ClientKey::mock(),
+        fn mock_with_key_error() -> CanisterOutputMessage {
+            CanisterOutputMessage {
+                client_key: MockClientKey::mock(),
                 key: "_not-a-u64".to_string(),
                 content: Vec::default(),
             }
         }
     }
 
-    impl ClientKey {
-        fn mock() -> Self {
-            Self {
+    struct MockClientKey(ClientKey);
+
+    impl MockClientKey {
+        fn mock() -> ClientKey {
+            ClientKey {
                 client_principal: Principal::anonymous(),
                 client_nonce: 0,
             }
@@ -93,12 +97,12 @@ mod test {
         polling_interval_ms: u64,
         client_channel_tx: Sender<IcWsCanisterMessage>,
     ) -> CanisterPoller {
-        let gateway_shared_state: GatewaySharedState = Arc::new(GatewayState::new());
+        let gateway_state: GatewayState = GatewayState::new();
 
-        let poller_state = gateway_shared_state
+        let poller_state = gateway_state
             .insert_client_channel_and_get_new_poller_state(
                 Principal::anonymous(),
-                ClientKey::mock(),
+                MockClientKey::mock(),
                 client_channel_tx,
                 Span::current(),
             )
@@ -113,16 +117,20 @@ mod test {
             ),
             Principal::anonymous(),
             poller_state,
-            gateway_shared_state,
+            gateway_state,
             polling_interval_ms,
         )
+    }
+
+    fn serialize(body: CanisterOutputCertifiedMessages) -> Vec<u8> {
+        candid::encode_one(body).unwrap()
     }
 
     #[tokio::test]
     async fn should_poll_and_validate_nonces() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
+        let body = serialize(MockCanisterOutputCertifiedMessages::mock_n(msg_count, 0));
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -139,8 +147,7 @@ mod test {
             .unwrap();
         let args = CanisterWsGetMessagesArguments { nonce: 0 };
 
-        match canister_methods::ws_get_messages(&agent, &Principal::anonymous(), args.clone()).await
-        {
+        match ws_get_messages(&agent, &Principal::anonymous(), args.clone()).await {
             Ok(res) => {
                 assert_eq!(res.messages.len(), msg_count);
                 for (i, msg) in res.messages.iter().enumerate() {
@@ -162,7 +169,9 @@ mod test {
     async fn should_poll_and_fail_to_validate_last_nonce() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n_with_key_error(msg_count, 0).serialize();
+        let body = serialize(MockCanisterOutputCertifiedMessages::mock_n_with_key_error(
+            msg_count, 0,
+        ));
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -179,7 +188,7 @@ mod test {
             .unwrap();
         let args = CanisterWsGetMessagesArguments { nonce: 0 };
 
-        match canister_methods::ws_get_messages(&agent, &Principal::anonymous(), args).await {
+        match ws_get_messages(&agent, &Principal::anonymous(), args).await {
             Ok(res) => {
                 for (i, msg) in res.messages.iter().enumerate() {
                     if i == msg_count - 1 {
@@ -204,7 +213,7 @@ mod test {
     async fn should_sleep_after_relaying() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
+        let body = serialize(MockCanisterOutputCertifiedMessages::mock_n(msg_count, 0));
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -260,8 +269,9 @@ mod test {
     async fn should_not_sleep_after_relaying() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body =
-            CanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count, 0).serialize();
+        let body = serialize(
+            MockCanisterOutputCertifiedMessages::mock_n_with_not_end_of_queue(msg_count, 0),
+        );
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -313,7 +323,7 @@ mod test {
     async fn should_terminate_polling_with_error() {
         let server = &*MOCK_SERVER;
         let msg_count = 10;
-        let body = CanisterOutputCertifiedMessages::mock_n(msg_count, 0).serialize();
+        let body = serialize(MockCanisterOutputCertifiedMessages::mock_n(msg_count, 0));
         let path = "/ws_get_messages";
         let mut guard = server.lock().unwrap();
         // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
@@ -347,6 +357,8 @@ mod test {
         // as the poller processed only the messages of the first polling iteration
         assert_eq!(i as usize, msg_count);
 
+        // needed to make sure that the test fails in case the task panics
+        let res = join!(handle).0.expect("task panicked");
         // the poller should return an error as in the first iteration it polls the messages from 0 to 'msg_count - 1'
         // in the second iteration it polls the messages which start again from 0 (as the mock server retruns the same messages)
         // and therefore it returns an error as the poller was expecting the nonce to be equal to 'msg_count'
@@ -355,7 +367,7 @@ mod test {
                 "Non consecutive nonce: expected {}, got 0",
                 msg_count
             )),
-            join!(handle).0.unwrap()
+            res
         );
 
         mock.assert_async().await;

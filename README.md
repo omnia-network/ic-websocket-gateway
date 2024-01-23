@@ -38,7 +38,7 @@ There are some command line arguments that you can set when running the gateway:
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
-| `--telemetry-jaeger-agent-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
+| `--opentelemetry-collector-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
 
 ## Docker
 
@@ -95,22 +95,43 @@ RUST_LOG_FILE=ic_websocket_gateway=debug RUST_LOG_STDOUT=ic_websocket_gateway=de
 
 ## Tracing telemetry
 
-The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [Jaeger](https://www.jaegertracing.io/) for tracing telemetry. To enable tracing telemetry, you have to:
+The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [Grafana](https://www.grafana.com/) for tracing telemetry. To enable tracing telemetry, you have to:
 
--   set the `--telemetry-jaeger-agent-endpoint` argument to point to the Jaeger agent endpoint (leaving it empty or unset will disable tracing telemetry);
+-   set the `--opentelemetry-collector-endpoint` argument to point to the opentelemetry collector endpoint (leaving it empty or unset will disable tracing telemetry);
 -   optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
 
-If you're running the gateway using from the [docker-compose.yml](./docker-compose.yml) file, you can run a Jaeger agent together with the gateway by simply running:
+If you're deploying the gateway locally for testing from the [docker-compose.yml](./docker-compose.yml) file, you can run both an opentelemetry collector and grafana together with the gateway by:
 
 ```
-docker compose --profile jaeger up -d
+docker compose --profile telemetry-local up -d
 ```
 
-making sure that you've set the `TELEMETRY_JAEGER_AGENT_ENDPOINT` variable in the `.env` file to:
+Before you do so, make sure you set the following varibales in the `.env` file:
 
 ```
-TELEMETRY_JAEGER_AGENT_ENDPOINT=jaeger:6831
+OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
+GRAFANA_TEMPO_ENDPOINT=tempo:4318
+GRAFANA_TEMPO_LOCAL=true
 ```
+
+If you are deploying the gateway in production and want to send the telemetry traces to Grafana Cloud, you only need to deploy the OTLP collector. To do so, run:
+
+```
+docker compose --profile telemetry-prod up -d
+```
+
+Before you do so, make sure you set the following varibales in the `.env` file:
+
+```
+OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
+GRAFANA_TEMPO_ENDPOINT=your-grafana-cloud-tempo-endpoint
+GRAFANA_TEMPO_ACCESS_TOKEN=your-grafana-cloud-tempo-basic-auth-token
+GRAFANA_TEMPO_LOCAL=false
+```
+
+You can find the Tempo endpoint and create a token, by following [this](https://grafana.com/blog/2021/04/13/how-to-send-traces-to-grafana-clouds-tempo-service-with-opentelemetry-collector/) guide.
+
+For more information about how to configure the env variables properly, checkout the [.env.example](./.env.example).
 
 # Development
 

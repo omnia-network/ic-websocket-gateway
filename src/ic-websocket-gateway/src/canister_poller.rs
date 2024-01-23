@@ -1,11 +1,9 @@
-use crate::{
-    canister_methods::{
-        self, CanisterOutputCertifiedMessages, CanisterToClientMessage,
-        CanisterWsGetMessagesArguments, IcError,
-    },
-    manager::{CanisterPrincipal, ClientSender, GatewaySharedState, PollerState},
-};
 use candid::Principal;
+use canister_utils::{
+    ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
+    CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
+};
+use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::Sender;
@@ -16,9 +14,6 @@ enum PollingStatus {
     MessagesPolled(CanisterOutputCertifiedMessages),
 }
 
-/// Canister message to be relayed to the client, together with its span
-pub type IcWsCanisterMessage = (CanisterToClientMessage, Span);
-
 /// Poller which periodically queries a canister for new messages and relays them to the client
 pub struct CanisterPoller {
     /// Agent used to communicate with the IC
@@ -28,7 +23,7 @@ pub struct CanisterPoller {
     /// State of the poller
     poller_state: PollerState,
     /// State of the gateway
-    gateway_shared_state: GatewaySharedState,
+    gateway_state: GatewayState,
     /// Nonce specified by the gateway during the query call to ws_get_messages,
     /// used by the CDK to determine which messages to respond with
     next_message_nonce: u64,
@@ -44,14 +39,14 @@ impl CanisterPoller {
         agent: Arc<Agent>,
         canister_id: Principal,
         poller_state: PollerState,
-        gateway_shared_state: GatewaySharedState,
+        gateway_state: GatewayState,
         polling_interval_ms: u64,
     ) -> Self {
         Self {
             agent,
             canister_id,
             poller_state,
-            gateway_shared_state,
+            gateway_state,
             next_message_nonce: 0,
             polling_iteration: 0,
             polling_interval_ms,
@@ -81,8 +76,7 @@ impl CanisterPoller {
                 // as the poller state contains all the state of the clients sessions opened to the failed poller, removing the poller state
                 // will also remove all the corresponding clients' states
                 // therefore, there is no need to wait for the clients to remove their state before terminating the poller
-                self.gateway_shared_state
-                    .remove_failed_canister(self.canister_id);
+                self.gateway_state.remove_failed_canister(self.canister_id);
                 // TODO: notify the canister that it cannot be polled anymore
                 return Err(e);
             }
@@ -145,7 +139,7 @@ impl CanisterPoller {
         trace!("Started polling iteration");
 
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        match canister_methods::ws_get_messages(
+        match ws_get_messages(
             &self.agent,
             &self.canister_id,
             CanisterWsGetMessagesArguments {
@@ -211,7 +205,7 @@ impl CanisterPoller {
                     trace!("Start relaying message",);
                     (canister_to_client_message, Span::current())
                 });
-                relay_message(canister_message, client_channel_tx)
+                relay_message(canister_message, &client_channel_tx)
                     .instrument(canister_message_span)
                     .await;
                 relayed_messages_count += 1;
@@ -293,9 +287,13 @@ impl CanisterPoller {
         // this is not acceptable as it results in messages being lost
         // therefore, check if the poller should be terminated after each polling iteration
         // TODO: find a more efficient way to do this, e.g. when the last client disconnects
-        return self
-            .gateway_shared_state
-            .remove_canister_if_empty(self.canister_id);
+        match self
+            .gateway_state
+            .remove_canister_if_empty(self.canister_id)
+        {
+            CanisterEntry::RemovedEmpty => true,
+            CanisterEntry::NotEmpty => false,
+        }
     }
 }
 
