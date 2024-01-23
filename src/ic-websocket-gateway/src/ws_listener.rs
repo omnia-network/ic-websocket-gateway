@@ -145,7 +145,7 @@ impl WsListener {
         let accept_client_connection_span = span!(
             Level::DEBUG,
             "Accept Connection",
-            ?client_addr,
+            client_addr = ?client_addr.ip(),
             client_id = self.next_client_id
         );
         let client_id = self.next_client_id;
