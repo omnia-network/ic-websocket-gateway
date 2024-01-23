@@ -9,9 +9,12 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
-type PollerTimeout = Duration;
+pub(crate) const POLLING_TIMEOUT_MS: u64 = 5_000;
 
-enum PollingStatus {
+type PollingTimeout = Duration;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PollingStatus {
     NoMessagesPolled,
     MessagesPolled(CanisterOutputCertifiedMessages),
     PollerTimedOut,
@@ -144,7 +147,7 @@ impl CanisterPoller {
     }
 
     /// Polls the canister for messages
-    async fn poll_canister(&mut self) -> Result<PollingStatus, String> {
+    pub(crate) async fn poll_canister(&mut self) -> Result<PollingStatus, String> {
         trace!("Started polling iteration");
 
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
@@ -152,7 +155,7 @@ impl CanisterPoller {
         // to prevent this, we set a timeout of 5 seconds, if the poller does not receive a response in time, it polls immediately
         // in case of a timeout, the message nonce is not updated so that no messages are lost by polling immediately again
         match timeout(
-            PollerTimeout::from_secs(5),
+            PollingTimeout::from_millis(POLLING_TIMEOUT_MS),
             ws_get_messages(
                 &self.agent,
                 &self.canister_id,

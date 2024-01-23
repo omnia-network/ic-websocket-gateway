@@ -93,7 +93,7 @@ pub struct WebsocketMessage {
 }
 
 /// Element of the list of messages returned to the WS Gateway after polling.
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Debug, CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputMessage {
     /// The client that the gateway will forward the message to or that sent the message.
     pub client_key: ClientKey,
@@ -122,7 +122,7 @@ pub enum CanisterServiceMessage {
 }
 
 /// List of messages returned to the WS Gateway after polling.
-#[derive(CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Debug, CandidType, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CanisterOutputCertifiedMessages {
     pub messages: Vec<CanisterOutputMessage>, // List of messages.
     #[serde(with = "serde_bytes")]
