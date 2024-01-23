@@ -1,0 +1,7 @@
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    url: http://tempo:3200  # tempo server
+    basicAuth: false

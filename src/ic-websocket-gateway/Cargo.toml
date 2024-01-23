@@ -1,6 +1,6 @@
 [package]
 name = "ic_websocket_gateway"
-version = "1.2.3"
+version = "1.3.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -10,11 +10,9 @@ license.workspace = true
 async-trait = "0.1.72"
 candid = { workspace = true }
 ic-agent = { workspace = true }
-ic-cdk = { workspace = true }
-ic-cdk-macros = { workspace = true }
 serde = { workspace = true }
 serde_cbor = "0.11.2"
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { workspace = true }
 tokio-native-tls = "0.3.1"
 native-tls = "0.2.11"
 tokio-util = "0.7.8"
@@ -22,24 +20,26 @@ serde_bytes = "0.11.12"
 tokio-tungstenite = "0.20.0"
 futures-util = "0.3.28"
 structopt = "0.3.21"
-tracing = "0.1.40"
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.17", features = [
   "fmt",
   "std",
   "json",
   "env-filter",
+  "registry",
 ] }
 tracing-appender = "0.2"
-ic-identity = { version = "0.1.0", path = "../ic-identity" }
+tracing-opentelemetry = "0.22.0"
+opentelemetry = { version = "0.21" }
+opentelemetry-otlp = { version = "0.14.0" }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
+ic-identity = { path = "../ic-identity" }
+gateway-state = { path = "../gateway-state" }
+canister-utils = { path = "../canister-utils" }
 rand = "0.8"
-reqwest = { workspace = true }
-opentelemetry = { version = "0.20" }
-tracing-opentelemetry = "0.20"
-opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
-dashmap = "5.5.3"
 
 [dev-dependencies]
 websocket = "0.26.5"
 mockito = "1.2.0"
 lazy_static = "1.4.0"
+canister-utils = { path = "../canister-utils", features = ["mock-server"] }

@@ -1,12 +1,13 @@
-use crate::gateway_tracing::{init_tracing, InitTracingResult};
-use crate::manager::Manager;
-use crate::ws_listener::TlsConfig;
+use crate::{
+    gateway_tracing::{init_tracing, InitTracingResult},
+    manager::Manager,
+    ws_listener::TlsConfig,
+};
 use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{fs, path::Path};
 use structopt::StructOpt;
 use tracing::info;
 
-mod canister_methods;
 mod canister_poller;
 mod client_session;
 mod client_session_handler;
@@ -46,7 +47,7 @@ struct DeploymentInfo {
     /// ```bash
     /// docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
     /// ```
-    telemetry_jaeger_agent_endpoint: Option<String>,
+    opentelemetry_collector_endpoint: Option<String>,
 }
 
 fn create_data_dir() -> Result<(), String> {
@@ -76,7 +77,7 @@ async fn main() -> Result<(), String> {
         guards: _guards,
         is_telemetry_enabled,
     } = init_tracing(
-        deployment_info.telemetry_jaeger_agent_endpoint.to_owned(),
+        deployment_info.opentelemetry_collector_endpoint.to_owned(),
         gateway_principal,
     )
     .expect("could not init tracing");

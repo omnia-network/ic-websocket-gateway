@@ -1,13 +1,12 @@
-use crate::{
-    canister_methods::{CanisterToClientMessage, CanisterWsOpenArguments, ClientKey},
-    canister_poller::IcWsCanisterMessage,
-    manager::CanisterPrincipal,
-};
 use candid::{decode_args, Principal};
+use canister_utils::{
+    CanisterToClientMessage, CanisterWsOpenArguments, ClientKey, IcWsCanisterMessage,
+};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+use gateway_state::CanisterPrincipal;
 use ic_agent::{
     agent::{Envelope, EnvelopeContent},
     Agent, AgentError,
@@ -59,7 +58,7 @@ pub enum IcWsError {
     Poller(String),
 }
 
-/// IC WebSocket session
+/// Actor for an IC WebSocket session
 pub struct ClientSession<S: AsyncRead + AsyncWrite + Unpin> {
     /// Identifier of the client connection
     _client_id: u64,
