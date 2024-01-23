@@ -11,12 +11,15 @@ mod test {
     use lazy_static::lazy_static;
     use std::{
         sync::{Arc, Mutex},
+        thread,
         time::Duration,
     };
     use tokio::sync::mpsc::{self, Receiver, Sender};
     use tracing::Span;
 
-    use crate::canister_poller::{get_nonce_from_message, CanisterPoller};
+    use crate::canister_poller::{
+        get_nonce_from_message, CanisterPoller, PollingStatus, POLLING_TIMEOUT_MS,
+    };
 
     struct MockCanisterOutputCertifiedMessages(CanisterOutputCertifiedMessages);
 
@@ -237,7 +240,7 @@ mod test {
             let end_polling_instant = tokio::time::Instant::now();
             let elapsed = end_polling_instant - start_polling_instant;
             // run 'cargo test -- --nocapture' to see the elapsed time
-            println!("Elapsed: {:?}", elapsed);
+            println!("Elapsed after relaying (should not sleep): {:?}", elapsed);
             assert!(
                 elapsed > Duration::from_millis(polling_interval_ms)
                 // Reasonable to expect that the time it takes to sleep
@@ -294,7 +297,7 @@ mod test {
             poller.poll_and_relay().await.expect("Failed to poll");
             let end_polling_instant = tokio::time::Instant::now();
             let elapsed = end_polling_instant - start_polling_instant;
-            println!("Elapsed: {:?}", elapsed);
+            println!("Elapsed after relaying (should sleep): {:?}", elapsed);
             assert!(
                 // The `poll_and_relay` function should not sleep for `polling_interval_ms`
                 // if the queue is not empty.
@@ -313,6 +316,51 @@ mod test {
 
         // needed to make sure that the test fails in case the task panics
         join!(handle).0.expect("task panicked");
+
+        mock.assert_async().await;
+        // just to make it explicit that the guard should be kept for the whole duration of the test
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn should_not_sleep_after_timeout() {
+        let server = &*MOCK_SERVER;
+        let path = "/ws_get_messages";
+        let mut guard = server.lock().unwrap();
+        // do not drop the guard until the end of this test to make sure that no other test interleaves and overwrites the mock response
+        let mock = guard
+            .mock("GET", path)
+            .with_chunked_body(|w| {
+                thread::sleep(Duration::from_millis(POLLING_TIMEOUT_MS + 10));
+                w.write_all(&vec![])
+            })
+            .expect(2)
+            .create_async()
+            .await;
+
+        let polling_interval_ms = 100;
+        let (client_channel_tx, _): (Sender<IcWsCanisterMessage>, Receiver<IcWsCanisterMessage>) =
+            mpsc::channel(100);
+
+        let mut poller = create_poller(polling_interval_ms, client_channel_tx);
+
+        // check that the poller times out
+        assert_eq!(
+            Ok(PollingStatus::PollerTimedOut),
+            poller.poll_canister().await
+        );
+
+        // check that the poller does not wait for a polling interval after timing out
+        let start_polling_instant = tokio::time::Instant::now();
+        poller.poll_and_relay().await.expect("Failed to poll");
+        let end_polling_instant = tokio::time::Instant::now();
+        let elapsed = end_polling_instant - start_polling_instant;
+        println!("Elapsed due to timeout: {:?}", elapsed);
+        assert!(
+            // The `poll_canister` function should not sleep for `polling_interval_ms`
+            // after the poller times out.
+            elapsed < Duration::from_millis(POLLING_TIMEOUT_MS + polling_interval_ms)
+        );
 
         mock.assert_async().await;
         // just to make it explicit that the guard should be kept for the whole duration of the test
