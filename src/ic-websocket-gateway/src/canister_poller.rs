@@ -62,7 +62,7 @@ impl CanisterPoller {
         // initially set to None as the first iteration will not have a previous span
         let mut previous_polling_iteration_span: Option<Span> = None;
         loop {
-            let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration);
+            let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration, cargo_version = env!("CARGO_PKG_VERSION"));
             if let Some(previous_polling_iteration_span) = previous_polling_iteration_span {
                 // create a follow from relationship between the current and previous polling iteration
                 // this enables to crawl polling iterations in reverse chronological order
