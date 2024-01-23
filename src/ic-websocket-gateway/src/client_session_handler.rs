@@ -13,7 +13,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_tungstenite::accept_async;
-use tracing::{debug, info, span, warn, Instrument, Level, Span};
+use tracing::{debug, field, info, span, warn, Instrument, Level, Span};
 
 /// Handler of a client IC WS session
 pub struct ClientSessionHandler {
@@ -63,8 +63,7 @@ impl ClientSessionHandler {
                     Receiver<IcWsCanisterMessage>,
                 ) = mpsc::channel(100);
 
-                let client_session_span =
-                    span!(parent: &Span::current(), Level::TRACE, "Client Session");
+                let client_session_span = span!(parent: &Span::current(), Level::TRACE, "Client Session", canister_id = field::Empty);
 
                 let client_session = ClientSession::init(
                     self.id,
@@ -141,6 +140,8 @@ impl ClientSessionHandler {
                             client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
                         );
+
+                    client_session_span.record("canister_id", canister_id.to_string());
 
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
