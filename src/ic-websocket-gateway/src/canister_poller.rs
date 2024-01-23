@@ -128,6 +128,7 @@ impl CanisterPoller {
                 }
             },
             PollingStatus::PollerTimedOut => {
+                // if the poller timed out, it already waited way too long... return immediately so that the next polling iteration can be started
                 warn!("Poller timed out. Polling immediately");
                 return Ok(());
             },
