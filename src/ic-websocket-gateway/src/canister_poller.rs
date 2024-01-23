@@ -6,12 +6,18 @@ use canister_utils::{
 use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
 use ic_agent::{Agent, AgentError};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::mpsc::Sender;
+use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
-enum PollingStatus {
+pub(crate) const POLLING_TIMEOUT_MS: u64 = 5_000;
+
+type PollingTimeout = Duration;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PollingStatus {
     NoMessagesPolled,
     MessagesPolled(CanisterOutputCertifiedMessages),
+    PollerTimedOut,
 }
 
 /// Poller which periodically queries a canister for new messages and relays them to the client
@@ -59,7 +65,7 @@ impl CanisterPoller {
         // initially set to None as the first iteration will not have a previous span
         let mut previous_polling_iteration_span: Option<Span> = None;
         loop {
-            let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration);
+            let polling_iteration_span = span!(Level::TRACE, "Polling Iteration", canister_id = %self.canister_id, polling_iteration = self.polling_iteration, cargo_version = env!("CARGO_PKG_VERSION"));
             if let Some(previous_polling_iteration_span) = previous_polling_iteration_span {
                 // create a follow from relationship between the current and previous polling iteration
                 // this enables to crawl polling iterations in reverse chronological order
@@ -97,33 +103,39 @@ impl CanisterPoller {
     pub async fn poll_and_relay(&mut self) -> Result<(), String> {
         let start_polling_instant = tokio::time::Instant::now();
 
-        if let PollingStatus::MessagesPolled(certified_canister_output) =
-            self.poll_canister().await?
-        {
-            let relay_messages_span =
-                span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
-            let end_of_queue_reached = {
-                match certified_canister_output.is_end_of_queue {
-                    Some(is_end_of_queue_reached) => is_end_of_queue_reached,
-                    // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
-                    // in this case, assume that the queue is fully drained and therefore will be polled again
-                    // after waiting for 'polling_interval_ms'
-                    None => true,
+        match self.poll_canister().await? {
+            PollingStatus::MessagesPolled(certified_canister_output) => {
+                let relay_messages_span =
+                    span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
+                let end_of_queue_reached = {
+                    match certified_canister_output.is_end_of_queue {
+                        Some(is_end_of_queue_reached) => is_end_of_queue_reached,
+                        // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
+                        // in this case, assume that the queue is fully drained and therefore will be polled again
+                        // after waiting for 'polling_interval_ms'
+                        None => true,
+                    }
+                };
+                self.update_nonce(&certified_canister_output)?;
+                // relaying of messages cannot be done in a separate task for each polling iteration
+                // as they might interleave and break the correct ordering of messages
+                // TODO: create a separate task dedicated to relaying messages which receives the messages from the poller via a queue
+                //       and relays them in FIFO order
+                self.relay_messages(certified_canister_output)
+                    .instrument(relay_messages_span)
+                    .await;
+                if !end_of_queue_reached {
+                    // if the queue is not fully drained, return immediately so that the next polling iteration can be started
+                    warn!("Canister queue is not fully drained. Polling immediately");
+                    return Ok(());
                 }
-            };
-            self.update_nonce(&certified_canister_output)?;
-            // relaying of messages cannot be done in a separate task for each polling iteration
-            // as they might interleave and break the correct ordering of messages
-            // TODO: create a separate task dedicated to relaying messages which receives the messages from the poller via a queue
-            //       and relays them in FIFO order
-            self.relay_messages(certified_canister_output)
-                .instrument(relay_messages_span)
-                .await;
-            if !end_of_queue_reached {
-                // if the queue is not fully drained, return immediately so that the next polling iteration can be started
-                warn!("Canister queue is not fully drained. Polling immediately");
+            },
+            PollingStatus::PollerTimedOut => {
+                // if the poller timed out, it already waited way too long... return immediately so that the next polling iteration can be started
+                warn!("Poller timed out. Polling immediately");
                 return Ok(());
-            }
+            },
+            PollingStatus::NoMessagesPolled => (),
         }
 
         // compute the amout of time to sleep for before polling again
@@ -135,20 +147,26 @@ impl CanisterPoller {
     }
 
     /// Polls the canister for messages
-    async fn poll_canister(&mut self) -> Result<PollingStatus, String> {
+    pub(crate) async fn poll_canister(&mut self) -> Result<PollingStatus, String> {
         trace!("Started polling iteration");
 
         // get messages to be relayed to clients from canister (starting from 'message_nonce')
-        match ws_get_messages(
-            &self.agent,
-            &self.canister_id,
-            CanisterWsGetMessagesArguments {
-                nonce: self.next_message_nonce,
-            },
+        // the response timeout of the IC CDK is 2 minutes which implies that the poller would be stuck for that long waiting for a response
+        // to prevent this, we set a timeout of 5 seconds, if the poller does not receive a response in time, it polls immediately
+        // in case of a timeout, the message nonce is not updated so that no messages are lost by polling immediately again
+        match timeout(
+            PollingTimeout::from_millis(POLLING_TIMEOUT_MS),
+            ws_get_messages(
+                &self.agent,
+                &self.canister_id,
+                CanisterWsGetMessagesArguments {
+                    nonce: self.next_message_nonce,
+                },
+            ),
         )
         .await
         {
-            Ok(certified_canister_output) => {
+            Ok(Ok(certified_canister_output)) => {
                 let number_of_polled_messages = certified_canister_output.messages.len();
                 if number_of_polled_messages == 0 {
                     trace!("No messages polled from canister");
@@ -161,7 +179,7 @@ impl CanisterPoller {
                     Ok(PollingStatus::MessagesPolled(certified_canister_output))
                 }
             },
-            Err(IcError::Agent(e)) => {
+            Ok(Err(IcError::Agent(e))) => {
                 if is_recoverable_error(&e) {
                     // if the error is due to a replica which is either actively malicious or simply unavailable
                     // or to a malfunctioning boundary node,
@@ -174,8 +192,12 @@ impl CanisterPoller {
                     Err(format!("Unrecoverable agent error: {:?}", e))
                 }
             },
-            Err(IcError::Candid(e)) => Err(format!("Unrecoverable candid error: {:?}", e)),
-            Err(IcError::Cdk(e)) => Err(format!("Unrecoverable CDK error: {:?}", e)),
+            Ok(Err(IcError::Candid(e))) => Err(format!("Unrecoverable candid error: {:?}", e)),
+            Ok(Err(IcError::Cdk(e))) => Err(format!("Unrecoverable CDK error: {:?}", e)),
+            Err(e) => {
+                warn!("Poller took too long to retrieve messages: {:?}", e);
+                Ok(PollingStatus::PollerTimedOut)
+            },
         }
     }
 

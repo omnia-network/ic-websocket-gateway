@@ -146,7 +146,8 @@ impl WsListener {
             Level::DEBUG,
             "Accept Connection",
             client_addr = ?client_addr.ip(),
-            client_id = self.next_client_id
+            client_id = self.next_client_id,
+            cargo_version = env!("CARGO_PKG_VERSION"),
         );
         let client_id = self.next_client_id;
         let tls_acceptor = self.tls_acceptor.clone();

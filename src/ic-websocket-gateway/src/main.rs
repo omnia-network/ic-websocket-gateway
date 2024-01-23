@@ -84,6 +84,7 @@ async fn main() -> Result<(), String> {
 
     // must be printed after initializing tracing to ensure that the info are captured
     info!("Deployment info: {:?}", deployment_info);
+    info!("Cargo version: {}", env!("CARGO_PKG_VERSION"));
     info!("Gateway Agent principal: {}", gateway_principal);
 
     let tls_config = if deployment_info.tls_certificate_pem_path.is_some()
