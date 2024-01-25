@@ -23,7 +23,7 @@ npm run generate:test_canister_rs
 source .env
 
 echo "Running integration test..."
-WS_GATEWAY_URL=ws://127.0.0.1:8080 IC_URL=http://127.0.0.1:4943 FETCH_IC_ROOT_KEY=true DFX_NETWORK=local TEST_CANISTER_ID=$CANISTER_ID_TEST_CANISTER_RS npm run integration:test
+WS_GATEWAY_URL=ws://127.0.0.1:8080 IC_URL=http://127.0.0.1:4943 FETCH_IC_ROOT_KEY=true DFX_NETWORK=local npm run integration:test
 
 echo "Stopping gateway..."
 kill $gateway_pid
