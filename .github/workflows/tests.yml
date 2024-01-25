@@ -35,7 +35,7 @@ jobs:
           cache-on-failure: "true"
       - name: Run unit tests
         run: ./scripts/ci_cd_test_unit.sh
-      - name: Install integration tests dependencies
-        run: ./scripts/install_integration_test_deps.sh
+      - name: Prepare environment for integration tests
+        run: ./scripts/prepare_integration_tests.sh
       - name: Run integration tests
         run: ./scripts/ci_cd_test_integration.sh
