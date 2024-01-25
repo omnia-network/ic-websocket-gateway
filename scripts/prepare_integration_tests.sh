@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -e
+
+echo "Building gateway"
+cargo build
+
 cd tests
 
 # install tests dependencies

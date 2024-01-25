@@ -1,12 +1,13 @@
 import IcWebSocket, { createWsConfig, generateRandomIdentity } from "ic-websocket-js";
-import environment from "./utils/environment";
 import { test_canister_rs } from "../declarations/test_canister_rs";
 import type { AppMessage, _SERVICE } from "../declarations/test_canister_rs/test_canister_rs.did";
 
 /// IcWebsocket parameters
-const gatewayAddress = environment.WS_GATEWAY_URL;
-const icUrl = environment.IC_URL;
-const canisterId = environment.TEST_CANISTER_ID;
+const gatewayAddress = process.env.WS_GATEWAY_URL;
+const icUrl = process.env.IC_URL;
+const canisterId = process.env.TEST_CANISTER_ID
+  || process.env.CANISTER_ID_TEST_CANISTER_RS
+  || process.env.CANISTER_ID_TEST_CANISTER_MO;
 
 /// test constants & variables
 const pingPongCount = 20;

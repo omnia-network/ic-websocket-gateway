@@ -155,20 +155,20 @@ Integration tests use the IC WebSocket SDKs and are written in both Rust and Mot
 
 After installing Node.js and dfx, you can run the integration tests as follows:
 
-1. Install test dependencies:
+1. Prepare the test environment by installing dependencies and building the components by running the following command:
     ```
-    ./scripts/install_integration_test_deps.sh
+    ./scripts/prepare_integration_tests.sh
     ```
-2. To run integration tests using the Rust test canister:
+2. The `tests/.env` file should now contain some variables created by `dfx`. Add the variables from the [.env.example](./tests/.env.example) file to the `.env` file and leave them unchanged.
+3. Run integration tests using the Rust test canister:
     ```
     ./scripts/integration_test_rs.sh
     ```
-3. To run integration tests using the Motoko test canister:
+
+    If you instead want to run tests using the Motoko test canister, run the following command instead:
     ```
     ./scripts/integration_test_mo.sh
     ```
-
-These scripts will take care of running the local replica and deploying the desired test canister.
 
 Integration tests can be found in the [tests/src/integration](./tests/src/integration/) folder.
 
@@ -176,7 +176,7 @@ Tests canisters used in the integration tests can be found in the [tests/src/tes
 
 ### Local test script
 
-To make it easier to run both the unit and integration tests (using Rust test canister), the [scripts/local_test.sh](./scripts/local_test.sh) script is provided. You can run it with:
+After setting up and running the tests for the first time following the steps above, you can use the following command to run the unit and integration tests (using Rust test canister) together:
 
 ```
 ./scripts/local_test.sh

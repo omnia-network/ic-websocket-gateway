@@ -1,8 +1,7 @@
+#!/bin/bash
+
 echo "Starting local replica"
 dfx start --clean --background
-
-echo "Building gateway"
-cargo build
 
 echo "Starting gateway in the background"
 RUST_LOG_STDOUT=ic_websocket_gateway=debug cargo run > scripts/gateway_test.log &
