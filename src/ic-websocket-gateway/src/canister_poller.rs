@@ -221,7 +221,7 @@ impl CanisterPoller {
                 .get(&canister_output_message.client_key)
                 .as_deref()
             {
-                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
+                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key, %self.canister_id);
                 canister_message_span.follows_from(Span::current().id());
                 let canister_message = canister_message_span.in_scope(|| {
                     trace!("Start relaying message",);
