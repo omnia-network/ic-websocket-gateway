@@ -135,7 +135,7 @@ impl ClientSessionHandler {
                         .gateway_state
                         .insert_client_channel_and_get_new_poller_state(
                             canister_id,
-                            client_key,
+                            client_key.clone(),
                             // important not to clone 'client_channel_tx' as otherwise the client session will not receive None in case of a poller error
                             client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
@@ -143,13 +143,20 @@ impl ClientSessionHandler {
 
                     client_session_span.record("canister_id", canister_id.to_string());
 
+                    // ensure this is done after the gateway state has been updated
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
-                    client_session
+                    if let Err(e) = client_session
                         .relay_client_message(ws_open_message)
                         .instrument(client_session_span.clone())
                         .await
-                        .map_err(|e| format!("Could not relay WS open message to IC: {:?}", e))?;
+                    {
+                        // if the message could not be relayed to the IC, remove the client from the gateway state
+                        // before returning the error and terminating the session handler
+                        self.gateway_state
+                            .remove_client(canister_id, client_key.clone());
+                        return Err(format!("Could not relay WS open message to IC: {:?}", e))?;
+                    }
 
                     client_session_span.in_scope(|| {
                         debug!("Client session setup");
