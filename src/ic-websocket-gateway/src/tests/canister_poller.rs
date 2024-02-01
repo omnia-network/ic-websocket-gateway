@@ -345,10 +345,7 @@ mod test {
         let mut poller = create_poller(polling_interval_ms, client_channel_tx);
 
         // check that the poller times out
-        assert_eq!(
-            Ok(PollingStatus::PollerTimedOut),
-            poller.poll_canister().await
-        );
+        assert_eq!(Ok(PollingStatus::TimedOut), poller.poll_canister().await);
 
         // check that the poller does not wait for a polling interval after timing out
         let start_polling_instant = tokio::time::Instant::now();

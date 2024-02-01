@@ -15,11 +15,15 @@ pub(crate) const POLLING_TIMEOUT_MS: u64 = 5_000;
 
 type PollingTimeout = Duration;
 
+/// Result of the polling iteration
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PollingStatus {
+    /// No messages polled
     NoMessagesPolled,
+    /// Some messages polled
     MessagesPolled(CanisterOutputCertifiedMessages),
-    PollerTimedOut,
+    /// Request timed out
+    TimedOut,
 }
 
 /// Poller which periodically queries a canister for new messages and relays them to the client
@@ -132,7 +136,7 @@ impl CanisterPoller {
                     return Ok(());
                 }
             },
-            PollingStatus::PollerTimedOut => {
+            PollingStatus::TimedOut => {
                 // if the poller timed out, it already waited way too long... return immediately so that the next polling iteration can be started
                 warn!("Poller timed out. Polling immediately");
                 return Ok(());
@@ -198,7 +202,7 @@ impl CanisterPoller {
             Ok(Err(IcError::Cdk(e))) => Err(format!("Unrecoverable CDK error: {:?}", e)),
             Err(e) => {
                 warn!("Poller took too long to retrieve messages: {:?}", e);
-                Ok(PollingStatus::PollerTimedOut)
+                Ok(PollingStatus::TimedOut)
             },
         }
     }
