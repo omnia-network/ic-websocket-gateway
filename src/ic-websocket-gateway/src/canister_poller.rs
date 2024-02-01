@@ -4,7 +4,7 @@ use canister_utils::{
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
 use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
-use ic_agent::{Agent, AgentError};
+use ic_agent::{agent::RejectCode, Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
@@ -353,7 +353,6 @@ fn is_recoverable_error(e: &AgentError) -> bool {
         AgentError::InvalidReplicaUrl(_)
         | AgentError::TimeoutWaitingForResponse()
         | AgentError::InvalidCborData(_)
-        | AgentError::ReplicaError(_)
         | AgentError::HttpError(_)
         | AgentError::InvalidReplicaStatus
         | AgentError::RequestStatusDoneNoReply(_)
@@ -366,6 +365,9 @@ fn is_recoverable_error(e: &AgentError) -> bool {
         | AgentError::TransportError(_)
         | AgentError::CallDataMismatch { .. }
         | AgentError::InvalidRejectCode(_) => true,
+        // in case of a replica error, we recover only if the error is transient
+        // all other errors (SysFatal, DestinationInvalid, CanisterReject, CanisterError) are considered permanent
+        AgentError::ReplicaError(e) => e.reject_code == RejectCode::SysTransient,
         _ => false,
     }
 }

@@ -196,7 +196,9 @@ impl ClientSessionHandler {
                 Err(e) => {
                     if let IcWsError::Poller(e) = e {
                         // no need to remove the client as the whole poller state has already been removed by the poller task
-                        return Err(format!("Poller error: {:?}", e));
+                        let err_msg = format!("Poller error: {:?}", e);
+                        warn!(err_msg);
+                        return Err(err_msg);
                     }
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
