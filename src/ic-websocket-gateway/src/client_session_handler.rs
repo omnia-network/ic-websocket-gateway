@@ -140,6 +140,7 @@ impl ClientSessionHandler {
                             client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
                         );
+                    debug!("Client added to gateway state");
 
                     client_session_span.record("canister_id", canister_id.to_string());
 
@@ -155,6 +156,8 @@ impl ClientSessionHandler {
                         // before returning the error and terminating the session handler
                         self.gateway_state
                             .remove_client(canister_id, client_key.clone());
+                        debug!("Client removed from gateway state");
+
                         return Err(format!("Could not relay WS open message to IC: {:?}", e))?;
                     }
 
@@ -187,9 +190,10 @@ impl ClientSessionHandler {
 
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
-                    // remove client from poller state
+                    // remove client from gateway state
                     self.gateway_state
                         .remove_client(canister_id, client_key.clone());
+                    debug!("Client removed from gateway state");
 
                     self.call_ws_close(&canister_id, client_key).await;
 
@@ -201,6 +205,9 @@ impl ClientSessionHandler {
                     continue;
                 },
                 Err(e) => {
+                    client_session_span.in_scope(|| {
+                        debug!("Client session error");
+                    });
                     if let IcWsError::Poller(e) = e {
                         // no need to remove the client as the whole poller state has already been removed by the poller task
                         let err_msg = format!("Poller error: {:?}", e);
@@ -217,6 +224,7 @@ impl ClientSessionHandler {
                         .gateway_state
                         .remove_client_if_exists(canister_id, client_key)
                     {
+                        debug!("Client removed from gateway state");
                         self.call_ws_close(&canister_id, client_key).await;
 
                         // return Err as the session had an error and cannot be updated anymore
