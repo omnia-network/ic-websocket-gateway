@@ -5,7 +5,7 @@ use crate::{
 };
 use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanisterMessage};
 use futures_util::StreamExt;
-use gateway_state::{CanisterPrincipal, ClientEntry, GatewayState, PollerState};
+use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, PollerState};
 use ic_agent::Agent;
 use std::sync::Arc;
 use tokio::{
@@ -135,21 +135,31 @@ impl ClientSessionHandler {
                         .gateway_state
                         .insert_client_channel_and_get_new_poller_state(
                             canister_id,
-                            client_key,
+                            client_key.clone(),
                             // important not to clone 'client_channel_tx' as otherwise the client session will not receive None in case of a poller error
                             client_channel_tx.take().expect("must be set only once"),
                             client_session_span.clone(),
                         );
+                    debug!("Client added to gateway state");
 
                     client_session_span.record("canister_id", canister_id.to_string());
 
+                    // ensure this is done after the gateway state has been updated
                     // TODO: figure out if it is guaranteed that all threads see the updated state of the gateway
                     //       before relaying the message to the IC
-                    client_session
+                    if let Err(e) = client_session
                         .relay_client_message(ws_open_message)
                         .instrument(client_session_span.clone())
                         .await
-                        .map_err(|e| format!("Could not relay WS open message to IC: {:?}", e))?;
+                    {
+                        // if the message could not be relayed to the IC, remove the client from the gateway state
+                        // before returning the error and terminating the session handler
+                        self.gateway_state
+                            .remove_client(canister_id, client_key.clone());
+                        debug!("Client removed from gateway state");
+
+                        return Err(format!("Could not relay WS open message to IC: {:?}", e))?;
+                    }
 
                     client_session_span.in_scope(|| {
                         debug!("Client session setup");
@@ -180,9 +190,10 @@ impl ClientSessionHandler {
 
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
-                    // remove client from poller state
+                    // remove client from gateway state
                     self.gateway_state
                         .remove_client(canister_id, client_key.clone());
+                    debug!("Client removed from gateway state");
 
                     self.call_ws_close(&canister_id, client_key).await;
 
@@ -194,9 +205,14 @@ impl ClientSessionHandler {
                     continue;
                 },
                 Err(e) => {
+                    client_session_span.in_scope(|| {
+                        debug!("Client session error");
+                    });
                     if let IcWsError::Poller(e) = e {
                         // no need to remove the client as the whole poller state has already been removed by the poller task
-                        return Err(format!("Poller error: {:?}", e));
+                        let err_msg = format!("Poller error: {:?}", e);
+                        warn!(err_msg);
+                        return Err(err_msg);
                     }
                     let canister_id = self.get_canister_id(&client_session);
                     let client_key = self.get_client_key(&client_session);
@@ -204,10 +220,11 @@ impl ClientSessionHandler {
                     // remove client from poller state, if it is present
                     // error might have happened before the client session was Setup
                     // if so, there is no need to remove the client as it is not yet in the poller state
-                    if let ClientEntry::Removed(client_key) = self
+                    if let ClientRemovalResult::Removed(client_key) = self
                         .gateway_state
                         .remove_client_if_exists(canister_id, client_key)
                     {
+                        debug!("Client removed from gateway state");
                         self.call_ws_close(&canister_id, client_key).await;
 
                         // return Err as the session had an error and cannot be updated anymore
