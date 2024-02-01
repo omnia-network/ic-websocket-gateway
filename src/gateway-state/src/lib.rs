@@ -127,18 +127,18 @@ impl GatewayState {
         &self,
         canister_id: CanisterPrincipal,
         client_key: ClientKey,
-    ) -> ClientEntry {
+    ) -> ClientRemovalResult {
         // START OF THE CRITICAL SECTION
         if let Entry::Occupied(mut entry) = self.inner.data.entry(canister_id) {
             let poller_state = entry.get_mut();
 
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
-            // returns 'ClientEntry::Removed' if the client was removed, 'ClientEntry::Vacant' if there was no such client
+            // returns 'ClientRemovalResult::Removed' if the client was removed, 'ClientRemovalResult::Vacant' if there was no such client
             return {
                 match poller_state.remove(&client_key) {
-                    Some(_) => ClientEntry::Removed(client_key),
-                    None => ClientEntry::Vacant,
+                    Some(_) => ClientRemovalResult::Removed(client_key),
+                    None => ClientRemovalResult::Vacant,
                 }
             };
         }
@@ -148,7 +148,7 @@ impl GatewayState {
         // indeed, a client session might get an error before the poller side of the channel has been dropped - but after the poller state has been removed -
         // in such a case, the client state has already been removed by the poller, together with the whole poller state
         // therefore there is no need to do anything else here and we pretend that there is no such entry
-        ClientEntry::Vacant
+        ClientRemovalResult::Vacant
     }
 
     /// SAFETY:
@@ -160,17 +160,20 @@ impl GatewayState {
     /// Therefore, this function is executed atomically.
     ///
     /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
-    pub fn remove_canister_if_empty(&self, canister_id: CanisterPrincipal) -> CanisterEntry {
+    pub fn remove_canister_if_empty(
+        &self,
+        canister_id: CanisterPrincipal,
+    ) -> CanisterRemovalResult {
         // remove_if returns None if the condition is not met, otherwise it returns the Some(<entry>)
-        // if Some, the poller state is empty and therefore the poller shall terminate - return 'CanisterEntry::RemovedEmpty'
-        // if None, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate - return 'CanisterEntry::NotEmpty'
+        // if Some, the poller state is empty and therefore the poller shall terminate - return 'CanisterRemovalResult::Empty'
+        // if None, the poller state is not empty and therefore there are still clients connected and the poller shall not terminate - return 'CanisterRemovalResult::NotEmpty'
         match self
             .inner
             .data
             .remove_if(&canister_id, |_, poller_state| poller_state.is_empty())
         {
-            Some(_) => CanisterEntry::RemovedEmpty,
-            None => CanisterEntry::NotEmpty,
+            Some(_) => CanisterRemovalResult::Empty,
+            None => CanisterRemovalResult::NotEmpty,
         }
     }
 
@@ -211,13 +214,19 @@ impl GatewayStateInner {
 /// and the state associated to each client
 pub type PollerState = Arc<DashMap<ClientKey, ClientSender>>;
 
-pub enum ClientEntry {
+/// Determines whether the client was removed from the poller state or if there was no such client
+pub enum ClientRemovalResult {
+    /// The client was removed from the poller state
     Removed(ClientKey),
+    /// The client was not present in the poller state
     Vacant,
 }
 
-pub enum CanisterEntry {
-    RemovedEmpty,
+/// Determines whether the canister was removed from the gateway state or not (in case there are still clients connected)
+pub enum CanisterRemovalResult {
+    /// The canister was removed from the gateway state
+    Empty,
+    /// The canister was not removed from the gateway state
     NotEmpty,
 }
 

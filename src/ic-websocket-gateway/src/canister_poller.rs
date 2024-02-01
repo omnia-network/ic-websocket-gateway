@@ -3,8 +3,10 @@ use canister_utils::{
     ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
-use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
-use ic_agent::{Agent, AgentError};
+use gateway_state::{
+    CanisterPrincipal, CanisterRemovalResult, ClientSender, GatewayState, PollerState,
+};
+use ic_agent::{agent::RejectCode, Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
@@ -13,11 +15,15 @@ pub(crate) const POLLING_TIMEOUT_MS: u64 = 5_000;
 
 type PollingTimeout = Duration;
 
+/// Result of the polling iteration
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PollingStatus {
+    /// No messages polled
     NoMessagesPolled,
+    /// Some messages polled
     MessagesPolled(CanisterOutputCertifiedMessages),
-    PollerTimedOut,
+    /// Request timed out
+    TimedOut,
 }
 
 /// Poller which periodically queries a canister for new messages and relays them to the client
@@ -130,7 +136,7 @@ impl CanisterPoller {
                     return Ok(());
                 }
             },
-            PollingStatus::PollerTimedOut => {
+            PollingStatus::TimedOut => {
                 // if the poller timed out, it already waited way too long... return immediately so that the next polling iteration can be started
                 warn!("Poller timed out. Polling immediately");
                 return Ok(());
@@ -196,7 +202,7 @@ impl CanisterPoller {
             Ok(Err(IcError::Cdk(e))) => Err(format!("Unrecoverable CDK error: {:?}", e)),
             Err(e) => {
                 warn!("Poller took too long to retrieve messages: {:?}", e);
-                Ok(PollingStatus::PollerTimedOut)
+                Ok(PollingStatus::TimedOut)
             },
         }
     }
@@ -221,7 +227,7 @@ impl CanisterPoller {
                 .get(&canister_output_message.client_key)
                 .as_deref()
             {
-                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key);
+                let canister_message_span = span!(parent: client_session_span, Level::TRACE, "Canister Message", message_key = canister_to_client_message.key, %self.canister_id);
                 canister_message_span.follows_from(Span::current().id());
                 let canister_message = canister_message_span.in_scope(|| {
                     trace!("Start relaying message",);
@@ -313,8 +319,8 @@ impl CanisterPoller {
             .gateway_state
             .remove_canister_if_empty(self.canister_id)
         {
-            CanisterEntry::RemovedEmpty => true,
-            CanisterEntry::NotEmpty => false,
+            CanisterRemovalResult::Empty => true,
+            CanisterRemovalResult::NotEmpty => false,
         }
     }
 }
@@ -353,7 +359,6 @@ fn is_recoverable_error(e: &AgentError) -> bool {
         AgentError::InvalidReplicaUrl(_)
         | AgentError::TimeoutWaitingForResponse()
         | AgentError::InvalidCborData(_)
-        | AgentError::ReplicaError(_)
         | AgentError::HttpError(_)
         | AgentError::InvalidReplicaStatus
         | AgentError::RequestStatusDoneNoReply(_)
@@ -366,6 +371,9 @@ fn is_recoverable_error(e: &AgentError) -> bool {
         | AgentError::TransportError(_)
         | AgentError::CallDataMismatch { .. }
         | AgentError::InvalidRejectCode(_) => true,
+        // in case of a replica error, we recover only if the error is transient
+        // all other errors (SysFatal, DestinationInvalid, CanisterReject, CanisterError) are considered permanent
+        AgentError::ReplicaError(e) => e.reject_code == RejectCode::SysTransient,
         _ => false,
     }
 }
