@@ -5,7 +5,7 @@ use crate::{
 };
 use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanisterMessage};
 use futures_util::StreamExt;
-use gateway_state::{CanisterPrincipal, ClientEntry, GatewayState, PollerState};
+use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, PollerState};
 use ic_agent::Agent;
 use std::sync::Arc;
 use tokio::{
@@ -206,7 +206,7 @@ impl ClientSessionHandler {
                     // remove client from poller state, if it is present
                     // error might have happened before the client session was Setup
                     // if so, there is no need to remove the client as it is not yet in the poller state
-                    if let ClientEntry::Removed(client_key) = self
+                    if let ClientRemovalResult::Removed(client_key) = self
                         .gateway_state
                         .remove_client_if_exists(canister_id, client_key)
                     {

@@ -3,7 +3,9 @@ use canister_utils::{
     ws_get_messages, CanisterOutputCertifiedMessages, CanisterToClientMessage,
     CanisterWsGetMessagesArguments, IcError, IcWsCanisterMessage,
 };
-use gateway_state::{CanisterEntry, CanisterPrincipal, ClientSender, GatewayState, PollerState};
+use gateway_state::{
+    CanisterPrincipal, CanisterRemovalResult, ClientSender, GatewayState, PollerState,
+};
 use ic_agent::{agent::RejectCode, Agent, AgentError};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::timeout};
@@ -313,8 +315,8 @@ impl CanisterPoller {
             .gateway_state
             .remove_canister_if_empty(self.canister_id)
         {
-            CanisterEntry::RemovedEmpty => true,
-            CanisterEntry::NotEmpty => false,
+            CanisterRemovalResult::Empty => true,
+            CanisterRemovalResult::NotEmpty => false,
         }
     }
 }
