@@ -28,13 +28,13 @@ impl Manager {
         let agent = Arc::new(agent);
 
         // creates a concurrent hashmap with capacity of 32 divided in shards so that each entry can be accessed concurrently without locking the whole state
-        let state: GatewayState = GatewayState::new();
+        let state: GatewayState = GatewayState::default();
 
-        return Self {
+        Self {
             agent,
             address: gateway_address,
             state,
-        };
+        }
     }
 
     pub fn get_agent_principal(&self) -> Principal {

@@ -100,7 +100,7 @@ mod test {
         polling_interval_ms: u64,
         client_channel_tx: Sender<IcWsCanisterMessage>,
     ) -> CanisterPoller {
-        let gateway_state: GatewayState = GatewayState::new();
+        let gateway_state: GatewayState = GatewayState::default();
 
         let poller_state = gateway_state
             .insert_client_channel_and_get_new_poller_state(

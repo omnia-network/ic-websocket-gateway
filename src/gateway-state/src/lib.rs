@@ -11,6 +11,12 @@ pub struct GatewayState {
     inner: Arc<GatewayStateInner>,
 }
 
+impl Default for GatewayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GatewayState {
     pub fn new() -> Self {
         Self {
@@ -187,7 +193,7 @@ impl GatewayState {
     ///
     /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
     pub fn remove_failed_canister(&self, canister_id: CanisterPrincipal) {
-        if let None = self.inner.data.remove(&canister_id) {
+        if self.inner.data.remove(&canister_id).is_none() {
             unreachable!("failed canister not found in gateway state");
         }
     }
@@ -255,7 +261,7 @@ mod tests {
     #[tokio::test]
     async fn should_insert_new_client_channels_and_get_new_poller_state_once() {
         let clients_count = 1000;
-        let gateway_state = GatewayState::new();
+        let gateway_state = GatewayState::default();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
         thread::scope(|s| {
             let mut handles = Vec::new();
@@ -295,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn benchmark_insertions_only() {
         let clients_count = 1000;
-        let gateway_state = GatewayState::new();
+        let gateway_state = GatewayState::default();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
         thread::scope(|s| {
             let mut handles = Vec::new();
@@ -333,7 +339,7 @@ mod tests {
     #[tokio::test]
     async fn benchmark_insertions_while_check_if_empty() {
         let iterations = 10_000;
-        let gateway_state = GatewayState::new();
+        let gateway_state = GatewayState::default();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
 
         let start = Instant::now();
@@ -406,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn benchmark_check_if_empty_while_insertions() {
         let iterations = 10_000;
-        let gateway_state = GatewayState::new();
+        let gateway_state = GatewayState::default();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
 
         let start = Instant::now();
@@ -471,7 +477,7 @@ mod tests {
     #[tokio::test]
     async fn simulate_ic_ws() {
         let iterations = 100;
-        let gateway_state = GatewayState::new();
+        let gateway_state = GatewayState::default();
         let canister_id = Principal::from_text("aaaaa-aa").unwrap();
 
         {

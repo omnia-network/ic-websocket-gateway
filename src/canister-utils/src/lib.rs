@@ -187,17 +187,17 @@ pub async fn ws_get_messages(
     canister_id: &Principal,
     args: CanisterWsGetMessagesArguments,
 ) -> CanisterWsGetMessagesResultWithIcError {
-    let args = candid::encode_args((args,)).map_err(|e| IcError::Candid(e))?;
+    let args = candid::encode_args((args,)).map_err(IcError::Candid)?;
 
     let res = agent
         .query(canister_id, "ws_get_messages")
         .with_arg(args)
         .call()
         .await
-        .map_err(|e| IcError::Agent(e))?;
+        .map_err(IcError::Agent)?;
 
-    let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(|e| IcError::Candid(e))?;
-    res.map_err(|e| IcError::Cdk(e))
+    let res = Decode!(&res, CanisterWsGetMessagesResult).map_err(IcError::Candid)?;
+    res.map_err(IcError::Cdk)
 }
 
 /// In order to call the mock server during testing, make sure that the 'mock-server'
@@ -217,5 +217,5 @@ pub async fn ws_get_messages(
         .await
         .expect("Failed to read HTTP response");
 
-    Decode!(&res, CanisterOutputCertifiedMessages).map_err(|e| IcError::Candid(e))
+    Decode!(&res, CanisterOutputCertifiedMessages).map_err(IcError::Candid)
 }
