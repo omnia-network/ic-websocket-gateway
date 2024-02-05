@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  ic_websocket_gateway:
+    ports:
+      - "8080:8080"
+    command:
+      [
+        "--gateway-address",
+        "0.0.0.0:8080",
+        "--ic-network-url",
+        "${IC_URL}",
+        "--polling-interval",
+        "${POLLING_INTERVAL}",
+        "--opentelemetry-collector-endpoint",
+        "${OPENTELEMETRY_COLLECTOR_ENDPOINT}",
+      ]
+    env_file:
+      - .env.local
+
+  otlp_collector:
+    env_file:
+      - .env.local
+
+  grafana:
+    image: grafana/grafana-enterprise
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./telemetry/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./telemetry/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./telemetry/dashboards:/etc/dashboards
+    networks:
+      - ic-ws-gateway-network
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    restart: unless-stopped
+    ports:
+      - "3200:3200" # tempo server
+      - "4318:4318" # otlp grpc receiver
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./telemetry/tempo-config.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    networks:
+      - ic-ws-gateway-network
+
+networks:
+  ic-ws-gateway-network:
+    name: ic-ws-gateway-network
+
+volumes:
+  tempo-data:
+    name: tempo-data
+  grafana-storage:
+    name: grafana-storage
