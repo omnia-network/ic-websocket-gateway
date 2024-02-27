@@ -54,12 +54,12 @@
     "last 2 edge version"
   ],
   "dependencies": {
-    "@dfinity/agent": "^0.20.1",
-    "@dfinity/candid": "^0.20.1",
-    "@dfinity/identity-secp256k1": "^0.20.1",
-    "@dfinity/principal": "^0.20.1",
+    "@dfinity/agent": "^1.0.1",
+    "@dfinity/candid": "^1.0.1",
+    "@dfinity/identity-secp256k1": "^1.0.1",
+    "@dfinity/principal": "^1.0.1",
     "bufferutil": "^4.0.8",
-    "ic-websocket-js": "^0.3.3",
+    "ic-websocket-js": "^0.3.4",
     "utf-8-validate": "^5.0.10"
   }
 }
