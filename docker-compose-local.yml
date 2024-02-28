@@ -2,6 +2,10 @@ version: '3.8'
 
 services:
   ic_websocket_gateway:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: local/ic-websocket-gateway
     ports:
       - "8080:8080"
     command:
@@ -51,6 +55,16 @@ services:
     volumes:
       - ./telemetry/tempo-config.yaml:/etc/tempo.yaml
       - tempo-data:/tmp/tempo
+    networks:
+      - ic-ws-gateway-network
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - "./telemtry/prometheus.yml:/etc/prometheus/prometheus.yml"
     networks:
       - ic-ws-gateway-network
 
