@@ -1,16 +1,16 @@
 use std::error::Error;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use metrics::{describe_gauge, describe_histogram, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::{MetricKindMask};
-// use opentelemetry::{global, KeyValue};
-// use opentelemetry_otlp::{Protocol, WithExportConfig};
 
-pub fn init_metrics() -> Result<(), Box<dyn Error>> {
-    let builder = PrometheusBuilder::new();
+pub fn init_metrics(port: Option<u16>) -> Result<(), Box<dyn Error>> {
+    let builder = PrometheusBuilder::new()
+        .with_http_listener(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port.unwrap_or(9000)));
     builder
         .idle_timeout(
-            MetricKindMask::COUNTER | MetricKindMask::HISTOGRAM,
+            MetricKindMask::ALL,
             Some(Duration::from_secs(10)),
         )
         .install()
@@ -26,36 +26,3 @@ pub fn init_metrics() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
-// pub fn init_metrics(opentelemetry_collector_endpoint: Option<String>) -> Result<(), String> {
-//     match opentelemetry_collector_endpoint
-//         .and_then(|s| if s.is_empty() { None } else { Some(s) })
-//     {
-//         Some(opentelemetry_collector_endpoint) => {
-//             let exporter = opentelemetry_otlp::new_exporter()
-//                 .tonic()
-//                 .with_endpoint(opentelemetry_collector_endpoint)
-//                 .with_protocol(Protocol::Grpc);
-//
-//             let meter_provider = opentelemetry_otlp::new_pipeline()
-//                 .metrics(tokio::spawn, tokio::time::sleep)
-//                 .with_exporter(exporter)
-//                 .build()
-//                 .unwrap();
-//
-//             global::set_meter_provider(meter_provider);
-//
-//             let meter = global::meter("my_app");
-//             let counter = meter.u64_counter("my_counter").init();
-//             counter.add(1, &[KeyValue::new("key", "value")]);
-//
-//             // Important: Give some time for metrics to be exported
-//             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-//         }
-//         None => {}
-//     }
-//
-//     register_custom_metrics();
-//
-//     Ok(())
-// }

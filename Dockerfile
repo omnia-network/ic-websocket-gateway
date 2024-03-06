@@ -29,6 +29,7 @@ WORKDIR /ic-ws-gateway
 COPY --from=builder /ic-ws-gateway/target/release/ic_websocket_gateway .
 
 EXPOSE 8080
+EXPOSE 9000
 
 # run the Gateway
 ENTRYPOINT ["/ic-ws-gateway/ic_websocket_gateway"]

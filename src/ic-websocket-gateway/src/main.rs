@@ -8,7 +8,6 @@ use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{fs, path::Path};
 use structopt::StructOpt;
 use tracing::info;
-// use tracing_subscriber::fmt::init;
 
 mod canister_poller;
 mod client_session;
@@ -85,8 +84,7 @@ async fn main() -> Result<(), String> {
     )
     .expect("could not init tracing");
 
-    // init_metrics(deployment_info.opentelemetry_collector_endpoint.to_owned())?;
-    init_metrics().expect("could not init metrics");
+    init_metrics(None).expect("could not init metrics");
 
     // must be printed after initializing tracing to ensure that the info are captured
     info!("Deployment info: {:?}", deployment_info);

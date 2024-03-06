@@ -186,11 +186,11 @@ impl ClientSessionHandler {
                     client_session_span.in_scope(|| {
                         debug!("Client session opened");
 
+                        let client_key = self.get_client_key(&client_session);
+
                         gauge!("clients_connected").increment(1.0);
 
-                        let client_key = self.get_client_key(&client_session);
-                        let key = format!("client_{}", client_key.clone().to_string());
-                        clients_session_time.insert(key, Instant::now());
+                        clients_session_time.insert(client_key.clone().to_string(), Instant::now());
                     });
                     // do not return anything as the session is still alive
                 },
@@ -198,14 +198,14 @@ impl ClientSessionHandler {
                     client_session_span.in_scope(|| {
                         debug!("Client session closed");
 
+                        let client_key = self.get_client_key(&client_session);
+
                         gauge!("clients_connected").decrement(1.0);
 
-                        let client_key = self.get_client_key(&client_session);
-                        let key = format!("client_{}", client_key.clone().to_string());
-                        let value = clients_session_time.get(&key);
+                        let value = clients_session_time.get(&client_key.clone().to_string());
 
                         let delta = value.unwrap().elapsed();
-                        histogram!("connection_duration").record(delta);
+                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                     });
 

@@ -42,25 +42,28 @@ There are some command line arguments that you can set when running the gateway:
 
 ## Docker
 
-A [Dockerfile](./Dockerfile) is provided, together with a [docker-compose.yml](./docker-compose.yml) file to run the gateway. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+A [Dockerfile](./Dockerfile) is provided, together with the files [docker-compose.yml](./docker-compose.yml), [docker-compose-local.yml](./docker-compose-local.yml) and [docker-compose-prod.yml](./docker-compose-prod.yml) to run the gateway according to the needs. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
 
 A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway). This is the image used in the [docker-compose.yml](./docker-compose.yml) file.
 
 To run the gateway with Docker Compose, follow these steps:
-
 1. Set the environment variables:
 
     ```
     cp .env.example .env
     ```
+   
+2. To simplify the local run process a bash script [start_local_docker_environment.sh](./scripts/start_local_docker_environment.sh) is provided.
+3. To simplify the local stop and clean process a bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided.
+4. If you want to run the [docker-compose-prod.yml](./docker-compose-prod.yml) file you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain (because it is configured to make the gateway run with TLS enabled). See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
+5. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
+6. Run the gateway:
+    ```
+    docker compose -f docker-compose.yml -f docker-compose-local.yml up
+    ```
+7. The Gateway will print its principal in the container logs, just as explained above.
 
-2. The docker-compose.yml file is configured to make the gateway run with TLS enabled. For this, you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
-3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
-4. Run the gateway:
-    ```
-    docker compose up
-    ```
-5. The Gateway will print its principal in the container logs, just as explained above.
+If you want to verify that all is started correctly a bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This assumes that the gateway is already running.
 
 ### Obtain a TLS certificate
 
