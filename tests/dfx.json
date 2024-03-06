@@ -18,5 +18,5 @@
   },
   "output_env_file": ".env",
   "version": 1,
-  "dfx": "0.16.1"
+  "dfx": "0.17.0"
 }

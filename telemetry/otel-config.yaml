@@ -13,8 +13,8 @@ exporters:
       authorization: Basic ${GRAFANA_TEMPO_ACCESS_TOKEN}
     tls:
       insecure: ${GRAFANA_TEMPO_LOCAL}
-  prometheus:
-      endpoint: "0.0.0.0:9090"
+#  prometheus:
+#      endpoint: "0.0.0.0:9090"
 
 service:
   pipelines:
@@ -22,6 +22,6 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlp]
-    metrics:
-        receivers: [ otlp ]
-        exporters: [ prometheus ]
+#    metrics:
+#        receivers: [ otlp ]
+#        exporters: [ prometheus ]

@@ -1,5 +1,6 @@
 use crate::{
     gateway_tracing::{init_tracing, InitTracingResult},
+    gateway_metrics::{init_metrics},
     manager::Manager,
     ws_listener::TlsConfig,
 };
@@ -7,6 +8,7 @@ use ic_identity::{get_identity_from_key_pair, load_key_pair};
 use std::{fs, path::Path};
 use structopt::StructOpt;
 use tracing::info;
+// use tracing_subscriber::fmt::init;
 
 mod canister_poller;
 mod client_session;
@@ -14,6 +16,7 @@ mod client_session_handler;
 mod gateway_tracing;
 mod manager;
 mod ws_listener;
+mod gateway_metrics;
 
 mod tests {
     mod canister_poller;
@@ -81,6 +84,9 @@ async fn main() -> Result<(), String> {
         gateway_principal,
     )
     .expect("could not init tracing");
+
+    // init_metrics(deployment_info.opentelemetry_collector_endpoint.to_owned())?;
+    init_metrics().expect("could not init metrics");
 
     // must be printed after initializing tracing to ensure that the info are captured
     info!("Deployment info: {:?}", deployment_info);

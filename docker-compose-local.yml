@@ -64,7 +64,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - "./telemtry/prometheus.yml:/etc/prometheus/prometheus.yml"
+      - "./telemetry/prometheus.yml:/etc/prometheus/prometheus.yml"
     networks:
       - ic-ws-gateway-network
 
