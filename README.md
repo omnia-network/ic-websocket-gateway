@@ -46,24 +46,48 @@ A [Dockerfile](./Dockerfile) is provided, together with the files [docker-compos
 
 A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway). This is the image used in the [docker-compose.yml](./docker-compose.yml) file.
 
-To run the gateway with Docker Compose, follow these steps:
+### Local
+To run the gateway in a local environment with Docker Compose, follow these steps:
+1. To run all the required local structure you can execute the [start_local_docker_environment.sh](./scripts/start_local_docker_environment.sh) with the command:
+    
+   ```
+    ./scripts/start_local_docker_environment.sh 
+    ```
+
+    This script simply run a dfx local replica and execute the gateway with the following command:
+
+    ```
+    docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env.local up -d --build
+    ```
+   
+2. To stop and clean all the local environment a bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided. You can execute it with the command:
+    
+   ```
+    ./scripts/stop_local_docker_environment.sh 
+    ```
+
+3. The Gateway will print its principal in the container logs, just as explained above.
+4. If you want to verify that all is started correctly a bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This assumes that the gateway is already running.
+
+### Production
+
+To run the gateway in a prod environment with Docker Compose, follow these steps:
 1. Set the environment variables:
 
     ```
     cp .env.example .env
     ```
-   
-2. To simplify the local run process a bash script [start_local_docker_environment.sh](./scripts/start_local_docker_environment.sh) is provided.
-3. To simplify the local stop and clean process a bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided.
-4. If you want to run the [docker-compose-prod.yml](./docker-compose-prod.yml) file you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain (because it is configured to make the gateway run with TLS enabled). See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
-5. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
-6. Run the gateway:
-    ```
-    docker compose -f docker-compose.yml -f docker-compose-local.yml up
-    ```
-7. The Gateway will print its principal in the container logs, just as explained above.
 
-If you want to verify that all is started correctly a bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This assumes that the gateway is already running.
+2. To run the [docker-compose-prod.yml](./docker-compose-prod.yml) file you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain (because it is configured to make the gateway run with TLS enabled). See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
+3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
+4. Run the gateway:
+   
+    ```
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml up
+    ```
+
+   This command, similar to the local one, allows you to run a docker compose generated from 2 different docker compose files.
+5. The Gateway will print its principal in the container logs, just as explained above.
 
 ### Obtain a TLS certificate
 

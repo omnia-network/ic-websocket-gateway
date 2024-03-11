@@ -109,7 +109,7 @@ impl ClientSessionHandler {
         mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
-        let mut clients_session_time = HashMap::new();
+        let mut clients_session_time: HashMap<ClientKey, Instant>  = HashMap::new();
 
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
@@ -190,7 +190,7 @@ impl ClientSessionHandler {
 
                         gauge!("clients_connected").increment(1.0);
 
-                        clients_session_time.insert(client_key.clone().to_string(), Instant::now());
+                        clients_session_time.insert(client_key.clone(), Instant::now());
                     });
                     // do not return anything as the session is still alive
                 },
@@ -202,7 +202,7 @@ impl ClientSessionHandler {
 
                         gauge!("clients_connected").decrement(1.0);
 
-                        let value = clients_session_time.get(&client_key.clone().to_string());
+                        let value = clients_session_time.get(&client_key.clone());
 
                         let delta = value.unwrap().elapsed();
                         histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
