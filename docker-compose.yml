@@ -1,29 +1,11 @@
+version: '3.8'
+
 services:
   ic_websocket_gateway:
     image: omniadevs/ic-websocket-gateway:latest
+    platform: linux/amd64
     container_name: ic-websocket-gateway
     restart: unless-stopped
-    ports:
-      - ${LISTEN_PORT}:443
-    command:
-      [
-        "--gateway-address",
-        "0.0.0.0:443",
-        "--ic-network-url",
-        "${IC_URL}",
-        "--polling-interval",
-        "${POLLING_INTERVAL}",
-        "--tls-certificate-pem-path",
-        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
-        "--tls-certificate-key-pem-path",
-        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
-        "--opentelemetry-collector-endpoint",
-        "${OPENTELEMETRY_COLLECTOR_ENDPOINT}",
-      ]
-    environment:
-      - RUST_LOG_FILE=${RUST_LOG_FILE}
-      - RUST_LOG_STDOUT=${RUST_LOG_STDOUT}
-      - RUST_LOG_TELEMETRY=${RUST_LOG_TELEMETRY}
     volumes:
       - ./volumes/ic-ws-gateway/data:/ic-ws-gateway/data
     networks:
@@ -33,63 +15,13 @@ services:
     image: otel/opentelemetry-collector:0.92.0
     container_name: otlp_collector
     restart: unless-stopped
-    profiles:
-      - telemetry-prod
-      - telemetry-local
     ports:
-      - 4317:4317 # otlp grpc receiver
-    environment:
-      - GRAFANA_TEMPO_ENDPOINT=${GRAFANA_TEMPO_ENDPOINT}
-      - GRAFANA_TEMPO_ACCESS_TOKEN=${GRAFANA_TEMPO_ACCESS_TOKEN:-}
-      - GRAFANA_TEMPO_LOCAL=${GRAFANA_TEMPO_LOCAL:-false}
+      - "4317:4317" # otlp grpc receiver
     volumes:
       - ./telemetry/otel-config.yaml:/etc/otelcol/config.yaml
-    networks:
-      - ic-ws-gateway-network
-
-  grafana:
-    image: grafana/grafana-enterprise
-    container_name: grafana
-    restart: unless-stopped
-    profiles:
-      - telemetry-local
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana-storage:/var/lib/grafana
-      - ./telemetry/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
-      - ./telemetry/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
-      - ./telemetry/dashboards:/etc/dashboards
-    networks:
-      - ic-ws-gateway-network
-    depends_on:
-      - tempo
-
-  tempo:
-    image: grafana/tempo:latest
-    container_name: tempo
-    restart: unless-stopped
-    profiles:
-      - telemetry-local
-    ports:
-      - "3200:3200" # tempo server
-      - "4318:4318" # otlp grpc receiver
-    command: ["-config.file=/etc/tempo.yaml"]
-    volumes:
-      - ./telemetry/tempo-config.yaml:/etc/tempo.yaml
-      - tempo-data:/tmp/tempo
     networks:
       - ic-ws-gateway-network
 
 networks:
   ic-ws-gateway-network:
     name: ic-ws-gateway-network
-
-volumes:
-  tempo-data:
-    name: tempo-data
-  grafana-storage:
-    name: grafana-storage

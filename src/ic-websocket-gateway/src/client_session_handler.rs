@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::{
     canister_poller::CanisterPoller,
     client_session::{ClientSession, IcWsError, IcWsSessionState},
@@ -8,6 +9,8 @@ use futures_util::StreamExt;
 use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, PollerState};
 use ic_agent::Agent;
 use std::sync::Arc;
+use std::time::Instant;
+use metrics::{gauge, histogram};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{self, Receiver, Sender},
@@ -106,6 +109,8 @@ impl ClientSessionHandler {
         mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
+        let mut clients_session_time: HashMap<ClientKey, Instant>  = HashMap::new();
+
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
         // if no new state is returned, try to update the state again
@@ -180,12 +185,28 @@ impl ClientSessionHandler {
                 Ok(Some(IcWsSessionState::Open)) => {
                     client_session_span.in_scope(|| {
                         debug!("Client session opened");
+
+                        let client_key = self.get_client_key(&client_session);
+
+                        gauge!("clients_connected").increment(1.0);
+
+                        clients_session_time.insert(client_key.clone(), Instant::now());
                     });
                     // do not return anything as the session is still alive
                 },
                 Ok(Some(IcWsSessionState::Closed)) => {
                     client_session_span.in_scope(|| {
                         debug!("Client session closed");
+
+                        let client_key = self.get_client_key(&client_session);
+
+                        gauge!("clients_connected").decrement(1.0);
+
+                        let value = clients_session_time.get(&client_key.clone());
+
+                        let delta = value.unwrap().elapsed();
+                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
+
                     });
 
                     let canister_id = self.get_canister_id(&client_session);

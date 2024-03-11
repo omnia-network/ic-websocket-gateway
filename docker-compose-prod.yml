@@ -1,0 +1,23 @@
+services:
+  ic_websocket_gateway:
+    ports:
+      - ${LISTEN_PORT}:443
+    command:
+      [
+        "--gateway-address",
+        "0.0.0.0:443",
+        "--ic-network-url",
+        "${IC_URL}",
+        "--polling-interval",
+        "${POLLING_INTERVAL}",
+        "--tls-certificate-pem-path",
+        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/fullchain.pem",
+        "--tls-certificate-key-pem-path",
+        "/ic-ws-gateway/data/certs/live/${DOMAIN_NAME}/privkey.pem",
+        "--opentelemetry-collector-endpoint",
+        "${OPENTELEMETRY_COLLECTOR_ENDPOINT}",
+      ]
+
+  otlp_collector:
+    env_file:
+      - .env

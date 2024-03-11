@@ -1,5 +1,5 @@
 ### install packages
-FROM rust:1.70-slim-bullseye AS deps
+FROM rust:1.76-slim-bullseye AS deps
 WORKDIR /ic-ws-gateway
 # this takes a while due to crates index update, so we do it first
 RUN cargo install cargo-chef
@@ -29,6 +29,7 @@ WORKDIR /ic-ws-gateway
 COPY --from=builder /ic-ws-gateway/target/release/ic_websocket_gateway .
 
 EXPOSE 8080
+EXPOSE 9000
 
 # run the Gateway
 ENTRYPOINT ["/ic-ws-gateway/ic_websocket_gateway"]
