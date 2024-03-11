@@ -186,7 +186,11 @@ After installing Node.js and dfx, you can run the integration tests as follows:
     ```
     ./scripts/prepare_integration_tests.sh
     ```
-2. The `tests/.env` file should now contain some variables created by `dfx`. Add the variables from the [.env.example](./tests/.env.example) file to the `.env` file and leave them unchanged.
+2. Set the environment variables:
+    ```
+    cp tests/.env.example tests/.env
+    ```
+   When running the tests, the `tests/.env` file is modified by dfx, which will add some variables.
 3. Run integration tests using the Rust test canister:
     ```
     ./scripts/integration_test_rs.sh
