@@ -7,7 +7,7 @@ scrape_configs:
       - targets: [ 'ic_websocket_gateway:9000' ]
 
 remote_write:
-  - url: ${GRAFANA_PROMETHEUS_ENDPOINT}
+  - url: $GRAFANA_PROMETHEUS_ENDPOINT
     basic_auth:
       username: ${GRAFANA_PROMETHEUS_USERNAME}
       password: ${GRAFANA_PROMETHEUS_PASSWORD}

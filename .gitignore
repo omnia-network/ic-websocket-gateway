@@ -12,5 +12,3 @@ scripts/gateway_test.log
 
 .env
 .idea
-
-telemetry/prometheus.yml
