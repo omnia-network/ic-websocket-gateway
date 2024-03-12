@@ -297,6 +297,8 @@ impl ClientSessionHandler {
     fn start_poller(&self, canister_id: CanisterPrincipal, poller_state: PollerState) {
         info!("Starting poller for canister: {}", canister_id);
 
+        gauge!("active_pollers").increment(1.0);
+
         // spawn new canister poller task
         let agent = Arc::clone(&self.agent);
         let gateway_state = self.gateway_state.clone();
@@ -326,6 +328,8 @@ impl ClientSessionHandler {
             // the poller takes care of notifying the session handlers when an error is detected
             // and removing its corresponding entry from the gateway state
             // therefore, this task can simply terminate without doing anything
+
+            gauge!("active_pollers").decrement(1.0);
         });
     }
 }
