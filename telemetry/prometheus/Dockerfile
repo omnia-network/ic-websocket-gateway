@@ -1,3 +1,4 @@
+# Warning: This image is not intended to be pushed to a public repository because it contains sensitive information!!
 FROM prom/prometheus
 
 COPY /telemetry/prometheus/prometheus.yml /etc/prometheus/prometheus.yml
