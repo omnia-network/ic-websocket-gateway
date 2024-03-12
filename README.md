@@ -57,7 +57,7 @@ To run the gateway in a local environment with Docker Compose, follow these step
     This script simply run a dfx local replica and execute the gateway with the following command:
 
     ```
-    docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env.local up -d --build
+    docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env --env-file .env.local up -d --build
     ```
    
 2. To stop and clean all the local environment a bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided. You can execute it with the command:

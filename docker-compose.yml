@@ -22,6 +22,19 @@ services:
     networks:
       - ic-ws-gateway-network
 
+  # https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    env_file:
+      - .env
+    volumes:
+      - "./telemetry/prometheus.yml:/etc/prometheus/prometheus.yml"
+    networks:
+      - ic-ws-gateway-network
+
 networks:
   ic-ws-gateway-network:
     name: ic-ws-gateway-network
