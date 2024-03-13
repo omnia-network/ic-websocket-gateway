@@ -24,6 +24,10 @@ pub fn init_metrics(port: Option<u16>) -> Result<(), Box<dyn Error>> {
         "connection_duration",
         "The duration of the client connection"
     );
+    describe_histogram!(
+        "connection_opening_time",
+        "The time it takes to open a connection"
+    );
 
     gauge!("clients_connected").set(0.0);
     gauge!("active_pollers").set(0.0);
