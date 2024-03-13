@@ -507,7 +507,7 @@
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "5m",
+          "interval": "1h",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -612,7 +612,7 @@
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "10m",
+          "interval": "1d",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -630,13 +630,13 @@
     "list": []
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 8,
+  "version": 9,
   "weekStart": ""
 }
