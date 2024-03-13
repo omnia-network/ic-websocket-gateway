@@ -21,3 +21,7 @@ services:
   otlp_collector:
     env_file:
       - .env
+
+  prometheus:
+    volumes:
+      - "./telemetry/prometheus/prometheus-prod.yml:/etc/prometheus/prometheus.yml"

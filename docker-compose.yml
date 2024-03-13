@@ -24,11 +24,11 @@ services:
 
   # https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/
   prometheus:
-#    image: prom/prometheus
-    image: local/prometheus
-    build:
-      context: ./
-      dockerfile: ./telemetry/prometheus/Dockerfile
+    image: prom/prometheus
+#    image: local/prometheus
+#    build:
+#      context: ./
+#      dockerfile: ./telemetry/prometheus/Dockerfile
     container_name: prometheus
     ports:
       - "9090:9090"

@@ -58,6 +58,10 @@ services:
     networks:
       - ic-ws-gateway-network
 
+  prometheus:
+    volumes:
+      - "./telemetry/prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml"
+
 networks:
   ic-ws-gateway-network:
     name: ic-ws-gateway-network
