@@ -19,6 +19,7 @@ pub fn init_metrics(port: Option<u16>) -> Result<(), Box<dyn Error>> {
         .expect("failed to install Prometheus recorder");
 
     describe_gauge!("clients_connected", "The number of clients currently connected");
+    describe_gauge!("clients_connected_by_canister", "The number of clients connected to a specific canister");
     describe_gauge!("active_pollers", "The number of pollers currently connected");
     describe_histogram!(
         "connection_duration",

@@ -147,6 +147,8 @@ impl ClientSessionHandler {
                         );
                     debug!("Client added to gateway state");
 
+                    gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).increment(1.0);
+
                     client_session_span.record("canister_id", canister_id.to_string());
 
                     // ensure this is done after the gateway state has been updated
@@ -162,6 +164,8 @@ impl ClientSessionHandler {
                         self.gateway_state
                             .remove_client(canister_id, client_key.clone());
                         debug!("Client removed from gateway state");
+
+                        gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
 
                         return Err(format!("Could not relay WS open message to IC: {:?}", e))?;
                     }
@@ -216,6 +220,8 @@ impl ClientSessionHandler {
                         .remove_client(canister_id, client_key.clone());
                     debug!("Client removed from gateway state");
 
+                    gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
+
                     self.call_ws_close(&canister_id, client_key).await;
 
                     // return Ok as the session was closed correctly
@@ -246,6 +252,9 @@ impl ClientSessionHandler {
                         .remove_client_if_exists(canister_id, client_key)
                     {
                         debug!("Client removed from gateway state");
+
+                        gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
+
                         self.call_ws_close(&canister_id, client_key).await;
 
                         // return Err as the session had an error and cannot be updated anymore
