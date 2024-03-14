@@ -15,18 +15,29 @@ Make sure you have the **Rust toolchain** installed. You can find instructions [
 ## Standalone
 
 1. Run the gateway:
-    ```
+
+    In **debug** mode:
+    ```bash
     cargo run
     ```
-2. After the gateway starts, it prints something like:
+    In **release** mode:
+    ```bash
+    cargo build --release
 
+    ./target/release/ic_websocket_gateway
     ```
-    2023-08-01T07:55:58.315793Z INFO ic_websocket_gateway::manager: Gateway Agent principal: sqdfl-mr4km-2hfjy-gajqo-xqvh7-hf4mf-nra4i-3it6l-neaw4-soolw-tae
+
+2. The output in the terminal should look like (some lines are omitted for brevity):
+
+    ```bash
+    ...
+
+    2024-03-14T11:19:33.649874Z  INFO ic_websocket_gateway: Gateway Agent principal: lk7eq-k74k2-khrsw-n2xau-7ujb2-f5ao7-zkpqn-cbbx2-4xn3f-aibn4-uae
+
+    ...
+
+    2024-03-14T11:19:33.650018Z  INFO ic_websocket_gateway::manager: Start accepting incoming connections
     ```
-
-    This is the principal that the gateway uses to interact with the canister IC WebSocket CDK.
-
-3. Copy the gateway principal as you will need it to initialize the canister CDK, so that the canister can authenticate the gateway. How to do this is explained in the [ic_websocket_example](https://github.com/omnia-network/ic_websocket_example#running-the-project-locally) README.
 
 ### Options available
 
@@ -38,7 +49,7 @@ There are some command line arguments that you can set when running the gateway:
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
-| `--opentelemetry-collector-endpoint` | Jaeger agent endpoint for the telemetry in the format <host>:<port>. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
+| `--opentelemetry-collector-endpoint` | OpenTelemetry collector endpoint. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
 
 ## Docker
 
@@ -127,28 +138,16 @@ The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [G
 -   set the `--opentelemetry-collector-endpoint` argument to point to the opentelemetry collector endpoint (leaving it empty or unset will disable tracing telemetry);
 -   optionally set the `RUST_LOG_TELEMETRY` environment variable, which defaults to `trace`, following the same principles described in the [Configure logging](#configure-logging) section.
 
-If you're deploying the gateway locally for testing from the [docker-compose.yml](./docker-compose.yml) file, you can run both an opentelemetry collector and grafana together with the gateway by:
+If you're deploying the gateway with Docker (see the [Docker](#docker) section), make sure you set the following varibales in the `.env` file:
 
-```
-docker compose --profile telemetry-local up -d
-```
-
-Before you do so, make sure you set the following varibales in the `.env` file:
-
+**Local**:
 ```
 OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
 GRAFANA_TEMPO_ENDPOINT=tempo:4318
 GRAFANA_TEMPO_LOCAL=true
 ```
 
-If you are deploying the gateway in production and want to send the telemetry traces to Grafana Cloud, you only need to deploy the OTLP collector. To do so, run:
-
-```
-docker compose --profile telemetry-prod up -d
-```
-
-Before you do so, make sure you set the following varibales in the `.env` file:
-
+**Production**:
 ```
 OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
 GRAFANA_TEMPO_ENDPOINT=your-grafana-cloud-tempo-endpoint
@@ -289,11 +288,11 @@ Feel free to open issues, pull requests, join our [Discord](https://discord.com/
 -   [Linkedin](https://linkedin.com/in/massimoalbarello)
 -   [Twitter](https://twitter.com/MaxAlbarello)
 -   [Calendly](https://cal.com/massimoalbarello/meeting)
--   [Email](mez@omnia-network.com)
+-   [Email](mailto:mez@omnia-network.com)
 
 ## Luca Bertelli
 
 -   [Linkedin](https://www.linkedin.com/in/luca-bertelli-407041128/)
 -   [Twitter](https://twitter.com/ilbert_luca)
 -   [Calendly](https://cal.com/lucabertelli/ic-websocket)
--   [Email](liuc@omnia-network.com)
+-   [Email](mailto:liuc@omnia-network.com)
