@@ -25,6 +25,10 @@ pub fn init_metrics(port: Option<u16>) -> Result<(), Box<dyn Error>> {
         "The duration of the client connection"
     );
     describe_histogram!(
+        "tls_resolution_time",
+        "The resolution time of the TLS handshake"
+    );
+    describe_histogram!(
         "connection_opening_time",
         "The time it takes to open a connection"
     );

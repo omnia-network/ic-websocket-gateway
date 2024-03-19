@@ -3,7 +3,7 @@ use gateway_state::GatewayState;
 use ic_agent::Agent;
 use native_tls::Identity;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
-// use std::collections::HashMap;
+use std::collections::HashMap;
 use std::time::Instant;
 use metrics::{histogram};
 use tokio::{
@@ -58,8 +58,8 @@ pub struct WsListener {
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
     next_client_id: ClientId,
-    // Map of client keys to the time of the first connection
-    // clients_connection_time: HashMap<ClientId, Instant>,
+    // Map of client id to the time of the first connection
+    clients_connection_time: HashMap<ClientId, Instant>,
 }
 
 impl WsListener {
@@ -100,7 +100,7 @@ impl WsListener {
             gateway_state,
             polling_interval_ms,
             next_client_id: 0,
-            // clients_connection_time: HashMap::new(),
+            clients_connection_time: HashMap::new(),
         }
     }
 
@@ -143,7 +143,7 @@ impl WsListener {
     /// because it could take several seconds to complete
     /// and this would otherwise block other incoming connections
     fn accept_connection(
-        &self,
+        &mut self,
         client_addr: SocketAddr,
         stream: TcpStream,
         tls_acceptor_channel_tx: Sender<AcceptedConnection>,
@@ -158,7 +158,7 @@ impl WsListener {
         let client_id = self.next_client_id;
         let tls_acceptor = self.tls_acceptor.clone();
 
-        // self.clients_connection_time.insert(client_id, Instant::now());
+        self.clients_connection_time.insert(client_id, Instant::now());
 
         tokio::spawn(
             async move {
@@ -218,15 +218,12 @@ impl WsListener {
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
 
-        // let value = self.clients_connection_time.get(&client_id.clone());
-        //
-        // let delta = value.unwrap().elapsed();
-        // histogram!("connection_opening_time", "client_id" => client_id.to_string()).record(delta);
+        let start = self.clients_connection_time.get(&client_id).unwrap().clone();
 
         tokio::spawn(
             async move {
                 let mut client_session_handler =
-                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms);
+                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms, start);
                 debug!("Started client session handler task");
 
                 if let Err(e) = {

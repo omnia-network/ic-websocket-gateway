@@ -28,6 +28,8 @@ pub struct ClientSessionHandler {
     gateway_state: GatewayState,
     /// Polling interval in milliseconds
     polling_interval_ms: u64,
+    // Time to the start of the connection
+    start_connection_time: Instant,
 }
 
 impl ClientSessionHandler {
@@ -36,12 +38,14 @@ impl ClientSessionHandler {
         agent: Arc<Agent>,
         gateway_state: GatewayState,
         polling_interval_ms: u64,
+        start_connection_time: Instant,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_state,
             polling_interval_ms,
+            start_connection_time,
         }
     }
 
@@ -194,7 +198,9 @@ impl ClientSessionHandler {
                         debug!("Clients connected: {}", clients_connected_count.to_string());
                         counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
 
-                        // End ws_listener connection timer, calculate delta and record it
+                        // Calculate the time it took to open the connection and record it using the timer started in ws_listener.rs
+                        let delta = self.start_connection_time.elapsed();
+                        histogram!("connection_opening_time", "client_key" => client_key.to_string()).record(delta);
 
                         clients_session_time.insert(client_key.clone(), Instant::now());
                     });

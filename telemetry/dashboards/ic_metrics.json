@@ -377,7 +377,7 @@
         "x": 12,
         "y": 8
       },
-      "id": 2,
+      "id": 8,
       "interval": "10s",
       "options": {
         "legend": {
@@ -410,7 +410,7 @@
           "useBackend": false
         }
       ],
-      "title": "Time to open connection by client id",
+      "title": "Tls resolution time by client id",
       "type": "timeseries"
     },
     {
@@ -418,20 +418,22 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "green",
+            "mode": "fixed"
           },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Number",
+            "axisLabel": "Time",
             "axisPlacement": "auto",
             "barAlignment": 0,
-            "drawStyle": "bars",
-            "fillOpacity": 100,
+            "drawStyle": "points",
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -455,9 +457,7 @@
               "mode": "off"
             }
           },
-          "decimals": 0,
           "mappings": [],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -471,7 +471,7 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -481,13 +481,13 @@
         "x": 0,
         "y": 16
       },
-      "id": 6,
+      "id": 2,
       "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
-          "placement": "right",
+          "displayMode": "list",
+          "placement": "bottom",
           "showLegend": false
         },
         "tooltip": {
@@ -495,7 +495,6 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.4.0",
       "targets": [
         {
           "datasource": {
@@ -504,18 +503,18 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum by(instance) (sum_over_time(clients_connected_count[$__interval]))",
+          "expr": "connection_opening_time{quantile=\"1\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "1h",
+          "interval": "",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Client connected by hour",
+      "title": "Time to open connection by client id",
       "type": "timeseries"
     },
     {
@@ -622,6 +621,111 @@
       ],
       "title": "Client connected by day",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Number",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 6,
+      "interval": "10s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "right",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(instance) (sum_over_time(clients_connected_count[$__interval]))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "1h",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Client connected by hour",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -638,6 +742,6 @@
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
