@@ -164,8 +164,6 @@ impl WsListener {
             async move {
                 let start = Instant::now();
 
-                // Start connection timer
-
                 let custom_stream = match tls_acceptor {
                     Some(ref acceptor) => {
                         match timeout(TlsAcceptorTimeout::from_secs(10), acceptor.accept(stream))
