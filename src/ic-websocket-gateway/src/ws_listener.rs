@@ -3,6 +3,9 @@ use gateway_state::GatewayState;
 use ic_agent::Agent;
 use native_tls::Identity;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
+use std::collections::HashMap;
+use std::time::Instant;
+use metrics::{histogram};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -55,6 +58,8 @@ pub struct WsListener {
     polling_interval_ms: u64,
     // Client ID assigned to the next client connection
     next_client_id: ClientId,
+    // Map of client id to the time of the first connection
+    clients_connection_time: HashMap<ClientId, Instant>,
 }
 
 impl WsListener {
@@ -95,6 +100,7 @@ impl WsListener {
             gateway_state,
             polling_interval_ms,
             next_client_id: 0,
+            clients_connection_time: HashMap::new(),
         }
     }
 
@@ -137,7 +143,7 @@ impl WsListener {
     /// because it could take several seconds to complete
     /// and this would otherwise block other incoming connections
     fn accept_connection(
-        &self,
+        &mut self,
         client_addr: SocketAddr,
         stream: TcpStream,
         tls_acceptor_channel_tx: Sender<AcceptedConnection>,
@@ -151,8 +157,15 @@ impl WsListener {
         );
         let client_id = self.next_client_id;
         let tls_acceptor = self.tls_acceptor.clone();
+
+        self.clients_connection_time.insert(client_id, Instant::now());
+
         tokio::spawn(
             async move {
+                let start = Instant::now();
+
+                // Start connection timer
+
                 let custom_stream = match tls_acceptor {
                     Some(ref acceptor) => {
                         match timeout(TlsAcceptorTimeout::from_secs(10), acceptor.accept(stream))
@@ -181,6 +194,9 @@ impl WsListener {
                             })
                             .await
                             .expect("ws listener's side of the channel dropped");
+
+                        let delta = start.elapsed();
+                        histogram!("tls_resolution_time", "client_id" => client_id.to_string()).record(delta);
                     },
                     Err(e) => {
                         error!("Failed to accept connection: {:?}", e);
@@ -201,10 +217,13 @@ impl WsListener {
         let gateway_state = self.gateway_state.clone();
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
+
+        let start = self.clients_connection_time.get(&client_id).unwrap().clone();
+
         tokio::spawn(
             async move {
                 let mut client_session_handler =
-                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms);
+                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms, start);
                 debug!("Started client session handler task");
 
                 if let Err(e) = {

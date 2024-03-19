@@ -1,6 +1,8 @@
 import IcWebSocket, { createWsConfig, generateRandomIdentity } from "ic-websocket-js";
 import { test_canister_rs } from "../declarations/test_canister_rs";
+// import { test_canister_mo } from "../declarations/test_canister_mo";
 import type { AppMessage, _SERVICE } from "../declarations/test_canister_rs/test_canister_rs.did";
+// import type { AppMessage, _SERVICE } from "../declarations/test_canister_mo/test_canister_mo.did";
 
 /// IcWebsocket parameters
 const gatewayAddress = process.env.WS_GATEWAY_URL;
@@ -53,6 +55,7 @@ describe("WS client", () => {
     const wsConfig = createWsConfig({
       canisterId,
       canisterActor: test_canister_rs,
+      // canisterActor: test_canister_mo,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
     });

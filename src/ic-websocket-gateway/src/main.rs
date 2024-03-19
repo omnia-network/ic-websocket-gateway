@@ -1,6 +1,6 @@
 use crate::{
+    gateway_metrics::init_metrics,
     gateway_tracing::{init_tracing, InitTracingResult},
-    gateway_metrics::{init_metrics},
     manager::Manager,
     ws_listener::TlsConfig,
 };
@@ -12,10 +12,10 @@ use tracing::info;
 mod canister_poller;
 mod client_session;
 mod client_session_handler;
+mod gateway_metrics;
 mod gateway_tracing;
 mod manager;
 mod ws_listener;
-mod gateway_metrics;
 
 mod tests {
     mod canister_poller;
@@ -25,15 +25,15 @@ mod tests {
 #[structopt(name = "Gateway", about = "IC WS Gateway")]
 struct DeploymentInfo {
     #[structopt(long, default_value = "http://127.0.0.1:4943")]
-    /// the URL of the IC network
+    /// The URL of the IC network. For mainnet, use `https://icp-api.io`.
     ic_network_url: String,
 
     #[structopt(long, default_value = "0.0.0.0:8080")]
-    /// address at which the WebSocket Gateway is reachable
+    /// Address at which the WebSocket Gateway is reachable.
     gateway_address: String,
 
     #[structopt(long, default_value = "100")]
-    /// time interval (in milliseconds) at which the canister is polled
+    /// Time interval (in milliseconds) at which the canisters are polled.
     polling_interval: u64,
 
     #[structopt(long)]
@@ -43,12 +43,7 @@ struct DeploymentInfo {
     tls_certificate_key_pem_path: Option<String>,
 
     #[structopt(long)]
-    /// Jaeger agent endpoint for the telemetry in the format <host>:<port>
-    ///
-    /// To run a Jaeger instance that listens on port 6831:
-    /// ```bash
-    /// docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 -p14268:14268 jaegertracing/all-in-one:latest
-    /// ```
+    /// OpenTelemetry collector endpoint for the telemetry.
     opentelemetry_collector_endpoint: Option<String>,
 }
 

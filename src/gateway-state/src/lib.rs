@@ -109,6 +109,14 @@ impl GatewayState {
         // therefore there is no need to do anything else here
     }
 
+    pub fn get_clients_count(&self, canister_id: CanisterPrincipal) -> usize {
+        if let Some(poller_state) = self.inner.data.get(&canister_id) {
+            poller_state.len()
+        } else {
+            0
+        }
+    }
+
     /// SAFETY:
     ///
     /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
