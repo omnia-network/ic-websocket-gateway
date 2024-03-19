@@ -3,7 +3,7 @@ use gateway_state::GatewayState;
 use ic_agent::Agent;
 use native_tls::Identity;
 use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
-use std::collections::HashMap;
+// use std::collections::HashMap;
 use std::time::Instant;
 use metrics::{histogram};
 use tokio::{
@@ -164,6 +164,8 @@ impl WsListener {
             async move {
                 let start = Instant::now();
 
+                // Start connection timer
+
                 let custom_stream = match tls_acceptor {
                     Some(ref acceptor) => {
                         match timeout(TlsAcceptorTimeout::from_secs(10), acceptor.accept(stream))
@@ -192,14 +194,14 @@ impl WsListener {
                             })
                             .await
                             .expect("ws listener's side of the channel dropped");
+
+                        let delta = start.elapsed();
+                        histogram!("tls_resolution_time", "client_id" => client_id.to_string()).record(delta);
                     },
                     Err(e) => {
                         error!("Failed to accept connection: {:?}", e);
                     },
                 }
-
-                let delta = start.elapsed();
-                histogram!("connection_opening_time", "client_id" => client_id.to_string()).record(delta);
             }
             .instrument(accept_client_connection_span),
         );

@@ -47,7 +47,7 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineStyle": {
               "fill": "solid"
             },
@@ -57,7 +57,7 @@
               "type": "linear"
             },
             "showPoints": "auto",
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -93,12 +93,13 @@
         "y": 0
       },
       "id": 3,
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -114,7 +115,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "clients_connected",
+          "expr": "sum by(instance) (clients_connected_count)",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -231,14 +232,14 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
             "showPoints": "auto",
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -295,7 +296,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "clients_connected_by_canister",
+          "expr": "clients_connected_count",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -398,7 +399,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "connection_opening_time{quantile=\"1\"}",
+          "expr": "tls_resolution_time{quantile=\"1\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -503,7 +504,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum(increase(clients_connected[$__interval]))",
+          "expr": "sum by(instance) (sum_over_time(clients_connected_count[$__interval]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -608,7 +609,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum(increase(clients_connected[$__interval]))",
+          "expr": "sum by(instance) (sum_over_time(clients_connected_count[$__interval]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -630,13 +631,13 @@
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 9,
+  "version": 3,
   "weekStart": ""
 }

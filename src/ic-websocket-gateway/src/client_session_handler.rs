@@ -10,7 +10,7 @@ use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, Poller
 use ic_agent::Agent;
 use std::sync::Arc;
 use std::time::Instant;
-use metrics::{gauge, histogram};
+use metrics::{counter, gauge, histogram};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{self, Receiver, Sender},
@@ -147,8 +147,6 @@ impl ClientSessionHandler {
                         );
                     debug!("Client added to gateway state");
 
-                    gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).increment(1.0);
-
                     client_session_span.record("canister_id", canister_id.to_string());
 
                     // ensure this is done after the gateway state has been updated
@@ -164,8 +162,6 @@ impl ClientSessionHandler {
                         self.gateway_state
                             .remove_client(canister_id, client_key.clone());
                         debug!("Client removed from gateway state");
-
-                        gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
 
                         return Err(format!("Could not relay WS open message to IC: {:?}", e))?;
                     }
@@ -190,9 +186,15 @@ impl ClientSessionHandler {
                     client_session_span.in_scope(|| {
                         debug!("Client session opened");
 
+                        let canister_id = self.get_canister_id(&client_session);
                         let client_key = self.get_client_key(&client_session);
 
-                        gauge!("clients_connected").increment(1.0);
+                        // Clients connection metrics
+                        let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
+                        debug!("Clients connected: {}", clients_connected_count.to_string());
+                        counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+
+                        // End ws_listener connection timer, calculate delta and record it
 
                         clients_session_time.insert(client_key.clone(), Instant::now());
                     });
@@ -201,16 +203,6 @@ impl ClientSessionHandler {
                 Ok(Some(IcWsSessionState::Closed)) => {
                     client_session_span.in_scope(|| {
                         debug!("Client session closed");
-
-                        let client_key = self.get_client_key(&client_session);
-
-                        gauge!("clients_connected").decrement(1.0);
-
-                        let value = clients_session_time.get(&client_key.clone());
-
-                        let delta = value.unwrap().elapsed();
-                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
-
                     });
 
                     let canister_id = self.get_canister_id(&client_session);
@@ -220,7 +212,14 @@ impl ClientSessionHandler {
                         .remove_client(canister_id, client_key.clone());
                     debug!("Client removed from gateway state");
 
-                    gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
+                    // Clients connection metrics
+                    let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
+                    debug!("Clients connected: {}", clients_connected_count.to_string());
+                    counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+
+                    let value = clients_session_time.get(&client_key.clone());
+                    let delta = value.unwrap().elapsed();
+                    histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                     self.call_ws_close(&canister_id, client_key).await;
 
@@ -253,7 +252,14 @@ impl ClientSessionHandler {
                     {
                         debug!("Client removed from gateway state");
 
-                        gauge!("clients_connected_by_canister", "canister_id" => canister_id.to_string()).decrement(1.0);
+                        // Clients connection metrics
+                        let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
+                        debug!("Clients connected: {}", clients_connected_count.to_string());
+                        counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+
+                        let value = clients_session_time.get(&client_key.clone());
+                        let delta = value.unwrap().elapsed();
+                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                         self.call_ws_close(&canister_id, client_key).await;
 
