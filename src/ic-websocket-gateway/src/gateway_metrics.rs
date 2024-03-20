@@ -9,20 +9,16 @@ pub fn init_metrics(port: Option<u16>) -> Result<(), Box<dyn Error>> {
     let builder = PrometheusBuilder::new()
         .with_http_listener(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port.unwrap_or(9000)));
 
-    // Set the idle timeout for counters and histograms to 10 seconds then the metrics are removed from the registry
+    // Set the idle timeout for counters and histograms to 30 seconds then the metrics are removed from the registry
     builder
         .idle_timeout(
-            MetricKindMask::COUNTER | MetricKindMask::HISTOGRAM,
-            Some(Duration::from_secs(10)),
-        )
-        .idle_timeout(
-            MetricKindMask::GAUGE,
+            MetricKindMask::ALL,
             Some(Duration::from_secs(30)),
         )
         .install()
         .expect("failed to install Prometheus recorder");
 
-    describe_gauge!("clients_connected_count", "The number of clients currently connected");
+    describe_gauge!("clients_connected", "The number of clients currently connected");
     describe_gauge!("active_pollers", "The number of pollers currently connected");
     describe_histogram!(
         "connection_duration",
