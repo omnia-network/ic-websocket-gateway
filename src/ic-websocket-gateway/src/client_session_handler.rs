@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::{
     canister_poller::CanisterPoller,
     client_session::{ClientSession, IcWsError, IcWsSessionState},
@@ -223,7 +222,7 @@ impl ClientSessionHandler {
                     debug!("Clients connected: {}", clients_connected_count.to_string());
                     counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
 
-                    let delta = client_start_session_time.unwrap().elapsed();
+                    let delta = client_start_session_time.elapsed();
                     histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                     self.call_ws_close(&canister_id, client_key).await;
@@ -262,7 +261,7 @@ impl ClientSessionHandler {
                         debug!("Clients connected: {}", clients_connected_count.to_string());
                         counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
 
-                        let delta = client_start_session_time.unwrap().elapsed();
+                        let delta = client_start_session_time.elapsed();
                         histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                         self.call_ws_close(&canister_id, client_key).await;
