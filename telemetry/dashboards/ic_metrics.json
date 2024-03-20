@@ -193,7 +193,7 @@
           "disableTextWrap": false,
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "active_pollers",
+          "expr": "last_over_time(active_pollers[24h])",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": true,
@@ -742,6 +742,6 @@
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }

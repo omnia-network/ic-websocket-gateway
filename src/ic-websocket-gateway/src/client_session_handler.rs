@@ -9,7 +9,7 @@ use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, Poller
 use ic_agent::Agent;
 use std::sync::Arc;
 use std::time::Instant;
-use metrics::{counter, gauge, histogram};
+use metrics::{gauge, histogram};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{self, Receiver, Sender},
@@ -195,7 +195,7 @@ impl ClientSessionHandler {
                         // Clients connection metrics
                         let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
                         debug!("Clients connected: {}", clients_connected_count.to_string());
-                        counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+                        gauge!("clients_connected_count", "canister_id" => canister_id.to_string()).set(clients_connected_count as f64);
 
                         // Calculate the time it took to open the connection and record it using the timer started in ws_listener.rs
                         let delta = self.start_connection_time.elapsed();
@@ -220,7 +220,7 @@ impl ClientSessionHandler {
                     // Clients connection metrics
                     let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
                     debug!("Clients connected: {}", clients_connected_count.to_string());
-                    counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+                    gauge!("clients_connected_count", "canister_id" => canister_id.to_string()).set(clients_connected_count as f64);
 
                     let delta = client_start_session_time.elapsed();
                     histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
@@ -259,7 +259,7 @@ impl ClientSessionHandler {
                         // Clients connection metrics
                         let clients_connected_count = self.gateway_state.get_clients_count(canister_id);
                         debug!("Clients connected: {}", clients_connected_count.to_string());
-                        counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
+                        gauge!("clients_connected_count", "canister_id" => canister_id.to_string()).set(clients_connected_count as f64);
 
                         let delta = client_start_session_time.elapsed();
                         histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
@@ -315,12 +315,15 @@ impl ClientSessionHandler {
     fn start_poller(&self, canister_id: CanisterPrincipal, poller_state: PollerState) {
         info!("Starting poller for canister: {}", canister_id);
 
-        gauge!("active_pollers").increment(1.0);
-
         // spawn new canister poller task
         let agent = Arc::clone(&self.agent);
         let gateway_state = self.gateway_state.clone();
         let polling_interval_ms = self.polling_interval_ms;
+
+        let active_pollers = gateway_state.get_active_pollers_count();
+        debug!("Active pollers: {}", active_pollers.to_string());
+        gauge!("active_pollers").set(active_pollers as f64);
+
         tokio::spawn(async move {
             // we pass both the whole gateway state and the poller state for the specific canister
             // the poller can access the poller state to determine which clients are connected
@@ -332,7 +335,7 @@ impl ClientSessionHandler {
                 agent,
                 canister_id,
                 poller_state,
-                gateway_state,
+                gateway_state.clone(),
                 polling_interval_ms,
             );
             if let Err(e) = poller.run_polling().await {
@@ -347,7 +350,9 @@ impl ClientSessionHandler {
             // and removing its corresponding entry from the gateway state
             // therefore, this task can simply terminate without doing anything
 
-            gauge!("active_pollers").decrement(1.0);
+            let active_pollers = gateway_state.get_active_pollers_count();
+            debug!("Active pollers: {}", active_pollers.to_string());
+            gauge!("active_pollers").set(active_pollers as f64);
         });
     }
 }

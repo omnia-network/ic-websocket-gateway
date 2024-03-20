@@ -117,6 +117,10 @@ impl GatewayState {
         }
     }
 
+    pub fn get_active_pollers_count(&self) -> usize {
+        self.inner.data.len()
+    }
+
     /// SAFETY:
     ///
     /// The [Dashmap::entry](https://docs.rs/dashmap/5.5.3/src/dashmap/lib.rs.html#1147-1163) method gets a write lock on the whole shard in which the entry is.
