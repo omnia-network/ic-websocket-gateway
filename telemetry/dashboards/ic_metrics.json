@@ -343,7 +343,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "green",
+            "mode": "fixed"
           },
           "custom": {
             "axisBorderShow": false,
@@ -426,11 +427,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum_over_time(new_connections_counter[$__interval])",
+          "expr": "sum by(instance) (max_over_time(clients_connected[30s]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "3m",
+          "interval": "1h",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -448,7 +449,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "green",
+            "mode": "fixed"
           },
           "custom": {
             "axisBorderShow": false,
@@ -531,11 +533,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum_over_time(new_connections_counter[$__interval])",
+          "expr": "sum by(instance) (max_over_time(clients_connected[30s]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "5m",
+          "interval": "1d",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -955,6 +957,6 @@
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 8,
+  "version": 9,
   "weekStart": ""
 }
