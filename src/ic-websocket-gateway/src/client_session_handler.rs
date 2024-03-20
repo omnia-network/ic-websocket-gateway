@@ -113,7 +113,7 @@ impl ClientSessionHandler {
         mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
-        let mut clients_session_time: HashMap<ClientKey, Instant>  = HashMap::new();
+        let mut client_start_session_time = Instant::now();
 
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
@@ -202,7 +202,7 @@ impl ClientSessionHandler {
                         let delta = self.start_connection_time.elapsed();
                         histogram!("connection_opening_time", "client_key" => client_key.to_string()).record(delta);
 
-                        clients_session_time.insert(client_key.clone(), Instant::now());
+                        client_start_session_time = Instant::now();
                     });
                     // do not return anything as the session is still alive
                 },
@@ -223,8 +223,7 @@ impl ClientSessionHandler {
                     debug!("Clients connected: {}", clients_connected_count.to_string());
                     counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
 
-                    let value = clients_session_time.get(&client_key.clone());
-                    let delta = value.unwrap().elapsed();
+                    let delta = client_start_session_time.unwrap().elapsed();
                     histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                     self.call_ws_close(&canister_id, client_key).await;
@@ -263,8 +262,7 @@ impl ClientSessionHandler {
                         debug!("Clients connected: {}", clients_connected_count.to_string());
                         counter!("clients_connected_count", "canister_id" => canister_id.to_string()).absolute(clients_connected_count as u64);
 
-                        let value = clients_session_time.get(&client_key.clone());
-                        let delta = value.unwrap().elapsed();
+                        let delta = client_start_session_time.unwrap().elapsed();
                         histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                         self.call_ws_close(&canister_id, client_key).await;
