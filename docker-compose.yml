@@ -25,6 +25,8 @@ services:
   # https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/
   prometheus:
     image: prom/prometheus
+    # If you want to build from local customized Dockerfile enabling the config file (prometheus.yml) environment variable substitution directly
+    # inside the image and not outside it, you can use the provided Dockerfile image. (telemetry/prometheus/Dockerfile)
 #    image: local/prometheus
 #    build:
 #      context: ./

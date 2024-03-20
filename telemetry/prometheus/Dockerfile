@@ -1,4 +1,9 @@
 # Warning: This image is not intended to be pushed to a public repository because it contains sensitive information!!
+# Important: This is an alternative solution to add the environment variables substitution feature to the official prom/prometheus image.
+# Normally, we use the official image and we prepare the configuration file (prometheus.yml) with the environment variables substitution before running the container.
+# This solution is useful when you have a private repository and you want to prepare 1 time the image and use it without
+# the need to always prepare the configuration file
+
 FROM prom/prometheus
 
 COPY /telemetry/prometheus/prometheus-template.yml /etc/prometheus/prometheus.yml
