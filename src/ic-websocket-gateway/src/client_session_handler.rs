@@ -112,7 +112,7 @@ impl ClientSessionHandler {
         mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
-        let mut client_start_session_time = Instant::now();
+        let client_start_session_time = Instant::now();
 
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
@@ -200,8 +200,6 @@ impl ClientSessionHandler {
                         // Calculate the time it took to open the connection and record it using the timer started in ws_listener.rs
                         let delta = self.start_connection_time.elapsed();
                         histogram!("connection_opening_time", "client_key" => client_key.to_string()).record(delta);
-
-                        client_start_session_time = Instant::now();
                     });
                     // do not return anything as the session is still alive
                 },

@@ -100,7 +100,7 @@ To run the gateway in a prod environment with Docker Compose, follow these steps
    This script firstly generated the `telemetry/prometheus/prometheus-prod.yml` config file starting from the `telemetry/prometheus/prometheus-template.yml` (step required to perform the variable substitution) and then simply run the gateway with the following command:
 
     ```
-    docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env up -d --build
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml --env-file .env up -d --build
     ```
 
 5. To stop and clean all the local environment a bash script [stop_prod_docker_environment.sh](./scripts/stop_prod_docker_environment.sh) is provided. You can execute it with the command:
