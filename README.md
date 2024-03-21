@@ -1,5 +1,9 @@
 # IC WebSocket Gateway
 
+[![GitHub Release](https://img.shields.io/github/v/release/omnia-network/ic-websocket-gateway)](https://github.com/omnia-network/ic-websocket-gateway/releases)
+[![GitHub License](https://img.shields.io/github/license/omnia-network/ic-websocket-gateway)](https://github.com/omnia-network/ic-websocket-gateway/blob/main/LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/omniadevs/ic-websocket-gateway?logo=docker)](https://hub.docker.com/r/omniadevs/ic-websocket-gateway)
+
 WebSockets enable web applications to maintain a full-duplex connection between the backend and the frontend. This allows for many different use-cases, such as notifications, dynamic content updates (e.g., showing new comments/likes on a post), collaborative editing, etc.
 
 At the moment, the Internet Computer does not natively support WebSocket connections and developers need to resort to work-arounds in the frontend to enable a similar functionality. This results in a poor developer experience and an overload of the backend canister.
@@ -8,11 +12,9 @@ This repository contains the implementation of a WebSocket Gateway enabling clie
 
 # Running the WS Gateway
 
-## Prerequisites
+## Standalone
 
 Make sure you have the **Rust toolchain** installed. You can find instructions [here](https://www.rust-lang.org/tools/install).
-
-## Standalone
 
 1. Run the gateway:
 
@@ -39,7 +41,7 @@ Make sure you have the **Rust toolchain** installed. You can find instructions [
     2024-03-14T11:19:33.650018Z  INFO ic_websocket_gateway::manager: Start accepting incoming connections
     ```
 
-### Options available
+### Arguments available
 
 There are some command line arguments that you can set when running the gateway:
 | Argument | Description | Default |
@@ -47,17 +49,49 @@ There are some command line arguments that you can set when running the gateway:
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
 | `--ic-network-url` | The URL of the IC network to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
+| `--prometheus-endpoint` | The **IP:port** on which the gateway will expose Prometheus metrics. | `0.0.0.0:9090` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--opentelemetry-collector-endpoint` | OpenTelemetry collector endpoint. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |
 
 ## Docker
 
-A [Dockerfile](./Dockerfile) is provided, together with the files [docker-compose.yml](./docker-compose.yml), [docker-compose-local.yml](./docker-compose-local.yml) and [docker-compose-prod.yml](./docker-compose-prod.yml) to run the gateway according to the needs. Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+Make sure you have [Docker](https://docs.docker.com/get-docker/) installed.
 
-A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway). This is the image used in the [docker-compose.yml](./docker-compose.yml) file.
+A [Dockerfile](./Dockerfile) is provided. To build the image, run:
+
+```bash
+docker build -t ic-websocket-gateway .
+```
+
+Then, run the gateway with the following command:
+
+```bash
+docker run -p 8080:8080 ic-websocket-gateway
+```
+
+A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway), that you can run with the following command:
+
+```bash
+docker run -p 8080:8080 omniadevs/ic-websocket-gateway
+```
+
+Have a look at the [Arguments available](#arguments-available) to configure the gateway for your needs.
+
+## Docker Compose
+
+Make sure you have [Docker Compose](https://docs.docker.com/compose/install/) installed.
+
+The following compose files are available:
+
+- [docker-compose.yml](./docker-compose.yml)
+- [docker-compose-local.yml](./docker-compose-local.yml)
+- [docker-compose-prod.yml](./docker-compose-prod.yml)
+
+The following sections describe how to use the different compose files to run the gateway with Docker Compose.
 
 ### Local
+
 To run the gateway in a local environment with Docker Compose, follow these steps:
 1. To run all the required local structure you can execute the [start_local_docker_environment.sh](./scripts/start_local_docker_environment.sh) with the command:
     
@@ -71,18 +105,24 @@ To run the gateway in a local environment with Docker Compose, follow these step
     docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env.local up -d --build
     ```
    
-2. To stop and clean all the local environment a bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided. You can execute it with the command:
+2. To stop and clean all the local environment, the bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided. You can execute it with the command:
     
    ```
     ./scripts/stop_local_docker_environment.sh 
     ```
 
-3. The Gateway will print its principal in the container logs, just as explained above.
-4. If you want to verify that all is started correctly a bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This assumes that the gateway is already running.
+3. The Gateway will print its principal in the container logs, just as explained in the [Standalone](#standalone) section.
+4. If you want to verify that everything started correctly, the bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This script assumes that the gateway is already running and reachable locally. You can execute it with the command:
+    
+   ```
+    ./scripts/run_test_canister.sh
+    ```
 
 ### Production
 
-To run the gateway in a prod environment with Docker Compose, follow these steps:
+This configuration uses the [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway) image.
+
+To run the gateway in a production environment with Docker Compose, follow these steps:
 1. Set the environment variables:
 
     ```
@@ -91,26 +131,26 @@ To run the gateway in a prod environment with Docker Compose, follow these steps
 
 2. To run the [docker-compose-prod.yml](./docker-compose-prod.yml) file you need a public domain (that you will put in the `DOMAIN_NAME` environment variable) and a TLS certificate for that domain (because it is configured to make the gateway run with TLS enabled). See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details.
 3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
-4. To run all the required production structure you can execute the [start_prod_docker_environment.sh](./scripts/start_prod_docker_environment.sh) with the command:
+4. To run all the required production containers you can execute the [start_prod_docker_environment.sh](./scripts/start_prod_docker_environment.sh) with the command:
 
    ```
     ./scripts/start_prod_docker_environment.sh 
     ```
 
-   This script firstly generated the `telemetry/prometheus/prometheus-prod.yml` config file starting from the `telemetry/prometheus/prometheus-template.yml` (step required to perform the variable substitution) and then simply run the gateway with the following command:
+   This script first generates the `telemetry/prometheus/prometheus-prod.yml` config file from the `telemetry/prometheus/prometheus-template.yml` template (step required to perform the environment variables substitution) and then runs the gateway with the following command:
 
     ```
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml --env-file .env up -d --build
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml --env-file .env up -d
     ```
 
-5. To stop and clean all the local environment a bash script [stop_prod_docker_environment.sh](./scripts/stop_prod_docker_environment.sh) is provided. You can execute it with the command:
+5. To stop and clean the containers, the bash script [stop_prod_docker_environment.sh](./scripts/stop_prod_docker_environment.sh) is provided. You can execute it with the command:
 
    ```
     ./scripts/stop_prod_docker_environment.sh 
     ```
-6. The Gateway will print its principal in the container logs, just as explained above.
+6. The Gateway will print its principal in the container logs, just as explained in the [Standalone](#standalone) section.
 
-### Obtain a TLS certificate
+#### Obtain a TLS certificate
 
 1. Buy a domain name and point it to the server where you are running the gateway.
 2. Make sure the `.env` file is configured with the correct domain name, see above.
