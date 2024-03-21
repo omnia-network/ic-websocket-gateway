@@ -59,14 +59,8 @@ services:
       - ic-ws-gateway-network
 
   prometheus:
-    image: prom/prometheus
-    container_name: prometheus
-    ports:
-      - "9090:9090"
     volumes:
-      - "./telemetry/prometheus.yml:/etc/prometheus/prometheus.yml"
-    networks:
-      - ic-ws-gateway-network
+      - "./telemetry/prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml"
 
 networks:
   ic-ws-gateway-network:

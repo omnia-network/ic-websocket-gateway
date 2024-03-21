@@ -3,7 +3,7 @@
 echo "Starting local replica"
 dfx start --clean --background
 
-echo "Removing previous local image"
+echo "Removing previous local websocket image"
 docker rmi local/ic-websocket-gateway
 
 echo "Starting docker environment"

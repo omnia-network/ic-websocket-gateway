@@ -12,3 +12,5 @@ scripts/gateway_test.log
 
 .env
 .idea
+
+prometheus-prod.yml

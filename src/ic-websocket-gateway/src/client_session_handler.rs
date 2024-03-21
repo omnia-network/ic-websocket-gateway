@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::{
     canister_poller::CanisterPoller,
     client_session::{ClientSession, IcWsError, IcWsSessionState},
@@ -28,6 +27,8 @@ pub struct ClientSessionHandler {
     gateway_state: GatewayState,
     /// Polling interval in milliseconds
     polling_interval_ms: u64,
+    // Time to the start of the connection
+    start_connection_time: Instant,
 }
 
 impl ClientSessionHandler {
@@ -36,12 +37,14 @@ impl ClientSessionHandler {
         agent: Arc<Agent>,
         gateway_state: GatewayState,
         polling_interval_ms: u64,
+        start_connection_time: Instant,
     ) -> Self {
         Self {
             id,
             agent,
             gateway_state,
             polling_interval_ms,
+            start_connection_time,
         }
     }
 
@@ -109,7 +112,7 @@ impl ClientSessionHandler {
         mut client_channel_tx: Option<Sender<IcWsCanisterMessage>>,
         client_session_span: Span,
     ) -> Result<(), String> {
-        let mut clients_session_time: HashMap<ClientKey, Instant>  = HashMap::new();
+        let client_start_session_time = Instant::now();
 
         // keeps trying to update the client session state
         // if a new state is returned, execute the corresponding logic
@@ -186,27 +189,23 @@ impl ClientSessionHandler {
                     client_session_span.in_scope(|| {
                         debug!("Client session opened");
 
+                        let canister_id = self.get_canister_id(&client_session);
                         let client_key = self.get_client_key(&client_session);
 
-                        gauge!("clients_connected").increment(1.0);
+                        // Clients connection metrics
+                        let clients_connected = self.gateway_state.get_clients_count(canister_id);
+                        debug!("Clients connected: {}", clients_connected.to_string());
+                        gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
 
-                        clients_session_time.insert(client_key.clone(), Instant::now());
+                        // Calculate the time it took to open the connection and record it using the timer started in ws_listener.rs
+                        let delta = self.start_connection_time.elapsed();
+                        histogram!("connection_opening_time", "client_key" => client_key.to_string()).record(delta);
                     });
                     // do not return anything as the session is still alive
                 },
                 Ok(Some(IcWsSessionState::Closed)) => {
                     client_session_span.in_scope(|| {
                         debug!("Client session closed");
-
-                        let client_key = self.get_client_key(&client_session);
-
-                        gauge!("clients_connected").decrement(1.0);
-
-                        let value = clients_session_time.get(&client_key.clone());
-
-                        let delta = value.unwrap().elapsed();
-                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
-
                     });
 
                     let canister_id = self.get_canister_id(&client_session);
@@ -215,6 +214,14 @@ impl ClientSessionHandler {
                     self.gateway_state
                         .remove_client(canister_id, client_key.clone());
                     debug!("Client removed from gateway state");
+
+                    // Clients connection metrics
+                    let clients_connected = self.gateway_state.get_clients_count(canister_id);
+                    debug!("Clients connected: {}", clients_connected.to_string());
+                    gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+
+                    let delta = client_start_session_time.elapsed();
+                    histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
 
                     self.call_ws_close(&canister_id, client_key).await;
 
@@ -246,6 +253,15 @@ impl ClientSessionHandler {
                         .remove_client_if_exists(canister_id, client_key)
                     {
                         debug!("Client removed from gateway state");
+
+                        // Clients connection metrics
+                        let clients_connected = self.gateway_state.get_clients_count(canister_id);
+                        debug!("Clients connected: {}", clients_connected.to_string());
+                        gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+
+                        let delta = client_start_session_time.elapsed();
+                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
+
                         self.call_ws_close(&canister_id, client_key).await;
 
                         // return Err as the session had an error and cannot be updated anymore
@@ -301,6 +317,11 @@ impl ClientSessionHandler {
         let agent = Arc::clone(&self.agent);
         let gateway_state = self.gateway_state.clone();
         let polling_interval_ms = self.polling_interval_ms;
+
+        let active_pollers = gateway_state.get_active_pollers_count();
+        debug!("Active pollers: {}", active_pollers.to_string());
+        gauge!("active_pollers").set(active_pollers as f64);
+
         tokio::spawn(async move {
             // we pass both the whole gateway state and the poller state for the specific canister
             // the poller can access the poller state to determine which clients are connected
@@ -312,7 +333,7 @@ impl ClientSessionHandler {
                 agent,
                 canister_id,
                 poller_state,
-                gateway_state,
+                gateway_state.clone(),
                 polling_interval_ms,
             );
             if let Err(e) = poller.run_polling().await {
@@ -326,6 +347,10 @@ impl ClientSessionHandler {
             // the poller takes care of notifying the session handlers when an error is detected
             // and removing its corresponding entry from the gateway state
             // therefore, this task can simply terminate without doing anything
+
+            let active_pollers = gateway_state.get_active_pollers_count();
+            debug!("Active pollers: {}", active_pollers.to_string());
+            gauge!("active_pollers").set(active_pollers as f64);
         });
     }
 }
