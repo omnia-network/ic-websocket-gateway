@@ -47,6 +47,7 @@ There are some command line arguments that you can set when running the gateway:
 | `--gateway-address` | The **IP:port** on which the gateway will listen for incoming connections. | `0.0.0.0:8080` |
 | `--ic-network-url` | The URL of the IC network to which the gateway will connect. | `http://127.0.0.1:4943` |
 | `--polling-interval` | The interval (in **milliseconds**) at which the gateway will poll the canisters for new messages. | `100` |
+| `--prometheus-endpoint` | The **IP:port** on which the gateway will expose Prometheus metrics. | `0.0.0.0:9090` |
 | `--tls-certificate-pem-path` | The path to the TLS certificate file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--tls-certificate-key-pem-path` | The path to the TLS private key file. See [Obtain a TLS certificate](#obtain-a-tls-certificate) for more details. | _empty_ |
 | `--opentelemetry-collector-endpoint` | OpenTelemetry collector endpoint. See [Tracing telemetry](#tracing-telemetry) for more details. | _empty_ |

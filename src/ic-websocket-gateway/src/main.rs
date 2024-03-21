@@ -36,6 +36,10 @@ struct DeploymentInfo {
     /// Time interval (in milliseconds) at which the canisters are polled.
     polling_interval: u64,
 
+    #[structopt(long, default_value = "0.0.0.0:9000")]
+    /// Prometheus endpoint on which the metrics are exposed.
+    prometheus_endpoint: String,
+
     #[structopt(long)]
     tls_certificate_pem_path: Option<String>,
 
@@ -79,7 +83,7 @@ async fn main() -> Result<(), String> {
     )
     .expect("could not init tracing");
 
-    init_metrics(None).expect("could not init metrics");
+    init_metrics(&deployment_info.prometheus_endpoint).expect("could not init metrics");
 
     // must be printed after initializing tracing to ensure that the info are captured
     info!("Deployment info: {:?}", deployment_info);
