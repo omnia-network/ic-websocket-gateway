@@ -12,11 +12,9 @@ This repository contains the implementation of a WebSocket Gateway enabling clie
 
 # Running the WS Gateway
 
-## Prerequisites
+## Standalone
 
 Make sure you have the **Rust toolchain** installed. You can find instructions [here](https://www.rust-lang.org/tools/install).
-
-## Standalone
 
 1. Run the gateway:
 
