@@ -8,7 +8,7 @@ use gateway_state::{
 };
 use ic_agent::{agent::RejectCode, Agent, AgentError};
 use std::{sync::Arc, time::Duration};
-use metrics::gauge;
+use metrics::{gauge, histogram};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
@@ -113,7 +113,6 @@ impl CanisterPoller {
     }
 
     pub async fn poll_and_relay(&mut self) -> Result<(), String> {
-        //TODO start the timer for the polling iteration
         let start_polling_instant = tokio::time::Instant::now();
 
         match self.poll_canister().await? {
@@ -151,8 +150,10 @@ impl CanisterPoller {
             PollingStatus::NoMessagesPolled => (),
         }
 
-        //TODO stop the timer for the polling iteration and log the duration
-        // compute the amout of time to sleep for before polling again
+        // record the time it took to poll the canister
+        let delta = start_polling_instant.elapsed();
+        histogram!("poller_duration", "canister_id" => self.canister_id.to_string()).record(delta);
+
         let effective_polling_interval =
             self.compute_effective_polling_interval(start_polling_instant);
         // if no messages are returned or if the queue is fully drained, sleep for 'effective_polling_interval' before polling again

@@ -33,6 +33,10 @@ pub fn init_metrics(address: &str) -> Result<(), Box<dyn Error>> {
         "connection_opening_time",
         "The time it takes to open a connection"
     );
+    describe_histogram!(
+        "poller_duration",
+        "The time it takes to poll the canister"
+    );
 
     gauge!("active_pollers").set(0.0);
 
