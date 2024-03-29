@@ -8,6 +8,7 @@ use gateway_state::{
 };
 use ic_agent::{agent::RejectCode, Agent, AgentError};
 use std::{sync::Arc, time::Duration};
+use metrics::gauge;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
@@ -77,6 +78,11 @@ impl CanisterPoller {
                 // this enables to crawl polling iterations in reverse chronological order
                 polling_iteration_span.follows_from(previous_polling_iteration_span.id());
             }
+
+            // register the number of active clients
+            let clients_connected = self.poller_state.len();
+            gauge!("clients_connected", "canister_id" => self.canister_id.to_string()).set(clients_connected as f64);
+
             if let Err(e) = self
                 .poll_and_relay()
                 .instrument(polling_iteration_span.clone())
@@ -107,6 +113,7 @@ impl CanisterPoller {
     }
 
     pub async fn poll_and_relay(&mut self) -> Result<(), String> {
+        //TODO start the timer for the polling iteration
         let start_polling_instant = tokio::time::Instant::now();
 
         match self.poll_canister().await? {
@@ -144,6 +151,7 @@ impl CanisterPoller {
             PollingStatus::NoMessagesPolled => (),
         }
 
+        //TODO stop the timer for the polling iteration and log the duration
         // compute the amout of time to sleep for before polling again
         let effective_polling_interval =
             self.compute_effective_polling_interval(start_polling_instant);

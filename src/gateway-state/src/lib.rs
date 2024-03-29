@@ -3,7 +3,8 @@ use dashmap::{mapref::entry::Entry, DashMap};
 use ic_agent::export::Principal;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use tracing::Span;
+use tracing::{debug, Span};
+use metrics::{gauge};
 
 /// State of the WS Gateway that can be shared between threads
 #[derive(Clone)]
@@ -53,6 +54,11 @@ impl GatewayState {
                         span: client_session_span,
                     },
                 );
+
+                // Increment the number of clients connected to the canister
+                let clients_connected = poller_state.len();
+                debug!("Clients connected: {}", clients_connected.to_string());
+                gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
                 // the poller shall not be started again
                 None
             },
@@ -68,6 +74,11 @@ impl GatewayState {
                     },
                 );
                 entry.insert(Arc::clone(&poller_state));
+
+                // Increment the number of clients connected to the canister
+                let clients_connected = poller_state.len();
+                debug!("Clients connected: {}", clients_connected.to_string());
+                gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
                 // the poller shall be started
                 Some(poller_state)
             },
@@ -98,6 +109,11 @@ impl GatewayState {
                 // if this is encountered it might indicate a race condition
                 unreachable!("Client key not found in poller state");
             }
+
+            // Decrement the number of clients connected to the canister
+            let clients_connected = poller_state.len();
+            debug!("Clients connected: {}", clients_connected.to_string());
+            gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
         }
@@ -107,14 +123,6 @@ impl GatewayState {
         // indeed, a client session might enter the Close state before the poller side of the channel has been dropped - but after the poller state has been removed -
         // in such a case, the client state as already been removed by the poller, together with the whole poller state
         // therefore there is no need to do anything else here
-    }
-
-    pub fn get_clients_count(&self, canister_id: &CanisterPrincipal) -> usize {
-        if let Some(poller_state) = self.inner.data.get(canister_id) {
-            poller_state.len()
-        } else {
-            0
-        }
     }
 
     pub fn get_active_pollers_count(&self) -> usize {
@@ -149,7 +157,14 @@ impl GatewayState {
             // returns 'ClientRemovalResult::Removed' if the client was removed, 'ClientRemovalResult::Vacant' if there was no such client
             return {
                 match poller_state.remove(&client_key) {
-                    Some(_) => ClientRemovalResult::Removed(client_key),
+                    Some(_) => {
+                        // Decrement the number of clients connected to the canister
+                        let clients_connected = poller_state.len();
+                        debug!("Clients connected: {}", clients_connected.to_string());
+                        gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+
+                        ClientRemovalResult::Removed(client_key)
+                    },
                     None => ClientRemovalResult::Vacant,
                 }
             };
