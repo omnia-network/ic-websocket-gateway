@@ -7,8 +7,8 @@ use gateway_state::{
     CanisterPrincipal, CanisterRemovalResult, ClientSender, GatewayState, PollerState,
 };
 use ic_agent::{agent::RejectCode, Agent, AgentError};
-use std::{sync::Arc, time::Duration};
 use metrics::{gauge, histogram};
+use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::{error, span, trace, warn, Instrument, Level, Span};
 
@@ -81,7 +81,8 @@ impl CanisterPoller {
 
             // register the number of active clients
             let clients_connected = self.poller_state.len();
-            gauge!("clients_connected", "canister_id" => self.canister_id.to_string()).set(clients_connected as f64);
+            gauge!("clients_connected", "canister_id" => self.canister_id.to_string())
+                .set(clients_connected as f64);
 
             if let Err(e) = self
                 .poll_and_relay()

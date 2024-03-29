@@ -15,7 +15,10 @@ pub fn init_metrics(address: &str) -> Result<(), Box<dyn Error>> {
         .install()
         .expect("failed to install Prometheus recorder");
 
-    describe_counter!("client_connected_count", "Each time that a client connects it emits a point");
+    describe_counter!(
+        "client_connected_count",
+        "Each time that a client connects it emits a point"
+    );
     describe_gauge!(
         "clients_connected",
         "The number of clients currently connected"
@@ -33,10 +36,7 @@ pub fn init_metrics(address: &str) -> Result<(), Box<dyn Error>> {
         "connection_opening_time",
         "The time it takes to open a connection"
     );
-    describe_histogram!(
-        "poller_duration",
-        "The time it takes to poll the canister"
-    );
+    describe_histogram!("poller_duration", "The time it takes to poll the canister");
 
     gauge!("active_pollers").set(0.0);
 

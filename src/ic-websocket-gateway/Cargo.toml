@@ -37,7 +37,7 @@ ic-identity = { path = "../ic-identity" }
 gateway-state = { path = "../gateway-state" }
 canister-utils = { path = "../canister-utils" }
 rand = "0.8"
-metrics = "0.22.1"
+metrics = { workspace = true }
 metrics-exporter-prometheus = "0.13.1"
 metrics-util = "0.16.2"
 

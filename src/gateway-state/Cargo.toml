@@ -11,5 +11,5 @@ dashmap = "5.5.3"
 ic-agent = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-metrics = "0.22.1"
+metrics = { workspace = true }
 canister-utils = { version = "1.0.0", path = "../canister-utils" }

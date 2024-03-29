@@ -1,10 +1,12 @@
-use canister_utils::{ClientKey, IcWsCanisterMessage};
-use dashmap::{mapref::entry::Entry, DashMap};
-use ic_agent::export::Principal;
 use std::sync::Arc;
+
+use dashmap::{DashMap, mapref::entry::Entry};
+use ic_agent::export::Principal;
+use metrics::gauge;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, Span};
-use metrics::{gauge};
+
+use canister_utils::{ClientKey, IcWsCanisterMessage};
 
 /// State of the WS Gateway that can be shared between threads
 #[derive(Clone)]
@@ -57,8 +59,9 @@ impl GatewayState {
 
                 // Increment the number of clients connected to the canister
                 let clients_connected = poller_state.len();
-                debug!("Clients connected: {}", clients_connected.to_string());
-                gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+                debug!("Clients connected: {}", clients_connected);
+                gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                    .set(clients_connected as f64);
                 // the poller shall not be started again
                 None
             },
@@ -77,8 +80,9 @@ impl GatewayState {
 
                 // Increment the number of clients connected to the canister
                 let clients_connected = poller_state.len();
-                debug!("Clients connected: {}", clients_connected.to_string());
-                gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+                debug!("Clients connected: {}", clients_connected);
+                gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                    .set(clients_connected as f64);
                 // the poller shall be started
                 Some(poller_state)
             },
@@ -112,8 +116,9 @@ impl GatewayState {
 
             // Decrement the number of clients connected to the canister
             let clients_connected = poller_state.len();
-            debug!("Clients connected: {}", clients_connected.to_string());
-            gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+            debug!("Clients connected: {}", clients_connected);
+            gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                .set(clients_connected as f64);
             // even if this is the last client session for the canister, do not remove the canister from the gateway state
             // this will be done by the poller task
         }
@@ -160,8 +165,9 @@ impl GatewayState {
                     Some(_) => {
                         // Decrement the number of clients connected to the canister
                         let clients_connected = poller_state.len();
-                        debug!("Clients connected: {}", clients_connected.to_string());
-                        gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+                        debug!("Clients connected: {}", clients_connected);
+                        gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                            .set(clients_connected as f64);
 
                         ClientRemovalResult::Removed(client_key)
                     },
@@ -271,13 +277,14 @@ pub type CanisterPrincipal = Principal;
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc::{self, Receiver};
-
-    use super::*;
     use std::{
         thread,
         time::{Duration, Instant},
     };
+
+    use tokio::sync::mpsc::{self, Receiver};
+
+    use super::*;
 
     #[tokio::test]
     async fn should_insert_new_client_channels_and_get_new_poller_state_once() {
