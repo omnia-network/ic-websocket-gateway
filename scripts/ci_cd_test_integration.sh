@@ -2,13 +2,13 @@
 
 set -e
 
+# requires running the prepare_integration_tests.sh script first
+
 echo "Starting local replica..."
 dfx start --clean --background
 
-echo "Building gateway..."
-cargo build
 echo "Starting gateway in the background..."
-cargo run > /dev/null 2>&1 &
+cargo run --release > /dev/null 2>&1 &
 gateway_pid=$!
 
 echo "Waiting for gateway to start..."
