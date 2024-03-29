@@ -639,7 +639,7 @@
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "5m",
+          "interval": "1h",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -745,7 +745,7 @@
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "10m",
+          "interval": "1d",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -1196,6 +1196,6 @@
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 16,
+  "version": 17,
   "weekStart": ""
 }
