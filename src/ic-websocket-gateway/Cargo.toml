@@ -36,7 +36,7 @@ opentelemetry = { version = "0.21" }
 opentelemetry-otlp = { version = "0.14.0" }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 rand = "0.8"
-metrics = "0.22.1"
+metrics = { workspace = true }
 metrics-exporter-prometheus = "0.13.1"
 metrics-util = "0.16.2"
 

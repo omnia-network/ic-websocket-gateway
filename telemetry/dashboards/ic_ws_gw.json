@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 12,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -30,9 +30,9 @@
         "x": 0,
         "y": 0
       },
-      "id": 2,
+      "id": 14,
       "panels": [],
-      "title": "Duration by Thread ID",
+      "title": "Proxy Canister",
       "type": "row"
     },
     {
@@ -51,16 +51,27 @@
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
-            "fillOpacity": 80,
+            "barAlignment": 0,
+            "drawStyle": "points",
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
             "lineWidth": 1,
+            "pointSize": 10,
             "scaleDistribution": {
               "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -73,10 +84,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           }
@@ -89,29 +96,21 @@
         "x": 0,
         "y": 1
       },
-      "id": 1,
+      "id": 11,
       "options": {
-        "barRadius": 0,
-        "barWidth": 0.97,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
-        "orientation": "auto",
-        "showValue": "auto",
-        "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
-        },
-        "xField": "Start time",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0
+        }
       },
+      "pluginVersion": "10.4.0-65283",
       "targets": [
         {
           "datasource": {
@@ -120,22 +119,12 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
-              "operator": "=",
-              "scope": "span",
-              "tag": "thread.id",
-              "value": [
-                "2"
-              ],
-              "valueType": "int"
-            },
-            {
               "id": "service-name",
               "operator": "=",
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -145,19 +134,30 @@
               "scope": "span",
               "tag": "name",
               "value": [
-                "Accept Connection"
+                "Polling Iteration"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "0b1aaf5a",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "iustv-tiaaa-aaaao-a3aga-cai"
               ],
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 999,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
-      "title": "Thread ID 2",
-      "type": "barchart"
+      "title": "Polling Iteration of HTTP Canister Proxy",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -213,6 +213,906 @@
         "x": 12,
         "y": 1
       },
+      "id": 16,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "8bcdaa62",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "iustv-tiaaa-aaaao-a3aga-cai"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Canister Message"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "HTTP Requests",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 15,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "Start time",
+        "xTickLabelRotation": 45,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "10.4.0-65283",
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "0a5d4dcf",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "iustv-tiaaa-aaaao-a3aga-cai"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Client Session"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Past Uptimes of HTTP Canister Proxy",
+      "type": "barchart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Polling Iterations by Canister ID",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 10,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0-65283",
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Polling Iteration"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "0b1aaf5a",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "mqci4-raaaa-aaaao-a2fyq-cai"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 999,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "spss": 100,
+          "tableType": "traces"
+        }
+      ],
+      "title": "Polling Iteration for IC WS Demo",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 17,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "92284c4a",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "mqci4-raaaa-aaaao-a2fyq-cai"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Canister Message"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Messages from IC WS Demo Canister",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 10,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0-65283",
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Polling Iteration"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "0b1aaf5a",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "sswdm-viaaa-aaaap-abugq-cai"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 999,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "spss": 100,
+          "tableType": "traces"
+        }
+      ],
+      "title": "Polling Iteration for sswdm",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 18,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "003150a8",
+              "operator": "=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "sswdm-viaaa-aaaap-abugq-cai"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Canister Message"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Canister messages from sswdm",
+      "type": "barchart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 2,
+      "panels": [],
+      "title": "Duration by Thread ID",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "id": 1,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "Start time",
+        "xTickLabelRotation": 45,
+        "xTickLabelSpacing": 100
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "P214B5B846CF3925F"
+          },
+          "filters": [
+            {
+              "id": "eaaf0a62",
+              "operator": "=",
+              "scope": "span",
+              "tag": "thread.id",
+              "value": [
+                "2"
+              ],
+              "valueType": "int"
+            },
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "ic-ws-gw-3656s"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "span-name",
+              "operator": "=",
+              "scope": "span",
+              "tag": "name",
+              "value": [
+                "Client Session"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "88e5980f",
+              "operator": "!=",
+              "scope": "span",
+              "tag": "canister_id",
+              "value": [
+                "iustv-tiaaa-aaaao-a3aga-cai"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 1000,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "spss": 100,
+          "tableType": "traces"
+        }
+      ],
+      "title": "Thread ID 2 (excluding HTTP Proxy)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "P214B5B846CF3925F"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
       "id": 6,
       "options": {
         "barRadius": 0,
@@ -229,6 +1129,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -244,7 +1145,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "b8078415",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -259,7 +1160,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -274,9 +1175,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -335,7 +1237,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 43
       },
       "id": 5,
       "options": {
@@ -353,6 +1255,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -368,7 +1271,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "d53c2a88",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -383,7 +1286,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -398,9 +1301,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -459,7 +1363,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 43
       },
       "id": 7,
       "options": {
@@ -477,6 +1381,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -492,7 +1397,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "7e6c2a74",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -507,7 +1412,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -522,9 +1427,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -583,7 +1489,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 51
       },
       "id": 3,
       "options": {
@@ -601,6 +1507,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -616,11 +1523,13 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "9d20e8d9",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
-              "value": [],
+              "value": [
+                "6"
+              ],
               "valueType": "int"
             },
             {
@@ -629,7 +1538,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -644,9 +1553,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -705,7 +1615,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 51
       },
       "id": 8,
       "options": {
@@ -723,6 +1633,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -738,7 +1649,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "1fef4771",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -753,7 +1664,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -768,9 +1679,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -829,7 +1741,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 59
       },
       "id": 4,
       "options": {
@@ -847,6 +1759,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -862,7 +1775,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "3b6ced2a",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -877,7 +1790,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -892,9 +1805,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -953,7 +1867,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 59
       },
       "id": 9,
       "options": {
@@ -971,6 +1885,7 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         },
@@ -986,7 +1901,7 @@
           },
           "filters": [
             {
-              "id": "d4ede8da",
+              "id": "a43b45ff",
               "operator": "=",
               "scope": "span",
               "tag": "thread.id",
@@ -1001,7 +1916,7 @@
               "scope": "resource",
               "tag": "service.name",
               "value": [
-                "ic-ws-gw-ipc77"
+                "ic-ws-gw-3656s"
               ],
               "valueType": "string"
             },
@@ -1016,9 +1931,10 @@
               "valueType": "string"
             }
           ],
-          "limit": 20,
+          "limit": 1000,
           "queryType": "traceqlSearch",
           "refId": "A",
+          "spss": 100,
           "tableType": "traces"
         }
       ],
@@ -1026,7 +1942,7 @@
       "type": "barchart"
     }
   ],
-  "refresh": false,
+  "refresh": "",
   "schemaVersion": 39,
   "tags": [],
   "templating": {
@@ -1036,12 +1952,11 @@
     "from": "now-3h",
     "to": "now"
   },
+  "timeRangeUpdatedDuringEditOrView": false,
   "timepicker": {},
   "timezone": "",
-  "title": "Client Connections by Thread ID",
+  "title": "IC WS GW",
   "uid": "a360ec48-ff96-448b-9711-e3e80d339722",
-  "version": 3,
+  "version": 15,
   "weekStart": ""
 }
-
-  
