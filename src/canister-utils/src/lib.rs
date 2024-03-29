@@ -217,5 +217,5 @@ pub async fn ws_get_messages(
         .await
         .expect("Failed to read HTTP response");
 
-    Decode!(&res, CanisterOutputCertifiedMessages).map_err(|e| IcError::Candid(e))
+    Decode!(&res, CanisterOutputCertifiedMessages).map_err(IcError::Candid)
 }

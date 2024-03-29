@@ -284,8 +284,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 // replace the field with the canister_id received in the first envelope
                 // this shall not be updated anymore
                 // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
-                if !self.canister_id.replace(canister_id.clone()).is_none()
-                    || !self.client_key.replace(client_key.clone()).is_none()
+                if self.canister_id.replace(canister_id).is_some()
+                    || self.client_key.replace(client_key.clone()).is_some()
                 {
                     // if the canister_id or client_key field was already set,
                     // it means that the client sent the WS open message twice,
@@ -303,10 +303,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             // in case of other errors, we report them and terminate the connection handler task
             Err(e) => {
                 self.close_ws_session().await?;
-                return Err(IcWsError::IcWsProtocol(format!(
+                Err(IcWsError::IcWsProtocol(format!(
                     "IC WS setup failed. Error: {:?}",
                     e
-                )));
+                )))
             },
         }
     }
@@ -361,7 +361,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             let canister_id = self.canister_id.expect("must be set");
 
             // relay the envelope to the IC
-            self.relay_envelope_to_canister(serialized_envelope, canister_id.clone())
+            self.relay_envelope_to_canister(serialized_envelope, canister_id)
                 .await
                 .map_err(|e| IcWsError::IcWsProtocol(e.to_string()))?;
 
@@ -385,7 +385,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         self.agent
             .update_signed(canister_id, serialized_envelope)
             .await?;
-        return Ok(());
+        Ok(())
     }
 
     async fn handle_open_transition(
