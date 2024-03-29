@@ -113,15 +113,11 @@ impl CanisterPoller {
             PollingStatus::MessagesPolled(certified_canister_output) => {
                 let relay_messages_span =
                     span!(parent: &Span::current(), Level::TRACE, "Relay Canister Messages");
-                let end_of_queue_reached = {
-                    match certified_canister_output.is_end_of_queue {
-                        Some(is_end_of_queue_reached) => is_end_of_queue_reached,
-                        // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
-                        // in this case, assume that the queue is fully drained and therefore will be polled again
-                        // after waiting for 'polling_interval_ms'
-                        None => true,
-                    }
-                };
+                // if 'is_end_of_queue' is None, the CDK version is < 0.3.1 and does not have such a field
+                // in this case, assume that the queue is fully drained and therefore will be polled again
+                // after waiting for 'polling_interval_ms'
+                let end_of_queue_reached =
+                    certified_canister_output.is_end_of_queue.unwrap_or(true);
                 self.update_nonce(&certified_canister_output)?;
                 // relaying of messages cannot be done in a separate task for each polling iteration
                 // as they might interleave and break the correct ordering of messages
@@ -233,7 +229,7 @@ impl CanisterPoller {
                     trace!("Start relaying message",);
                     (canister_to_client_message, Span::current())
                 });
-                relay_message(canister_message, &client_channel_tx)
+                relay_message(canister_message, client_channel_tx)
                     .instrument(canister_message_span)
                     .await;
                 relayed_messages_count += 1;
@@ -340,7 +336,7 @@ async fn relay_message(
     }
 }
 
-pub fn get_nonce_from_message(key: &String) -> Result<u64, String> {
+pub fn get_nonce_from_message(key: &str) -> Result<u64, String> {
     if let Some(message_nonce_str) = key.split('_').last() {
         let message_nonce = message_nonce_str
             .parse()

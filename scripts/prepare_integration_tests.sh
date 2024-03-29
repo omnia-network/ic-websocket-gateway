@@ -3,7 +3,7 @@
 set -e
 
 echo "Building gateway"
-cargo build
+cargo build --release
 
 cd tests
 

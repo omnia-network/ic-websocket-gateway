@@ -1,0 +1,19 @@
+name: Setup Rust
+description: Setup Rust
+inputs:
+  cache-key:
+    description: "The key to use for caching"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust toolchain
+      shell: bash
+      run: rustup show
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        cache-on-failure: true

@@ -1,11 +1,11 @@
 use crate::client_session_handler::ClientSessionHandler;
 use gateway_state::GatewayState;
 use ic_agent::Agent;
+use metrics::histogram;
 use native_tls::Identity;
-use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
 use std::collections::HashMap;
 use std::time::Instant;
-use metrics::{histogram};
+use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -158,7 +158,8 @@ impl WsListener {
         let client_id = self.next_client_id;
         let tls_acceptor = self.tls_acceptor.clone();
 
-        self.clients_connection_time.insert(client_id, Instant::now());
+        self.clients_connection_time
+            .insert(client_id, Instant::now());
 
         tokio::spawn(
             async move {
@@ -194,7 +195,8 @@ impl WsListener {
                             .expect("ws listener's side of the channel dropped");
 
                         let delta = start.elapsed();
-                        histogram!("tls_resolution_time", "client_id" => client_id.to_string()).record(delta);
+                        histogram!("tls_resolution_time", "client_id" => client_id.to_string())
+                            .record(delta);
                     },
                     Err(e) => {
                         error!("Failed to accept connection: {:?}", e);
@@ -216,12 +218,17 @@ impl WsListener {
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
 
-        let start = self.clients_connection_time.get(&client_id).unwrap().clone();
+        let start = *self.clients_connection_time.get(&client_id).unwrap();
 
         tokio::spawn(
             async move {
-                let mut client_session_handler =
-                    ClientSessionHandler::new(client_id, agent, gateway_state, polling_interval_ms, start);
+                let mut client_session_handler = ClientSessionHandler::new(
+                    client_id,
+                    agent,
+                    gateway_state,
+                    polling_interval_ms,
+                    start,
+                );
                 debug!("Started client session handler task");
 
                 if let Err(e) = {
