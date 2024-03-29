@@ -352,7 +352,7 @@
             "axisColorMode": "text",
             "axisLabel": "Number",
             "axisPlacement": "auto",
-            "barAlignment": 0,
+            "barAlignment": -1,
             "drawStyle": "bars",
             "fillOpacity": 100,
             "gradientMode": "none",
@@ -405,7 +405,7 @@
         "y": 18
       },
       "id": 6,
-      "interval": "30s",
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
@@ -427,11 +427,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum by(instance) (max_over_time(clients_connected[30s]))",
+          "expr": "sum by(instance) (max_over_time(client_connected_count[$__interval]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "1h",
+          "interval": "5m",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -458,7 +458,7 @@
             "axisColorMode": "text",
             "axisLabel": "Number",
             "axisPlacement": "auto",
-            "barAlignment": 0,
+            "barAlignment": -1,
             "drawStyle": "bars",
             "fillOpacity": 100,
             "gradientMode": "none",
@@ -511,7 +511,7 @@
         "y": 18
       },
       "id": 7,
-      "interval": "30s",
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
@@ -533,11 +533,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum by(instance) (max_over_time(clients_connected[30s]))",
+          "expr": "sum by(instance) (max_over_time(client_connected_count[$__interval]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "interval": "1d",
+          "interval": "10m",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -616,7 +616,7 @@
         "y": 26
       },
       "id": 2,
-      "interval": "30s",
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
@@ -720,7 +720,7 @@
         "y": 26
       },
       "id": 8,
-      "interval": "30s",
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
@@ -776,7 +776,39 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "max": 1,
@@ -804,20 +836,18 @@
         "y": 35
       },
       "id": 12,
+      "interval": "10s",
       "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "sizing": "auto"
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
       "pluginVersion": "10.4.0",
       "targets": [
@@ -839,7 +869,7 @@
         }
       ],
       "title": "Gateway status",
-      "type": "gauge"
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -909,6 +939,7 @@
         "y": 35
       },
       "id": 13,
+      "interval": "10s",
       "options": {
         "legend": {
           "calcs": [],
@@ -957,6 +988,6 @@
   "timezone": "browser",
   "title": "IC Metrics",
   "uid": "cdfh3d16g8dtsf",
-  "version": 9,
+  "version": 15,
   "weekStart": ""
 }

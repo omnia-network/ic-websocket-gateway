@@ -109,8 +109,8 @@ impl GatewayState {
         // therefore there is no need to do anything else here
     }
 
-    pub fn get_clients_count(&self, canister_id: CanisterPrincipal) -> usize {
-        if let Some(poller_state) = self.inner.data.get(&canister_id) {
+    pub fn get_clients_count(&self, canister_id: &CanisterPrincipal) -> usize {
+        if let Some(poller_state) = self.inner.data.get(canister_id) {
             poller_state.len()
         } else {
             0
