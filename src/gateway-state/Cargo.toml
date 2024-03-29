@@ -13,4 +13,5 @@ dashmap = "5.5.3"
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+metrics = { workspace = true }
 canister-utils = { workspace = true }
