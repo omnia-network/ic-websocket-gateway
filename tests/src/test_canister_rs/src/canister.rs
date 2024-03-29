@@ -16,16 +16,14 @@ pub struct AppMessage {
 
 impl AppMessage {
     fn candid_serialize(&self) -> Vec<u8> {
-        encode_one(&self).unwrap()
+        encode_one(self).unwrap()
     }
 }
 
 pub fn on_open(args: OnOpenCallbackArgs) {
     // add client to the list of connected clients
     CLIENTS_CONNECTED.with(|clients_connected| {
-        clients_connected
-            .borrow_mut()
-            .insert(args.client_principal.clone());
+        clients_connected.borrow_mut().insert(args.client_principal);
 
         print(format!(
             "[on_open] # clients connected: {}",
@@ -46,16 +44,16 @@ pub fn on_message(args: OnMessageCallbackArgs) {
         text: app_msg.clone().text + " ping",
         timestamp: time(),
     };
-    print(format!("[on_message] Received message"));
+    print("[on_message] Received message");
     send_app_message(args.client_principal, new_msg)
 }
 
 fn send_app_message(client_key: ClientPrincipal, msg: AppMessage) {
-    print(format!("Sending message"));
+    print("Sending message");
     if let Err(e) = send(client_key, msg.candid_serialize()) {
         print(format!("Could not send message: {}", e));
     }
-    print(format!("Message sent"));
+    print("Message sent");
 }
 
 pub fn on_close(args: OnCloseCallbackArgs) {

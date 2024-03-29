@@ -283,7 +283,7 @@ impl ClientSessionHandler {
         // call ws_close so that the client is removed from the canister
         if let Err(e) = ws_close(
             &self.agent,
-            &canister_id,
+            canister_id,
             CanisterWsCloseArguments { client_key },
         )
         .await

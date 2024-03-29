@@ -60,7 +60,8 @@ fn ws_get_messages(args: CanisterWsGetMessagesArguments) -> CanisterWsGetMessage
     ic_websocket_cdk::ws_get_messages(args)
 }
 
-//// Debug/tests methods
+// Debug/tests methods
+
 // send a message to the client, usually called by the canister itself
 #[update]
 fn send(client_key: ClientPrincipal, msg_bytes: Vec<u8>) -> CanisterSendResult {

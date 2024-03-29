@@ -7,9 +7,11 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-dashmap = "5.5.3"
 ic-agent = { workspace = true }
+
+dashmap = "5.5.3"
 tokio = { workspace = true }
 tracing = { workspace = true }
+
 metrics = { workspace = true }
-canister-utils = { version = "1.0.0", path = "../canister-utils" }
+canister-utils = { workspace = true }

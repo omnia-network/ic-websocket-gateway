@@ -14,6 +14,12 @@ pub struct GatewayState {
     inner: Arc<GatewayStateInner>,
 }
 
+impl Default for GatewayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GatewayState {
     pub fn new() -> Self {
         Self {
@@ -220,7 +226,7 @@ impl GatewayState {
     ///
     /// This function shall be called only if it is guaranteed that the canister entry exists in the gateway state.
     pub fn remove_failed_canister(&self, canister_id: CanisterPrincipal) {
-        if let None = self.inner.data.remove(&canister_id) {
+        if self.inner.data.remove(&canister_id).is_none() {
             unreachable!("failed canister not found in gateway state");
         }
     }

@@ -218,11 +218,7 @@ impl WsListener {
         let polling_interval_ms = self.polling_interval_ms;
         // spawn a session handler task for each incoming client connection
 
-        let start = self
-            .clients_connection_time
-            .get(&client_id)
-            .unwrap()
-            .clone();
+        let start = *self.clients_connection_time.get(&client_id).unwrap();
 
         tokio::spawn(
             async move {
