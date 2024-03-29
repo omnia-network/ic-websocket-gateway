@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use dashmap::{DashMap, mapref::entry::Entry};
+use dashmap::{mapref::entry::Entry, DashMap};
 use ic_agent::export::Principal;
 use metrics::gauge;
 use tokio::sync::mpsc::Sender;
