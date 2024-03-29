@@ -1,4 +1,4 @@
-name: Rust tests
+name: Integration tests
 
 # only run when a commit is pushed to the main branch
 on:
