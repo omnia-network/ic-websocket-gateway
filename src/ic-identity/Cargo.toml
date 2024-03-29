@@ -9,5 +9,6 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ring = "0.16.20"
 ic-agent = { workspace = true }
+
+ring = "0.16.20"
