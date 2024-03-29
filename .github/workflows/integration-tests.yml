@@ -10,7 +10,7 @@ on:
       - main
 
 jobs:
-  rust-tests:
+  integration-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
