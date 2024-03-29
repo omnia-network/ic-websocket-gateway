@@ -7,9 +7,9 @@ use canister_utils::{ws_close, CanisterWsCloseArguments, ClientKey, IcWsCanister
 use futures_util::StreamExt;
 use gateway_state::{CanisterPrincipal, ClientRemovalResult, GatewayState, PollerState};
 use ic_agent::Agent;
+use metrics::{gauge, histogram};
 use std::sync::Arc;
 use std::time::Instant;
-use metrics::{gauge, histogram};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{self, Receiver, Sender},
@@ -218,10 +218,12 @@ impl ClientSessionHandler {
                     // Clients connection metrics
                     let clients_connected = self.gateway_state.get_clients_count(canister_id);
                     debug!("Clients connected: {}", clients_connected.to_string());
-                    gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+                    gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                        .set(clients_connected as f64);
 
                     let delta = client_start_session_time.elapsed();
-                    histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
+                    histogram!("connection_duration", "client_key" => client_key.to_string())
+                        .record(delta);
 
                     self.call_ws_close(&canister_id, client_key).await;
 
@@ -257,10 +259,12 @@ impl ClientSessionHandler {
                         // Clients connection metrics
                         let clients_connected = self.gateway_state.get_clients_count(canister_id);
                         debug!("Clients connected: {}", clients_connected.to_string());
-                        gauge!("clients_connected", "canister_id" => canister_id.to_string()).set(clients_connected as f64);
+                        gauge!("clients_connected", "canister_id" => canister_id.to_string())
+                            .set(clients_connected as f64);
 
                         let delta = client_start_session_time.elapsed();
-                        histogram!("connection_duration", "client_key" => client_key.to_string()).record(delta);
+                        histogram!("connection_duration", "client_key" => client_key.to_string())
+                            .record(delta);
 
                         self.call_ws_close(&canister_id, client_key).await;
 
