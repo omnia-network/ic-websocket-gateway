@@ -64,17 +64,22 @@ A [Dockerfile](./Dockerfile) is provided. To build the image, run:
 docker build -t ic-websocket-gateway .
 ```
 
-Then, run the gateway with the following command:
+Then, run the gateway with the following command (assuming you want to connect to the local dfx replica running on the default port):
 
 ```bash
-docker run -p 8080:8080 ic-websocket-gateway
+docker run -p 8080:8080 ic-websocket-gateway --ic-network-url http://host.docker.internal:4943
 ```
 
 A Docker image is also available at [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway), that you can run with the following command:
 
 ```bash
-docker run -p 8080:8080 omniadevs/ic-websocket-gateway
+docker run -p 8080:8080 omniadevs/ic-websocket-gateway --ic-network-url http://host.docker.internal:4943
 ```
+
+> Note: if you're on an ARM machine, you have to add the `--platform` flag to the command above, since the published image is built only for the `x86_64` architecture:
+> ```bash
+> docker run --platform linux/amd64 -p 8080:8080 omniadevs/ic-websocket-gateway --ic-network-url http://host.docker.internal:4943
+> ```
 
 Have a look at the [Arguments available](#arguments-available) to configure the gateway for your needs.
 
