@@ -90,6 +90,8 @@ The following compose files are available:
 
 The following sections describe how to use the different compose files to run the gateway with Docker Compose.
 
+A visual representation of the containers in the compose files is provided in the [docker-compose-structure.png](./docs/images/docker-compose-structure.png) image.
+
 ### Local
 
 To run the gateway in a local environment with Docker Compose, follow these steps:
