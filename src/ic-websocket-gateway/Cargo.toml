@@ -11,19 +11,19 @@ candid = { workspace = true }
 ic-agent = { workspace = true }
 
 serde = { workspace = true }
-serde_cbor = "0.11.2"
-serde_bytes = "0.11.12"
+serde_cbor = "0.11"
+serde_bytes = { workspace = true }
 
-async-trait = "0.1.72"
+async-trait = "0.1"
 tokio = { workspace = true }
-tokio-native-tls = "0.3.1"
-native-tls = "0.2.11"
-tokio-util = "0.7.8"
-tokio-tungstenite = "0.20.0"
-futures-util = "0.3.28"
-structopt = "0.3.21"
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+tokio-util = "0.7"
+tokio-tungstenite = "0.23"
+futures-util = "0.3"
+structopt = "0.3"
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3.17", features = [
+tracing-subscriber = { version = "0.3", features = [
   "fmt",
   "std",
   "json",
@@ -31,22 +31,22 @@ tracing-subscriber = { version = "0.3.17", features = [
   "registry",
 ] }
 tracing-appender = "0.2"
-tracing-opentelemetry = "0.22.0"
-opentelemetry = { version = "0.21" }
-opentelemetry-otlp = { version = "0.14.0" }
+tracing-opentelemetry = "0.22"
+opentelemetry = "0.21"
+opentelemetry-otlp = "0.14"
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 rand = "0.8"
 metrics = { workspace = true }
-metrics-exporter-prometheus = "0.13.1"
-metrics-util = "0.16.2"
+metrics-exporter-prometheus = "0.15"
+metrics-util = "0.17"
 
 ic-identity = { workspace = true }
 canister-utils = { workspace = true }
 gateway-state = { path = "../gateway-state" }
 
 [dev-dependencies]
-websocket = "0.26.5"
-mockito = "1.2.0"
-lazy_static = "1.4.0"
+websocket = "0.27"
+mockito = "1.4"
+lazy_static = "1.5"
 
 canister-utils = { workspace = true, features = ["mock-server"] }

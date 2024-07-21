@@ -13,23 +13,24 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.76.0"
+rust-version = "1.79"
 repository = "https://github.com/omnia-network/ic-websocket-gateway"
 description = "IC Websocket Gateway workspace"
 license = "MIT"
 
 [workspace.dependencies]
-candid = "0.10.3"
-ic-cdk = "0.12.0"
-ic-cdk-macros = "0.8.4"
-ic-agent = "0.33.0"
+candid = "0.10"
+ic-cdk = "0.15"
+ic-cdk-macros = "0.15"
+ic-agent = "0.36"
 
-serde = "1.0.176"
+serde = "1.0"
+serde_bytes = "0.11"
 
-reqwest = "0.11.7"
-tokio = { version = "1.29.1", features = ["full"] }
-tracing = "0.1.40"
-metrics = "0.22.1"
+reqwest = "0.12"
+tokio = { version = "1.38", features = ["full"] }
+tracing = "0.1"
+metrics = "0.23"
 
 canister-utils = { path = "src/canister-utils" }
 ic-identity = { path = "src/ic-identity" }

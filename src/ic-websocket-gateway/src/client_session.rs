@@ -49,6 +49,7 @@ pub enum IcWsSessionState {
 
 /// Possible errors that can occur during an IC WebSocket session
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum IcWsError {
     /// Error due to not following the IC WS protocol
     IcWsProtocol(String),

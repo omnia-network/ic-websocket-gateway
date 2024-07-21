@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 ic-agent = { workspace = true }
 
-dashmap = "5.5.3"
+dashmap = "6.0"
 tokio = { workspace = true }
 tracing = { workspace = true }
 

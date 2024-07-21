@@ -11,4 +11,4 @@ license.workspace = true
 [dependencies]
 ic-agent = { workspace = true }
 
-ring = "0.16.20"
+ring = "0.17"
