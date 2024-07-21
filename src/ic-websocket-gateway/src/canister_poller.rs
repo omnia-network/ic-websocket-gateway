@@ -359,8 +359,8 @@ pub fn get_nonce_from_message(key: &str) -> Result<u64, String> {
 }
 
 /// Returns true if the error is caused by a replica which is either actively malicious or simply unavailable
-fn is_recoverable_error(e: &AgentError) -> bool {
-    match e {
+fn is_recoverable_error(err: &AgentError) -> bool {
+    match err {
         // TODO: make sure that we include all the "recoverable" errors
         AgentError::InvalidReplicaUrl(_)
         | AgentError::TimeoutWaitingForResponse()
@@ -379,7 +379,7 @@ fn is_recoverable_error(e: &AgentError) -> bool {
         | AgentError::InvalidRejectCode(_) => true,
         // in case of a replica error, we recover only if the error is transient
         // all other errors (SysFatal, DestinationInvalid, CanisterReject, CanisterError) are considered permanent
-        AgentError::ReplicaError(e) => e.reject_code == RejectCode::SysTransient,
+        AgentError::UncertifiedReject(e) => e.reject_code == RejectCode::SysTransient,
         _ => false,
     }
 }
