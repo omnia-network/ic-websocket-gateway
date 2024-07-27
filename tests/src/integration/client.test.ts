@@ -11,6 +11,10 @@ const canisterId = process.env.TEST_CANISTER_ID
   || process.env.CANISTER_ID_TEST_CANISTER_RS
   || process.env.CANISTER_ID_TEST_CANISTER_MO;
 
+console.log("gatewayAddress", gatewayAddress);
+console.log("icUrl", icUrl);
+console.log("canisterId", canisterId);
+
 /// test constants & variables
 const pingPongCount = 20;
 let ws: IcWebSocket<_SERVICE, AppMessage>;
