@@ -30,6 +30,12 @@ jobs:
         with:
           dfx-version: 0.21.0
 
+      - name: Install mops
+        run: npm i ic-mops -g
+
+      - name: install moc
+        run: npx mocv use latest
+
       - name: Prepare environment for integration tests
         run: ./scripts/prepare_integration_tests.sh
 
