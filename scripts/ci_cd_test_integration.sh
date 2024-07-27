@@ -27,7 +27,7 @@ dfx deploy test_canister_rs --no-wallet
 npm run generate:test_canister_rs
 
 echo "Running integration test (Rust)..."
-TEST_CANISTER_ID=$(dfx canister id test_canister_mo) npm run integration:test
+TEST_CANISTER_ID=$(dfx canister id test_canister_rs) npm run integration:test
 
 echo "Deploying test canister (Motoko)..."
 dfx deploy test_canister_mo --no-wallet
