@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
 ic-cdk-macros = { workspace = true }
-ic-websocket-cdk = "0.3.4"
+ic-websocket-cdk = "0.4.0"
 serde = { workspace = true }

@@ -21,7 +21,7 @@ mod test {
         get_nonce_from_message, CanisterPoller, PollingStatus, POLLING_TIMEOUT_MS,
     };
 
-    struct MockCanisterOutputCertifiedMessages(CanisterOutputCertifiedMessages);
+    struct MockCanisterOutputCertifiedMessages;
 
     impl MockCanisterOutputCertifiedMessages {
         fn mock_n(n: usize, base_nonce: usize) -> CanisterOutputCertifiedMessages {
@@ -54,7 +54,7 @@ mod test {
         }
     }
 
-    struct MockCanisterOutputMessage(CanisterOutputMessage);
+    struct MockCanisterOutputMessage;
 
     impl MockCanisterOutputMessage {
         fn mock(nonce: usize) -> CanisterOutputMessage {
@@ -74,7 +74,7 @@ mod test {
         }
     }
 
-    struct MockClientKey(ClientKey);
+    struct MockClientKey;
 
     impl MockClientKey {
         fn mock() -> ClientKey {
@@ -93,7 +93,7 @@ mod test {
         // ensures that only one test at the time can set the mock response
         // this enables running the tests without specifying each time "-- --test-threads=1"
         static ref MOCK_SERVER: Arc<Mutex<mockito::Server>> =
-            Arc::new(Mutex::new(mockito::Server::new_with_port(51558)));
+            Arc::new(Mutex::new(mockito::Server::new_with_opts(mockito::ServerOpts { port: 51558, ..Default::default() })));
     }
 
     fn create_poller(
