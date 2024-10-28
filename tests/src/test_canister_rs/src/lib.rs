@@ -1,7 +1,6 @@
-use ic_cdk_macros::*;
 use std::{cell::RefCell, collections::HashSet};
 
-use canister::{on_close, on_message, on_open, AppMessage};
+use ic_cdk::{init, post_upgrade, query, update};
 use ic_websocket_cdk::{
     CanisterSendResult, CanisterWsCloseArguments, CanisterWsCloseResult,
     CanisterWsGetMessagesArguments, CanisterWsGetMessagesResult, CanisterWsMessageArguments,
@@ -10,6 +9,8 @@ use ic_websocket_cdk::{
 };
 
 mod canister;
+
+use canister::{on_close, on_message, on_open, AppMessage};
 
 thread_local! {
     /* flexible */ static CLIENTS_CONNECTED: RefCell<HashSet<ClientPrincipal>> = RefCell::new(HashSet::new());
