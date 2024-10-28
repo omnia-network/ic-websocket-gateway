@@ -7,7 +7,7 @@ mod test {
     };
     use futures_util::join;
     use gateway_state::GatewayState;
-    use ic_agent::{agent::http_transport::ReqwestTransport, Agent};
+    use ic_agent::Agent;
     use lazy_static::lazy_static;
     use std::{
         sync::{Arc, Mutex},
@@ -114,7 +114,7 @@ mod test {
         CanisterPoller::new(
             Arc::new(
                 Agent::builder()
-                    .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
+                    .with_url("http://127.0.0.1:4943")
                     .build()
                     .unwrap(),
             ),
@@ -145,7 +145,7 @@ mod test {
             .await;
 
         let agent = Agent::builder()
-            .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
+            .with_url("http://127.0.0.1:4943")
             .build()
             .unwrap();
         let args = CanisterWsGetMessagesArguments { nonce: 0 };
@@ -186,7 +186,7 @@ mod test {
             .await;
 
         let agent = Agent::builder()
-            .with_transport(ReqwestTransport::create("http://127.0.0.1:4943").unwrap())
+            .with_url("http://127.0.0.1:4943")
             .build()
             .unwrap();
         let args = CanisterWsGetMessagesArguments { nonce: 0 };

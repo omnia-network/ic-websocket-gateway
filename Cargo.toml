@@ -20,9 +20,8 @@ license = "MIT"
 
 [workspace.dependencies]
 candid = "0.10"
-ic-cdk = "0.15"
-ic-cdk-macros = "0.15"
-ic-agent = "0.36"
+ic-cdk = "0.16"
+ic-agent = "0.39"
 
 serde = "1.0"
 serde_bytes = "0.11"

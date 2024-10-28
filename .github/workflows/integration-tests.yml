@@ -28,7 +28,7 @@ jobs:
 
       - uses: dfinity/setup-dfx@main
         with:
-          dfx-version: 0.21.0
+          dfx-version: 0.24.1
 
       - name: Install mops
         run: npm i ic-mops -g

@@ -1,6 +1,6 @@
 use candid::{CandidType, Decode, Error, Principal};
 use ic_agent::AgentError;
-use ic_agent::{agent::http_transport::ReqwestTransport, identity::BasicIdentity, Agent};
+use ic_agent::{identity::BasicIdentity, Agent};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use tracing::Span;
@@ -152,9 +152,8 @@ pub async fn get_new_agent(
     identity: BasicIdentity,
 ) -> Result<Agent, AgentError> {
     let is_mainnet = is_mainnet(ic_network_url);
-    let transport = ReqwestTransport::create(ic_network_url.to_string())?;
     let agent = Agent::builder()
-        .with_transport(transport)
+        .with_url(ic_network_url)
         .with_identity(identity)
         .with_verify_query_signatures(is_mainnet)
         .build()?;
