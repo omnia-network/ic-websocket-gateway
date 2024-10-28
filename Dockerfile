@@ -1,5 +1,5 @@
 ### install packages
-FROM rust:1.76-slim-bullseye AS deps
+FROM rust:1.79-slim-bullseye AS deps
 WORKDIR /ic-ws-gateway
 # this takes a while due to crates index update, so we do it first
 RUN cargo install cargo-chef
