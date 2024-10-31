@@ -9,5 +9,5 @@ crate-type = ["cdylib"]
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
-ic-websocket-cdk = "0.4.0"
+ic-websocket-cdk = "0.4.1"
 serde = { workspace = true }
