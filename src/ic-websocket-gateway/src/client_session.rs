@@ -9,7 +9,7 @@ use futures_util::{
 use gateway_state::CanisterPrincipal;
 use ic_agent::{
     agent::{Envelope, EnvelopeContent},
-    Agent, AgentError,
+    Agent,
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
@@ -368,9 +368,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             let canister_id = self.canister_id.expect("must be set");
 
             // relay the envelope to the IC
-            self.relay_envelope_to_canister(serialized_envelope, canister_id)
-                .await
-                .map_err(|e| IcWsError::IcWsProtocol(e.to_string()))?;
+            self.relay_envelope_to_canister(serialized_envelope, canister_id);
 
             // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
@@ -384,15 +382,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         }
     }
 
-    async fn relay_envelope_to_canister(
-        &self,
-        serialized_envelope: Vec<u8>,
-        canister_id: Principal,
-    ) -> Result<(), AgentError> {
-        self.agent
-            .update_signed(canister_id, serialized_envelope)
-            .await?;
-        Ok(())
+    fn relay_envelope_to_canister(&self, serialized_envelope: Vec<u8>, canister_id: Principal) {
+        let agent = self.agent.clone();
+        tokio::spawn(
+            async move {
+                match agent.update_signed(canister_id, serialized_envelope).await {
+                    Ok(_) => (),
+                    Err(e) => {
+                        let err = IcWsError::IcWsProtocol(e.to_string());
+                        error!("Error relaying envelope to canister: {:?}", err)
+                    },
+                }
+            }
+            .in_current_span(),
+        );
     }
 
     async fn handle_open_transition(
