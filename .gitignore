@@ -14,3 +14,5 @@ scripts/gateway_test.log
 .idea
 
 prometheus-prod.yml
+
+.DS_Store
