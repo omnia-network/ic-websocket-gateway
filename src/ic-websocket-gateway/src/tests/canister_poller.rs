@@ -1,3 +1,10 @@
+// mockito::Server is behind a SYNC mutex so that only one test at the same time can access it
+// otherwise, as async tests are run on multiple threads, the mock response of one test might overwrite
+// the mock response of another, causing the test to fail
+// acquiring the mutex and the beginning of each test and dropping the guard only at the end,
+// ensures that only one test at the time can set the mock response
+// this enables running the tests without specifying each time "-- --test-threads=1"
+#[allow(clippy::await_holding_lock)]
 #[cfg(test)]
 mod test {
     use candid::Principal;
@@ -86,14 +93,12 @@ mod test {
     }
 
     lazy_static! {
-        // mockito::Server is behind a SYNC mutex so that only one test at the same time can access it
-        // otherwise, as async tests are run on multiple threads, the mock response of one test might overwrite
-        // the mock response of another, causing the test to fail
-        // acquiring the mutex and the beginning of each test and dropping the guard only at the end,
-        // ensures that only one test at the time can set the mock response
-        // this enables running the tests without specifying each time "-- --test-threads=1"
-        static ref MOCK_SERVER: Arc<Mutex<mockito::Server>> =
-            Arc::new(Mutex::new(mockito::Server::new_with_opts(mockito::ServerOpts { port: 51558, ..Default::default() })));
+        static ref MOCK_SERVER: Arc<Mutex<mockito::Server>> = Arc::new(Mutex::new(
+            mockito::Server::new_with_opts(mockito::ServerOpts {
+                port: 51558,
+                ..Default::default()
+            })
+        ));
     }
 
     fn create_poller(
@@ -332,7 +337,7 @@ mod test {
             .mock("GET", path)
             .with_chunked_body(|w| {
                 thread::sleep(Duration::from_millis(POLLING_TIMEOUT_MS + 10));
-                w.write_all(&vec![])
+                w.write_all(&[])
             })
             .expect(2)
             .create_async()

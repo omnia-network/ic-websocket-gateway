@@ -399,7 +399,6 @@ mod tests {
 
         {
             let gateway_state = gateway_state.clone();
-            let canister_id = canister_id.clone();
             thread::spawn(move || loop {
                 gateway_state.remove_canister_if_empty(canister_id);
             });
@@ -461,7 +460,6 @@ mod tests {
 
         {
             let gateway_state = gateway_state.clone();
-            let canister_id = canister_id.clone();
             thread::spawn(move || {
                 for i in 0.. {
                     let client_key = ClientKey::new(Principal::anonymous(), i);
@@ -516,7 +514,6 @@ mod tests {
 
         {
             let gateway_state = gateway_state.clone();
-            let canister_id = canister_id.clone();
             thread::spawn(move || {
                 for i in 0.. {
                     let client_key = ClientKey::new(Principal::anonymous(), i);
