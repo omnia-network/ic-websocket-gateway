@@ -13,7 +13,7 @@ use ic_agent::{
 };
 use serde::{Deserialize, Serialize};
 use serde_cbor::{from_slice, to_vec};
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     select,
@@ -45,6 +45,25 @@ pub enum IcWsSessionState {
     Setup(Message),
     Open,
     Closed,
+}
+
+impl Display for IcWsSessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            IcWsSessionState::Init => "Init",
+            IcWsSessionState::Setup(_) => "Setup",
+            IcWsSessionState::Open => "Open",
+            IcWsSessionState::Closed => "Closed",
+        };
+
+        write!(f, "{label}")
+    }
+}
+
+impl IcWsSessionState {
+    pub fn is_closed(&self) -> bool {
+        matches!(self, IcWsSessionState::Closed)
+    }
 }
 
 /// Possible errors that can occur during an IC WebSocket session
@@ -146,61 +165,47 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         &mut self,
         client_update: Result<Message, Error>,
     ) -> Result<(), IcWsError> {
+        // upon receiving an update, check if the message is valid and is not a close message
+        let ws_message = self.check_client_update(client_update)?;
+        if ws_message.is_close() && !self.session_state.is_closed() {
+            trace!("Client disconnected while in {} state", self.session_state);
+            self.session_state = IcWsSessionState::Closed;
+            return Ok(());
+        }
+
         match self.session_state {
             IcWsSessionState::Init => {
-                let ws_message = self.handle_ws_errors(client_update)?;
-                if !ws_message.is_close() {
-                    // upon receiving a message while the session is Init, check if the message is valid
-                    // if not return an error, otherwise set the session state to Setup
-                    // if multiple messages are received while in Init state, 'handle_setup_transition' will
-                    // return an error as the client shall not send more than one message while in Init state
-                    let setup_state = self.handle_setup_transition(ws_message).await?;
-                    self.session_state = setup_state;
-                    Ok(())
-                } else {
-                    trace!("Client disconnected while in Init state");
-                    self.session_state = IcWsSessionState::Closed;
-                    Ok(())
-                }
+                // upon receiving a message while the session is Init, check if the message is valid
+                // if not return an error, otherwise set the session state to Setup
+                // if multiple messages are received while in Init state, 'handle_setup_transition' will
+                // ignore them as the client shall not send more than one message while in Init state
+                let setup_state = self.handle_setup_transition(ws_message).await?;
+                self.session_state = setup_state;
             },
             IcWsSessionState::Setup(_) => {
-                // upon receiving an update while the session is Setup, check if it is due to
-                // the client disconnecting without a closing handshake
-                let _ = self.handle_ws_errors(client_update)?;
-                // upon receiving a message while the session is Setup, discard the message
-                // and return an error as the client shall not send a message while in Setup state
-                // this implies a bug in the client SDK
-                error!("Received client message while in Setup state");
-                self.session_state = IcWsSessionState::Closed;
-                Err(IcWsError::IcWsProtocol(String::from(
-                    "Client shall not send messages while in Setup state",
-                )))
+                // upon receiving a message while the session is Setup, ignore the message as the
+                // client shall not send a message while in Setup state
+                warn!("Received client message while in Setup state");
             },
             IcWsSessionState::Open => {
-                let ws_message = self.handle_ws_errors(client_update)?;
-                if !ws_message.is_close() {
-                    // upon receiving a message while the session is Open, immediately relay the client messages to the IC
-                    // this does not result in a state transition, which shall remain in Open state
-                    self.relay_client_message(ws_message)
-                        .instrument(Span::current())
-                        .await?;
-                    Ok(())
-                } else {
-                    trace!("Client disconnected while in Open state");
-                    self.session_state = IcWsSessionState::Closed;
-                    Ok(())
-                }
+                // upon receiving a message while the session is Open, immediately relay the client messages to the IC
+                // this does not result in a state transition, which shall remain in Open state
+                self.relay_client_message(ws_message)
+                    .instrument(Span::current())
+                    .await?;
             },
             IcWsSessionState::Closed => {
                 // upon receiving a message while the session is Closed, discard the message
                 // and return an error as this shall not be possible
                 // this implies a bug in the WS Gateway
                 error!("Received client message while in Closed state");
-                Err(IcWsError::IcWsProtocol(String::from(
+                return Err(IcWsError::IcWsProtocol(String::from(
                     "Client shall not send messages while in Closed state",
-                )))
+                )));
             },
         }
+
+        Ok(())
     }
 
     async fn handle_canister_update(
@@ -238,7 +243,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         // this implies a bug in the WS Gateway
                         error!("Received canister message while in Closed state");
                         Err(IcWsError::IcWsProtocol(String::from(
-                            "Poller shall not be able tosend messages while the session is in Closed state",
+                            "Poller shall not be able to send messages while the session is in Closed state",
                         )))
                     },
                 }
@@ -253,11 +258,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         }
     }
 
-    fn handle_ws_errors(
+    fn check_client_update(
         &mut self,
-        canister_update: Result<Message, Error>,
+        client_update: Result<Message, Error>,
     ) -> Result<Message, IcWsError> {
-        match canister_update {
+        match client_update {
             Ok(ws_message) => Ok(ws_message),
             Err(e) => {
                 // no need to update the session state to Closed as 'update_state' will return an error
@@ -284,17 +289,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             Ok((client_key, canister_id)) => {
                 // replace the field with the canister_id received in the first envelope
                 // this shall not be updated anymore
-                // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
+                // if canister_id is already set in the struct, we log a warning as inspect_ic_ws_open_message shall only be called once
                 if self.canister_id.replace(canister_id).is_some()
                     || self.client_key.replace(client_key.clone()).is_some()
                 {
                     // if the canister_id or client_key field was already set,
                     // it means that the client sent the WS open message twice,
                     // which it shall not do
-                    // therefore, return an error
-                    return Err(IcWsError::IcWsProtocol(String::from(
-                        "canister_id or client_key field was set twice",
-                    )));
+                    warn!("canister_id or client_key field was set twice");
                 }
                 trace!("Validated WS open message");
 
@@ -366,7 +368,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 .await
                 .map_err(|e| IcWsError::IcWsProtocol(e.to_string()))?;
 
-            // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
+            // there is no need to relay the response back to the client as the response to a request to the /call endpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
             trace!("Relayed client message to canister");
