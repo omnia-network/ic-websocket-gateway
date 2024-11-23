@@ -178,7 +178,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 // upon receiving a message while the session is Init, check if the message is valid
                 // if not return an error, otherwise set the session state to Setup
                 // if multiple messages are received while in Init state, 'handle_setup_transition' will
-                // return an error as the client shall not send more than one message while in Init state
+                // ignore them as the client shall not send more than one message while in Init state
                 let setup_state = self.handle_setup_transition(ws_message).await?;
                 self.session_state = setup_state;
             },
@@ -289,17 +289,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             Ok((client_key, canister_id)) => {
                 // replace the field with the canister_id received in the first envelope
                 // this shall not be updated anymore
-                // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
+                // if canister_id is already set in the struct, we log a warning as inspect_ic_ws_open_message shall only be called once
                 if self.canister_id.replace(canister_id).is_some()
                     || self.client_key.replace(client_key.clone()).is_some()
                 {
                     // if the canister_id or client_key field was already set,
                     // it means that the client sent the WS open message twice,
                     // which it shall not do
-                    // therefore, return an error
-                    return Err(IcWsError::IcWsProtocol(String::from(
-                        "canister_id or client_key field was set twice",
-                    )));
+                    warn!("canister_id or client_key field was set twice");
                 }
                 trace!("Validated WS open message");
 
