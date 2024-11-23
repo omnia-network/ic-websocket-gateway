@@ -165,8 +165,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         &mut self,
         client_update: Result<Message, Error>,
     ) -> Result<(), IcWsError> {
-        // upon receiving an update while the session is Setup, check if it is due to
-        // the client disconnecting without a closing handshake
+        // upon receiving an update, check if the message is valid and is not a close message
         let ws_message = self.check_client_update(client_update)?;
         if ws_message.is_close() && !self.session_state.is_closed() {
             trace!("Client disconnected while in {} state", self.session_state);
@@ -244,7 +243,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         // this implies a bug in the WS Gateway
                         error!("Received canister message while in Closed state");
                         Err(IcWsError::IcWsProtocol(String::from(
-                            "Poller shall not be able tosend messages while the session is in Closed state",
+                            "Poller shall not be able to send messages while the session is in Closed state",
                         )))
                     },
                 }
@@ -372,7 +371,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 .await
                 .map_err(|e| IcWsError::IcWsProtocol(e.to_string()))?;
 
-            // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
+            // there is no need to relay the response back to the client as the response to a request to the /call endpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
             trace!("Relayed client message to canister");
