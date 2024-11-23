@@ -165,8 +165,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         &mut self,
         client_update: Result<Message, Error>,
     ) -> Result<(), IcWsError> {
-        // upon receiving an update while the session is Setup, check if it is due to
-        // the client disconnecting without a closing handshake
+        // upon receiving an update, check if the message is valid and is not a close message
         let ws_message = self.check_client_update(client_update)?;
         if ws_message.is_close() && !self.session_state.is_closed() {
             trace!("Client disconnected while in {} state", self.session_state);
@@ -179,7 +178,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                 // upon receiving a message while the session is Init, check if the message is valid
                 // if not return an error, otherwise set the session state to Setup
                 // if multiple messages are received while in Init state, 'handle_setup_transition' will
-                // return an error as the client shall not send more than one message while in Init state
+                // ignore them as the client shall not send more than one message while in Init state
                 let setup_state = self.handle_setup_transition(ws_message).await?;
                 self.session_state = setup_state;
             },
@@ -244,7 +243,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
                         // this implies a bug in the WS Gateway
                         error!("Received canister message while in Closed state");
                         Err(IcWsError::IcWsProtocol(String::from(
-                            "Poller shall not be able tosend messages while the session is in Closed state",
+                            "Poller shall not be able to send messages while the session is in Closed state",
                         )))
                     },
                 }
@@ -290,17 +289,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             Ok((client_key, canister_id)) => {
                 // replace the field with the canister_id received in the first envelope
                 // this shall not be updated anymore
-                // if canister_id is already set in the struct, we return an error as inspect_ic_ws_open_message shall only be called once
+                // if canister_id is already set in the struct, we log a warning as inspect_ic_ws_open_message shall only be called once
                 if self.canister_id.replace(canister_id).is_some()
                     || self.client_key.replace(client_key.clone()).is_some()
                 {
                     // if the canister_id or client_key field was already set,
                     // it means that the client sent the WS open message twice,
                     // which it shall not do
-                    // therefore, return an error
-                    return Err(IcWsError::IcWsProtocol(String::from(
-                        "canister_id or client_key field was set twice",
-                    )));
+                    warn!("canister_id or client_key field was set twice");
                 }
                 trace!("Validated WS open message");
 
@@ -370,7 +366,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
             // relay the envelope to the IC
             self.relay_envelope_to_canister(serialized_envelope, canister_id);
 
-            // there is no need to relay the response back to the client as the response to a request to the /call enpoint is not certified by the canister
+            // there is no need to relay the response back to the client as the response to a request to the /call endpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
 
             trace!("Relayed client message to canister");
