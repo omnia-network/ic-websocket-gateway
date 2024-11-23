@@ -24,7 +24,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Cargo clippy
-        run: cargo clippy --all --all-features -- -Dwarnings
+        run: cargo clippy --all-targets --all-features --workspace -- -Dwarnings
 
       - name: Run unit tests
         run: ./scripts/unit_test.sh
