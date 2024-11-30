@@ -23,12 +23,6 @@ jobs:
 
       - uses: ./.github/actions/setup-dfx
 
-      - name: Install mops
-        run: npm i ic-mops -g
-
-      - name: install moc
-        run: npx mocv use latest
-
       - name: Prepare environment for load tests
         run: ./scripts/prepare_tests.sh
 
