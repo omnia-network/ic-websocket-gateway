@@ -368,8 +368,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
 
             // there is no need to relay the response back to the client as the response to a request to the /call endpoint is not certified by the canister
             // and therefore could be manufactured by the gateway
-
-            trace!("Relayed client message to canister");
             Ok(())
         } else {
             Err(IcWsError::IcWsProtocol(String::from(
@@ -383,7 +381,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientSession<S> {
         tokio::spawn(
             async move {
                 match agent.update_signed(canister_id, serialized_envelope).await {
-                    Ok(_) => (),
+                    Ok(_) => trace!("Relayed client message to canister"),
                     Err(e) => {
                         let err = IcWsError::IcWsProtocol(e.to_string());
                         error!("Error relaying envelope to canister: {:?}", err)
