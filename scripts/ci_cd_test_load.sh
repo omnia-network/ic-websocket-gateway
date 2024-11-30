@@ -37,6 +37,17 @@ mkdir -p reports
 echo "Running load tests..."
 LOG_LEVEL=error npx artillery run gateway_load_tests.yml --output reports/gateway_load_tests.json
 
+echo "Results:"
+cat reports/gateway_load_tests.json
+
+# Check that no users have failed
+echo "Checking that no users have failed..."
+failed=$(jq '.aggregate.counters."vusers.failed"' reports/gateway_load_tests.json)
+if [ "$failed" != 0 ]; then
+    echo "ERROR: Load test failed with $failed users failing."
+    exit 1
+fi
+
 echo "Stopping gateway..."
 kill $gateway_pid
 
