@@ -1,4 +1,4 @@
-name: Integration tests
+name: Load tests
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  integration-tests:
+  load-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -29,8 +29,8 @@ jobs:
       - name: install moc
         run: npx mocv use latest
 
-      - name: Prepare environment for integration tests
+      - name: Prepare environment for load tests
         run: ./scripts/prepare_tests.sh
 
-      - name: Run integration tests
-        run: ./scripts/ci_cd_test_integration.sh
+      - name: Execute load tests
+        run: ./scripts/ci_cd_test_load.sh

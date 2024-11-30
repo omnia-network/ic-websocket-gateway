@@ -1,0 +1,10 @@
+name: Setup DFX
+description: Setup DFX
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup DFX
+      uses: dfinity/setup-dfx@main
+      with:
+        dfx-version: 0.24.1

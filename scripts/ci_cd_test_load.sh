@@ -26,14 +26,16 @@ dfx deploy test_canister_rs --no-wallet
 # which will be used for both Rust and Motoko tests
 npm run generate:test_canister_rs
 
-echo "Running integration test (Rust)..."
-TEST_CANISTER_ID=$(dfx canister id test_canister_rs) npm run integration:test
+# Compile load test script
+echo "Compiling load test script..."
+npm run load:bundle
 
-echo "Deploying test canister (Motoko)..."
-dfx deploy test_canister_mo --no-wallet
+# Create reports directory if it doesn't exist
+mkdir -p reports
 
-echo "Running integration test (Motoko)..."
-TEST_CANISTER_ID=$(dfx canister id test_canister_mo) npm run integration:test
+# Run load tests
+echo "Running load tests..."
+LOG_LEVEL=debug npx artillery run gateway_load_tests.yml --output reports/gateway_load_tests.json
 
 echo "Stopping gateway..."
 kill $gateway_pid

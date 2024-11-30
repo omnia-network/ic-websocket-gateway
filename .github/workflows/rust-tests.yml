@@ -1,6 +1,5 @@
 name: Rust tests
 
-# only run when a commit is pushed to the main branch
 on:
   push:
     branches:
