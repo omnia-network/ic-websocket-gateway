@@ -38,7 +38,7 @@ mkdir -p reports
 
 # Run load tests
 echo "Running load tests..."
-LOG_LEVEL=error npx artillery run load/gateway_load_tests.yml --output reports/gateway_load_tests.json
+LOG_LEVEL=error npx artillery run gateway_load_tests.yml --output reports/gateway_load_tests.json
 
 echo "Results:"
 cat reports/gateway_load_tests.json

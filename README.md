@@ -278,7 +278,7 @@ After setting up and running the tests for the first time following the steps ab
 
 ### Load tests
 
-Load tests are provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
+We use [Artillery](https://github.com/artilleryio/artillery) to run load tests. The load test configuration is provided in the [tests/gateway_load_tests.yml](./tests/gateway_load_tests.yml) file and the source code is provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
 
 ```
 ./scripts/run_load_test.sh
