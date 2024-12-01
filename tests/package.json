@@ -1,5 +1,5 @@
 {
-  "name": "ic_websocket_gateway_integration_tests",
+  "name": "ic_websocket_gateway_tests",
   "version": "0.1.0",
   "description": "IC WebSocket on the IC (tests)",
   "keywords": [
@@ -9,7 +9,6 @@
     "Canister"
   ],
   "scripts": {
-    "postinstall": "npx mops install",
     "load:bundle": "webpack",
     "integration:test": "LOG_LEVEL=debug jest",
     "generate:test_canister_rs": "dfx generate test_canister_rs",
@@ -51,6 +50,8 @@
     "@dfinity/candid": "^2.1.3",
     "@dfinity/identity-secp256k1": "^2.1.3",
     "@dfinity/principal": "^2.1.3",
-    "ic-websocket-js": "^0.4.1"
+    "bufferutil": "^4.0.8",
+    "ic-websocket-js": "^0.4.1",
+    "utf-8-validate": "^5.0.10"
   }
 }

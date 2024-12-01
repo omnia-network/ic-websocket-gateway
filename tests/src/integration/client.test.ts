@@ -1,7 +1,9 @@
+import { Actor, HttpAgent } from "@dfinity/agent";
 import IcWebSocket, { createWsConfig, generateRandomIdentity } from "ic-websocket-js";
-import { test_canister_rs } from "../declarations/test_canister_rs";
-// import { test_canister_mo } from "../declarations/test_canister_mo";
+import { idlFactory } from "../declarations/test_canister_rs";
 import type { AppMessage, _SERVICE } from "../declarations/test_canister_rs/test_canister_rs.did";
+// The Motoko test canister has the same interface as the Rust test canister, so we don't need to import it
+// import { idlFactory } from "../declarations/test_canister_mo";
 // import type { AppMessage, _SERVICE } from "../declarations/test_canister_mo/test_canister_mo.did";
 
 /// IcWebsocket parameters
@@ -14,6 +16,29 @@ const canisterId = process.env.TEST_CANISTER_ID
 console.log("gatewayAddress", gatewayAddress);
 console.log("icUrl", icUrl);
 console.log("canisterId", canisterId);
+
+/// Canister actor
+const createActor = async (canisterId: string) => {
+  const agent = await HttpAgent.create();
+
+  // Fetch root key for certificate validation during development
+  if (process.env.DFX_NETWORK !== "ic") {
+    try {
+      await agent.fetchRootKey();
+    } catch (err) {
+      console.warn(
+          "Unable to fetch root key. Check to ensure that your local replica is running"
+      );
+      console.error(err);
+    }
+  }
+
+  // Creates an actor with using the candid interface and the HttpAgent
+  return Actor.createActor<_SERVICE>(idlFactory, {
+    agent,
+    canisterId,
+  });
+};
 
 /// test constants & variables
 const pingPongCount = 20;
@@ -56,9 +81,10 @@ const reconstructWsMessage = (index: number) => {
 /// tests
 describe("WS client", () => {
   it("should open a connection", async () => {
+    const canisterActor = await createActor(canisterId);
     const wsConfig = createWsConfig({
       canisterId,
-      canisterActor: test_canister_rs,
+      canisterActor,
       // canisterActor: test_canister_mo,
       networkUrl: icUrl,
       identity: generateRandomIdentity(),

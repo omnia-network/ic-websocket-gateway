@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# requires running the prepare_tests.sh script first
+
 echo "Starting local replica"
 dfx start --clean --background
 
@@ -9,6 +11,7 @@ pid=$!
 
 echo "Deploying Motoko test canister"
 cd tests
+npx mops install
 npm run generate:test_canister_mo
 dfx deploy test_canister_mo --no-wallet
 

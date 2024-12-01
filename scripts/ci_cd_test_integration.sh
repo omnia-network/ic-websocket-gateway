@@ -2,7 +2,7 @@
 
 set -e
 
-# requires running the prepare_integration_tests.sh script first
+# requires running the prepare_tests.sh script first
 
 echo "Starting local replica..."
 dfx start --clean --background

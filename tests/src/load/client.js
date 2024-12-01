@@ -12,7 +12,7 @@ const canisterId = process.env.TEST_CANISTER_ID
 
 const messagesSentPerClient = 20;
 
-async function connectClient(userContext, events, next) {
+async function connectClient(userContext, events) {
   try {
     const startTimestamp = Date.now();
 
@@ -37,17 +37,15 @@ async function connectClient(userContext, events, next) {
 
       userContext.vars.ws = customWs;
     });
-
-    next();
   } catch (err) {
     console.error(err);
     events.emit('counter', 'connect_client_error', 1);
 
-    next(new Error(err));
+    throw new Error(err);
   }
 }
 
-async function sendMessages(userContext, events, next) {
+async function sendMessages(userContext, events) {
   const ws = userContext.vars.ws;
 
   try {
@@ -86,14 +84,11 @@ async function sendMessages(userContext, events, next) {
         }
       };
     });
-
-    next();
   } catch (err) {
     console.error(err);
-
     events.emit('counter', 'send_message_error', 1);
 
-    next(new Error(err));
+    throw new Error(err);
   }
 }
 
@@ -102,7 +97,7 @@ function disconnectClient(userContext, events, done) {
 
   events.emit('counter', 'disconnect_client', 1);
 
-  return done();
+  done();
 }
 
 module.exports = { connectClient, sendMessages, disconnectClient };

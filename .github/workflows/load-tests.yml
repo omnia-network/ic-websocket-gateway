@@ -1,4 +1,4 @@
-name: Integration tests
+name: Load tests
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  integration-tests:
+  load-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -23,14 +23,15 @@ jobs:
 
       - uses: ./.github/actions/setup-dfx
 
-      - name: Install mops
-        run: npm i ic-mops -g
-
-      - name: install moc
-        run: npx mocv use latest
-
-      - name: Prepare environment for integration tests
+      - name: Prepare environment for load tests
         run: ./scripts/prepare_tests.sh
 
-      - name: Run integration tests
-        run: ./scripts/ci_cd_test_integration.sh
+      - name: Execute load tests
+        run: ./scripts/ci_cd_test_load.sh
+
+      - name: Upload load test results
+        if: always()  # This ensures the upload happens even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: tests/reports/gateway_load_tests.json

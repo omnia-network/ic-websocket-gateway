@@ -19,10 +19,13 @@ Make sure you have the **Rust toolchain** installed. You can find instructions [
 1. Run the gateway:
 
     In **debug** mode:
+
     ```bash
     cargo run
     ```
+
     In **release** mode:
+
     ```bash
     cargo build --release
 
@@ -77,6 +80,7 @@ docker run -p 8080:8080 omniadevs/ic-websocket-gateway --ic-network-url http://h
 ```
 
 > Note: if you're on an ARM machine, you have to add the `--platform` flag to the command above, since the published image is built only for the `x86_64` architecture:
+>
 > ```bash
 > docker run --platform linux/amd64 -p 8080:8080 omniadevs/ic-websocket-gateway --ic-network-url http://host.docker.internal:4943
 > ```
@@ -89,9 +93,9 @@ Make sure you have [Docker Compose](https://docs.docker.com/compose/install/) in
 
 The following compose files are available:
 
-- [docker-compose.yml](./docker-compose.yml)
-- [docker-compose-local.yml](./docker-compose-local.yml)
-- [docker-compose-prod.yml](./docker-compose-prod.yml)
+-   [docker-compose.yml](./docker-compose.yml)
+-   [docker-compose-local.yml](./docker-compose-local.yml)
+-   [docker-compose-prod.yml](./docker-compose-prod.yml)
 
 The following sections describe how to use the different compose files to run the gateway with Docker Compose.
 
@@ -100,10 +104,11 @@ A visual representation of the containers in the compose files is provided in th
 ### Local
 
 To run the gateway in a local environment with Docker Compose, follow these steps:
+
 1. To run all the required local structure you can execute the [start_local_docker_environment.sh](./scripts/start_local_docker_environment.sh) with the command:
-    
-   ```
-    ./scripts/start_local_docker_environment.sh 
+
+    ```
+     ./scripts/start_local_docker_environment.sh
     ```
 
     This script simply run a dfx local replica and execute the gateway with the following command:
@@ -111,25 +116,22 @@ To run the gateway in a local environment with Docker Compose, follow these step
     ```
     docker compose -f docker-compose.yml -f docker-compose-local.yml --env-file .env.local up -d --build
     ```
-   
+
 2. To stop and clean all the local environment, the bash script [stop_local_docker_environment.sh](./scripts/stop_local_docker_environment.sh) is provided. You can execute it with the command:
-    
-   ```
-    ./scripts/stop_local_docker_environment.sh 
+
+    ```
+     ./scripts/stop_local_docker_environment.sh
     ```
 
 3. The Gateway will print its principal in the container logs, just as explained in the [Standalone](#standalone) section.
-4. If you want to verify that everything started correctly, the bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This script assumes that the gateway is already running and reachable locally. You can execute it with the command:
-    
-   ```
-    ./scripts/run_test_canister.sh
-    ```
+4. You can verify that things are working properly by running the tests, see [Testing](#Testing)
 
 ### Production
 
 This configuration uses the [omniadevs/ic-websocket-gateway](https://hub.docker.com/r/omniadevs/ic-websocket-gateway) image.
 
 To run the gateway in a production environment with Docker Compose, follow these steps:
+
 1. Set the environment variables:
 
     ```
@@ -140,11 +142,11 @@ To run the gateway in a production environment with Docker Compose, follow these
 3. Open the `443` port (or the port that you set in the `LISTEN_PORT` environment variable) on your server and make it reachable from the Internet.
 4. To run all the required production containers you can execute the [start_prod_docker_environment.sh](./scripts/start_prod_docker_environment.sh) with the command:
 
-   ```
-    ./scripts/start_prod_docker_environment.sh 
+    ```
+     ./scripts/start_prod_docker_environment.sh
     ```
 
-   This script first generates the `telemetry/prometheus/prometheus-prod.yml` config file from the `telemetry/prometheus/prometheus-template.yml` template (step required to perform the environment variables substitution) and then runs the gateway with the following command:
+    This script first generates the `telemetry/prometheus/prometheus-prod.yml` config file from the `telemetry/prometheus/prometheus-template.yml` template (step required to perform the environment variables substitution) and then runs the gateway with the following command:
 
     ```
     docker compose -f docker-compose.yml -f docker-compose-prod.yml --env-file .env up -d
@@ -152,9 +154,10 @@ To run the gateway in a production environment with Docker Compose, follow these
 
 5. To stop and clean the containers, the bash script [stop_prod_docker_environment.sh](./scripts/stop_prod_docker_environment.sh) is provided. You can execute it with the command:
 
-   ```
-    ./scripts/stop_prod_docker_environment.sh 
     ```
+     ./scripts/stop_prod_docker_environment.sh
+    ```
+
 6. The Gateway will print its principal in the container logs, just as explained in the [Standalone](#standalone) section.
 
 #### Obtain a TLS certificate
@@ -198,6 +201,7 @@ The gateway uses the [opentelemetry](https://docs.rs/opentelemetry) crate and [G
 If you're deploying the gateway with Docker (see the [Docker](#docker) section), make sure you set the following varibales in the `.env` file:
 
 **Local**:
+
 ```
 OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
 GRAFANA_TEMPO_ENDPOINT=tempo:4318
@@ -205,6 +209,7 @@ GRAFANA_TEMPO_LOCAL=true
 ```
 
 **Production**:
+
 ```
 OPENTELEMETRY_COLLECTOR_ENDPOINT=grpc://otlp_collector:4317
 GRAFANA_TEMPO_ENDPOINT=your-grafana-cloud-tempo-endpoint
@@ -240,19 +245,21 @@ After installing Node.js and dfx, you can run the integration tests as follows:
 
 1. Prepare the test environment by installing dependencies and building the components by running the following command:
     ```
-    ./scripts/prepare_integration_tests.sh
+    ./scripts/prepare_tests.sh
     ```
 2. Set the environment variables:
     ```
     cp tests/.env.example tests/.env
     ```
-   When running the tests, the `tests/.env` file is modified by dfx, which will add some variables.
+    When running the tests, the `tests/.env` file will be modified by dfx to add some variables.
 3. Run integration tests using the Rust test canister:
+
     ```
     ./scripts/integration_test_rs.sh
     ```
 
-    If you instead want to run tests using the Motoko test canister, run the following command instead:
+    If you want to run tests using the Motoko test canister, run the following command instead:
+
     ```
     ./scripts/integration_test_mo.sh
     ```
@@ -263,7 +270,7 @@ Tests canisters used in the integration tests can be found in the [tests/src/tes
 
 ### Local test script
 
-After setting up and running the tests for the first time following the steps above, you can use the following command to run the unit and integration tests (using Rust test canister) together:
+After setting up and running the tests for the first time following the steps above, you can use the following command to run the unit and integration tests (using both the Rust and Motoko test canisters):
 
 ```
 ./scripts/local_test.sh
@@ -271,13 +278,13 @@ After setting up and running the tests for the first time following the steps ab
 
 ### Load tests
 
-Load tests are provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
+We use [Artillery](https://github.com/artilleryio/artillery) to run load tests. The load test configuration is provided in the [tests/gateway_load_tests.yml](./tests/gateway_load_tests.yml) file and the source code is provided in the [tests/src/load](./tests/src/load/) folder. You can run them with:
 
 ```
 ./scripts/run_load_test.sh
 ```
 
-This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/integration_test_rs.sh](./scripts/integration_test_rs.sh) is a good reference for how to do that.
+This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/ci_cd_test_load.sh](./scripts/ci_cd_test_load.sh) is a good reference for how to do that.
 
 # How it works
 
