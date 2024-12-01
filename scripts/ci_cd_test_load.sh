@@ -11,8 +11,8 @@ echo "Starting gateway in the background..."
 cargo run --release > /dev/null 2>&1 &
 gateway_pid=$!
 
-echo "Waiting for gateway to start..."
-sleep 1
+echo "Waiting for gateway and replica to start..."
+sleep 15
 
 export DFX_NETWORK=local
 export WS_GATEWAY_URL=ws://127.0.0.1:8080
