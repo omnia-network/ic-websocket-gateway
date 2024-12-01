@@ -124,10 +124,7 @@ To run the gateway in a local environment with Docker Compose, follow these step
     ```
 
 3. The Gateway will print its principal in the container logs, just as explained in the [Standalone](#standalone) section.
-4. If you want to verify that everything started correctly, the bash script [run_test_canister.sh](./scripts/run_test_canister.sh) is provided. This script assumes that the gateway is already running and reachable locally. You can execute it with the command:
-    ```
-     ./scripts/run_test_canister.sh
-    ```
+4. You can verify that things are working properly by running the tests, see [Testing](#Testing)
 
 ### Production
 
@@ -254,14 +251,14 @@ After installing Node.js and dfx, you can run the integration tests as follows:
     ```
     cp tests/.env.example tests/.env
     ```
-    When running the tests, the `tests/.env` file is modified by dfx, which will add some variables.
+    When running the tests, the `tests/.env` file will be modified by dfx to add some variables.
 3. Run integration tests using the Rust test canister:
 
     ```
     ./scripts/integration_test_rs.sh
     ```
 
-    If you instead want to run tests using the Motoko test canister, run the following command instead:
+    If you want to run tests using the Motoko test canister, run the following command instead:
 
     ```
     ./scripts/integration_test_mo.sh
@@ -273,7 +270,7 @@ Tests canisters used in the integration tests can be found in the [tests/src/tes
 
 ### Local test script
 
-After setting up and running the tests for the first time following the steps above, you can use the following command to run the unit and integration tests (using Rust test canister) together:
+After setting up and running the tests for the first time following the steps above, you can use the following command to run the unit and integration tests (using both the Rust and Motoko test canisters):
 
 ```
 ./scripts/local_test.sh
@@ -287,7 +284,7 @@ Load tests are provided in the [tests/src/load](./tests/src/load/) folder. You c
 ./scripts/run_load_test.sh
 ```
 
-This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/integration_test_rs.sh](./scripts/integration_test_rs.sh) is a good reference for how to do that.
+This script requires you to set up the test environment manually, because you usually want to keep an eye on the logs of the different components. You have to start the local replica, start the gateway and deploy the test canister. The [scripts/ci_cd_test_load.sh](./scripts/ci_cd_test_load.sh) is a good reference for how to do that.
 
 # How it works
 

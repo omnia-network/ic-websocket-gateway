@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# requires running the prepare_tests.sh script first
+
 echo "Starting local replica"
 dfx start --clean --background
 
