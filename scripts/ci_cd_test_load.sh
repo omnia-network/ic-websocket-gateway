@@ -41,14 +41,16 @@ echo "Results:"
 cat reports/gateway_load_tests.json
 
 # Check that no users have failed
-echo "Checking that no users have failed..."
+echo -e "\nChecking that no users have failed..."
 failed=$(jq '.aggregate.counters."vusers.failed"' reports/gateway_load_tests.json)
 if [ "$failed" != 0 ]; then
     echo "ERROR: Load test failed with $failed users failing."
     exit 1
+else
+    echo "All users were successful."
 fi
 
-echo "Stopping gateway..."
+echo -e "\nStopping gateway..."
 kill $gateway_pid
 
 echo "Stopping local replica..."
