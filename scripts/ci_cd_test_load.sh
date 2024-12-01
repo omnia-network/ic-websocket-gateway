@@ -5,7 +5,7 @@ set -e
 # requires running the prepare_tests.sh script first
 
 echo "Starting local replica..."
-dfx start --clean --background
+dfx start --clean > /dev/null 2>&1 &
 
 echo "Starting gateway in the background..."
 cargo run --release > /dev/null 2>&1 &
