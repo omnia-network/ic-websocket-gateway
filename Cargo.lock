@@ -1593,7 +1593,7 @@ dependencies = [
 
 [[package]]
 name = "ic_websocket_gateway"
-version = "1.4.5"
+version = "1.4.6"
 dependencies = [
  "async-trait",
  "candid",

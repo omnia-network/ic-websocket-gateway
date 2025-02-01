@@ -1,6 +1,6 @@
 [package]
 name = "ic_websocket_gateway"
-version = "1.4.5"
+version = "1.4.6"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -24,11 +24,11 @@ futures-util = "0.3"
 structopt = "0.3"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [
-  "fmt",
-  "std",
-  "json",
-  "env-filter",
-  "registry",
+    "fmt",
+    "std",
+    "json",
+    "env-filter",
+    "registry",
 ] }
 tracing-appender = "0.2"
 tracing-opentelemetry = "0.22"
