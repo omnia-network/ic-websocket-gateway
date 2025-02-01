@@ -35,12 +35,13 @@ EXPOSE 8080
 EXPOSE 9000
 
 HEALTHCHECK --timeout=30s --interval=30s --retries=5 \
-  CMD curl -i -N \
+  CMD curl -s -i -N -X GET --head \
     -H "Connection: Upgrade" \
     -H "Upgrade: websocket" \
     -H "Sec-WebSocket-Version: 13" \
     -H "Sec-WebSocket-Key: jWPXCaHslL1epUzz0k29Qw==" \
-    -X GET --head http://127.0.0.1:8080 | grep -q "HTTP/1.1 101 Switching Protocols" && exit 0 || exit 1
+    http://127.0.0.1:8080 \
+    | grep -q "HTTP/1.1 101 Switching Protocols" && exit 0 || exit 1
 
 # run the Gateway
 ENTRYPOINT ["/ic-ws-gateway/ic_websocket_gateway"]
