@@ -7,6 +7,7 @@ use std::{
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -20,40 +21,57 @@ pub fn init_tracing(
     opentelemetry_collector_endpoint: Option<String>,
     gateway_principal: Principal,
 ) -> Result<InitTracingResult, String> {
-    if !Path::new("./data/traces").is_dir() {
-        fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
-    }
+    // stdout tracing
+    let (stdout_tracing_layer, guard_stdout) = {
+        let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?;
-    let filename = format!("./data/traces/gateway_{:?}.log", timestamp.as_millis());
+        let env_filter_stdout = EnvFilter::builder()
+            .with_env_var("RUST_LOG_STDOUT")
+            .try_from_env()
+            .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=info"));
+        let stdout_tracing_layer = tracing_subscriber::fmt::layer()
+            .with_writer(non_blocking_stdout)
+            .pretty()
+            .with_filter(env_filter_stdout);
 
-    println!("Tracing to file: {}", filename);
+        (stdout_tracing_layer, guard_stdout)
+    };
 
-    let log_file = File::create(filename).map_err(|e| e.to_string())?;
-    let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
-    let (non_blocking_stdout, guard_stdout) = tracing_appender::non_blocking(std::io::stdout());
+    // file tracing
+    let (file_tracing_layer, guard_file) = {
+        if !Path::new("./data/traces").is_dir() {
+            fs::create_dir("./data/traces").map_err(|e| e.to_string())?;
+        }
 
-    let env_filter_file = EnvFilter::builder()
-        .with_env_var("RUST_LOG_FILE")
-        .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=trace"));
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        let filename = format!("./data/traces/gateway_{:?}.log", timestamp.as_millis());
 
-    let file_tracing_layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_writer(non_blocking_file)
-        .with_thread_ids(true)
-        .with_filter(env_filter_file);
+        println!("Tracing to file: {}", filename);
 
-    let env_filter_stdout = EnvFilter::builder()
-        .with_env_var("RUST_LOG_STDOUT")
-        .try_from_env()
-        .unwrap_or_else(|_| EnvFilter::new("ic_websocket_gateway=info"));
-    let stdout_tracing_layer = tracing_subscriber::fmt::layer()
-        .with_writer(non_blocking_stdout)
-        .pretty()
-        .with_filter(env_filter_stdout);
+        let log_file = File::create(filename).map_err(|e| e.to_string())?;
+        let (non_blocking_file, guard_file) = tracing_appender::non_blocking(log_file);
+
+        let env_filter_file = EnvFilter::builder()
+            .with_env_var("RUST_LOG_FILE")
+            .try_from_env()
+            .unwrap_or_else(|_| {
+                // disable file tracing by default
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::OFF.into())
+                    .parse("")
+                    .expect("failed to parse default filter for file tracing")
+            });
+
+        let file_tracing_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(non_blocking_file)
+            .with_thread_ids(true)
+            .with_filter(env_filter_file);
+
+        (file_tracing_layer, guard_file)
+    };
 
     let is_telemetry_enabled =
         match opentelemetry_collector_endpoint
