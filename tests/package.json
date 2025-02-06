@@ -19,7 +19,7 @@
     "@babel/preset-env": "^7.26.0",
     "@babel/preset-typescript": "^7.26.0",
     "@types/jest": "^29.5.14",
-    "artillery": "^2.0.21",
+    "artillery": "^2.0.22",
     "babel-jest": "^29.7.0",
     "babel-loader": "^9.2.1",
     "core-js": "^3.39.0",
