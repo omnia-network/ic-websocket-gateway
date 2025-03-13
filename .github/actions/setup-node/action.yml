@@ -4,8 +4,19 @@ description: Setup Node.js
 runs:
   using: 'composite'
   steps:
-    - uses: actions/setup-node@v4
+    - uses: pnpm/action-setup@v4
+      name: Install pnpm
+      id: pnpm-install
       with:
-        node-version: 20
-        cache: "npm"
+        run_install: false
+
+    - name: Install NodeJS
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: 'tests/.node-version'
+        cache: 'pnpm'
         cache-dependency-path: "tests/package-lock.json"
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm i --frozen-lockfile
