@@ -24,16 +24,16 @@ cd tests
 dfx deploy test_canister_rs --no-wallet
 # generate test_canister JS declarations,
 # which will be used for both Rust and Motoko tests
-npm run generate:test_canister_rs
+pnpm generate:test_canister_rs
 
 echo "Running integration test (Rust)..."
-TEST_CANISTER_ID=$(dfx canister id test_canister_rs) npm run integration:test
+TEST_CANISTER_ID=$(dfx canister id test_canister_rs) pnpm integration:test
 
 echo "Deploying test canister (Motoko)..."
 dfx deploy test_canister_mo --no-wallet
 
 echo "Running integration test (Motoko)..."
-TEST_CANISTER_ID=$(dfx canister id test_canister_mo) npm run integration:test
+TEST_CANISTER_ID=$(dfx canister id test_canister_mo) pnpm integration:test
 
 echo "Stopping gateway..."
 kill $gateway_pid

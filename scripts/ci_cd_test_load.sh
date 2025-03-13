@@ -27,11 +27,11 @@ cd tests
 dfx deploy test_canister_rs --no-wallet
 # generate test_canister JS declarations,
 # which will be used for both Rust and Motoko tests
-npm run generate:test_canister_rs
+pnpm generate:test_canister_rs
 
 # Compile load test script
 echo "Compiling load test script..."
-npm run load:bundle
+pnpm load:bundle
 
 # Create reports directory if it doesn't exist
 mkdir -p reports
