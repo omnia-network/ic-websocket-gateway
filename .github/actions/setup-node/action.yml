@@ -16,7 +16,7 @@ runs:
       with:
         node-version-file: 'tests/.node-version'
         cache: 'pnpm'
-        cache-dependency-path: "tests/package-lock.json"
+        cache-dependency-path: "tests/pnpm-lock.yaml"
 
     - name: Install dependencies
       shell: bash
