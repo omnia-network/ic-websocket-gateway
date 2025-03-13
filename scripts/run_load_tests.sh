@@ -6,7 +6,7 @@ cd tests
 
 # Compile load test script
 echo "Compiling load test script..."
-npm run load:bundle
+pnpm load:bundle
 
 # Create reports directory if it doesn't exist
 mkdir -p reports

@@ -24,7 +24,7 @@ jobs:
       - uses: ./.github/actions/setup-dfx
 
       - name: Install mops
-        run: npm i ic-mops -g
+        run: pnpm i -g ic-mops
 
       - name: install moc
         run: npx mocv use latest
