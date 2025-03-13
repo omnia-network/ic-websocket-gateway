@@ -1,6 +1,6 @@
 require('./prepare-environment.js');
 
-const { default: IcWebsocket, generateRandomIdentity, createWsConfig } = require('ic-websocket-js/lib/cjs/index.js');
+const { IcWebsocket, generateRandomIdentity, createWsConfig } = require('ic-websocket-js/lib/cjs/index.js');
 const { test_canister_rs } = require('../declarations/test_canister_rs/index.js');
 
 /// IcWebsocket parameters

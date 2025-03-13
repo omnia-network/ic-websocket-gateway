@@ -3,9 +3,7 @@
     "types": ["jest", "node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "moduleResolution": "node",
+    "moduleResolution": "node"
   },
-  "include": [
-    "src/integration/**/*.ts",
-  ],
+  "include": ["src/integration/**/*.ts"]
 }

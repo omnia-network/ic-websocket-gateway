@@ -19,6 +19,7 @@
     "@babel/preset-env": "^7.26.9",
     "@babel/preset-typescript": "^7.26.0",
     "@types/jest": "^29.5.14",
+    "@types/node": "^20.14.11",
     "artillery": "^2.0.22",
     "babel-jest": "^29.7.0",
     "babel-loader": "^10.0.0",
@@ -52,7 +53,8 @@
     "@dfinity/principal": "^2.3.0",
     "bufferutil": "^4.0.9",
     "ic-websocket-js": "^0.5.0",
-    "utf-8-validate": "^6.0.5"
+    "utf-8-validate": "^6.0.5",
+    "ws": "^8.18.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

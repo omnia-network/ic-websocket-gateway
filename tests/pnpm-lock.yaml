@@ -29,6 +29,9 @@ importers:
       utf-8-validate:
         specifier: ^6.0.5
         version: 6.0.5
+      ws:
+        specifier: ^8.18.1
+        version: 8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
     devDependencies:
       '@babel/core':
         specifier: ^7.26.10
@@ -42,6 +45,9 @@ importers:
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
+      '@types/node':
+        specifier: ^20.14.11
+        version: 20.14.11
       artillery:
         specifier: ^2.0.22
         version: 2.0.22(@aws-sdk/client-sso-oidc@3.679.0(@aws-sdk/client-sts@3.679.0))(@types/node@20.14.11)(bufferutil@4.0.9)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.8.2)(utf-8-validate@6.0.5)
@@ -8153,8 +8159,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  ws@8.18.0:
-    resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
+  ws@8.18.1:
+    resolution: {integrity: sha512-RKW2aJZMXeMxVpnZ6bck+RswznaxmzdULiBr6KY7XkTnW8uvt0iT9H5DkHUChXrc+uurzwa0rVI16n/Xzjdz1w==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -10526,7 +10532,7 @@ snapshots:
       text-table: 0.2.0
       url-join: 4.0.0
       wrap-ansi: 7.0.0
-      ws: 8.18.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      ws: 8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
     transitivePeerDependencies:
       - bufferutil
       - encoding
@@ -15711,7 +15717,7 @@ snapshots:
       type-fest: 0.12.0
       widest-line: 4.0.1
       wrap-ansi: 8.1.0
-      ws: 8.18.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      ws: 8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
       yoga-wasm-web: 0.3.3
     transitivePeerDependencies:
       - bufferutil
@@ -16479,7 +16485,7 @@ snapshots:
       whatwg-encoding: 2.0.0
       whatwg-mimetype: 3.0.0
       whatwg-url: 11.0.0
-      ws: 8.18.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      ws: 8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
       xml-name-validator: 4.0.0
     transitivePeerDependencies:
       - bufferutil
@@ -19681,7 +19687,7 @@ snapshots:
       bufferutil: 4.0.9
       utf-8-validate: 6.0.5
 
-  ws@8.18.0(bufferutil@4.0.9)(utf-8-validate@6.0.5):
+  ws@8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5):
     optionalDependencies:
       bufferutil: 4.0.9
       utf-8-validate: 6.0.5

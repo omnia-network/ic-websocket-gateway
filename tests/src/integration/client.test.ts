@@ -1,5 +1,5 @@
 import { Actor, HttpAgent } from "@dfinity/agent";
-import IcWebSocket, { createWsConfig, generateRandomIdentity } from "ic-websocket-js";
+import { IcWebSocket, createWsConfig, generateRandomIdentity } from "ic-websocket-js";
 import { idlFactory } from "../declarations/test_canister_rs";
 import type { AppMessage, _SERVICE } from "../declarations/test_canister_rs/test_canister_rs.did";
 // The Motoko test canister has the same interface as the Rust test canister, so we don't need to import it
@@ -27,7 +27,7 @@ const createActor = async (canisterId: string) => {
       await agent.fetchRootKey();
     } catch (err) {
       console.warn(
-          "Unable to fetch root key. Check to ensure that your local replica is running"
+        "Unable to fetch root key. Check to ensure that your local replica is running"
       );
       console.error(err);
     }
