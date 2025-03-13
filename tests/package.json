@@ -64,5 +64,6 @@
       "unix-dgram",
       "utf-8-validate"
     ]
-  }
+  },
+  "packageManager": "pnpm@10.6.1"
 }
