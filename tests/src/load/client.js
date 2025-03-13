@@ -1,9 +1,9 @@
 require('./prepare-environment.js');
 
-const { IcWebsocket, generateRandomIdentity, createWsConfig } = require('ic-websocket-js/lib/cjs/index.js');
+const { IcWebSocket, generateRandomIdentity, createWsConfig } = require('ic-websocket-js/lib/cjs/index.js');
 const { test_canister_rs } = require('../declarations/test_canister_rs/index.js');
 
-/// IcWebsocket parameters
+// IcWebSocket parameters
 const gatewayAddress = process.env.WS_GATEWAY_URL;
 const icUrl = process.env.IC_URL;
 const canisterId = process.env.TEST_CANISTER_ID
@@ -22,7 +22,7 @@ async function connectClient(userContext, events) {
       networkUrl: icUrl,
       identity: generateRandomIdentity(),
     });
-    const customWs = new IcWebsocket(gatewayAddress, undefined, wsConfig);
+    const customWs = new IcWebSocket(gatewayAddress, undefined, wsConfig);
 
     await new Promise((resolve, reject) => {
       customWs.onopen = () => {
