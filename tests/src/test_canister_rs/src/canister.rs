@@ -1,5 +1,5 @@
 use candid::{decode_one, encode_one, CandidType};
-use ic_cdk::{api::time, print};
+use ic_cdk::{api::time, println};
 use ic_websocket_cdk::{
     send, ClientPrincipal, OnCloseCallbackArgs, OnMessageCallbackArgs, OnOpenCallbackArgs,
 };
@@ -25,10 +25,10 @@ pub fn on_open(args: OnOpenCallbackArgs) {
     CLIENTS_CONNECTED.with(|clients_connected| {
         clients_connected.borrow_mut().insert(args.client_principal);
 
-        print(format!(
+        println!(
             "[on_open] # clients connected: {}",
             clients_connected.borrow().len()
-        ));
+        );
     });
 
     let msg = AppMessage {
@@ -44,16 +44,16 @@ pub fn on_message(args: OnMessageCallbackArgs) {
         text: app_msg.clone().text + " ping",
         timestamp: time(),
     };
-    print("[on_message] Received message");
+    println!("[on_message] Received message");
     send_app_message(args.client_principal, new_msg)
 }
 
 fn send_app_message(client_key: ClientPrincipal, msg: AppMessage) {
-    print("Sending message");
+    println!("Sending message");
     if let Err(e) = send(client_key, msg.candid_serialize()) {
-        print(format!("Could not send message: {}", e));
+        println!("Could not send message: {}", e);
     }
-    print("Message sent");
+    println!("Message sent");
 }
 
 pub fn on_close(args: OnCloseCallbackArgs) {
@@ -63,9 +63,9 @@ pub fn on_close(args: OnCloseCallbackArgs) {
             .borrow_mut()
             .remove(&args.client_principal);
 
-        print(format!(
+        println!(
             "[on_close] # clients connected: {}",
             clients_connected.borrow().len()
-        ));
+        );
     });
 }

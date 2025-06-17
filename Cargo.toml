@@ -12,24 +12,24 @@ default-members = ["src/ic-websocket-gateway"]
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
-rust-version = "1.79"
+edition = "2024"
+rust-version = "1.85"
 repository = "https://github.com/omnia-network/ic-websocket-gateway"
 description = "IC Websocket Gateway workspace"
 license = "MIT"
 
 [workspace.dependencies]
 candid = "0.10"
-ic-cdk = "0.16"
+ic-cdk = "0.18"
 ic-agent = "0.39"
 
 serde = "1.0"
 serde_bytes = "0.11"
 
 reqwest = "0.12"
-tokio = { version = "1.38", features = ["full"] }
+tokio = { version = "1.45", features = ["full"] }
 tracing = "0.1"
-metrics = "0.23"
+metrics = "0.24"
 
 canister-utils = { path = "src/canister-utils" }
 ic-identity = { path = "src/ic-identity" }
